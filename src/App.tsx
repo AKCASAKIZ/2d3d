@@ -32,6 +32,7 @@ import {
   Copy,
   FlipHorizontal,
   Scissors,
+  Clipboard,
 } from 'lucide-react';
 
 import { Point, CommandType, DrawModeType, HistoryItem, SnapPoint, TrackLine, CADLayer, PathSettings, SnapToggles } from './types';
@@ -161,6 +162,8 @@ export default function App() {
   // Multi-selection states for robust integrity and dragging multiple entities
   const [selectedPathIndices, setSelectedPathIndices] = useState<number[]>([]);
   const [isFinalPointsSelected, setIsFinalPointsSelected] = useState<boolean>(false);
+  const [copiedPaths, setCopiedPaths] = useState<Point[][]>([]);
+  const [copiedFinalPoints, setCopiedFinalPoints] = useState<Point[] | null>(null);
   const [rightClickStart, setRightClickStart] = useState<{ x: number; y: number } | null>(null);
   const [rightClickEnd, setRightClickEnd] = useState<{ x: number; y: number } | null>(null);
 
@@ -437,6 +440,119 @@ export default function App() {
     }
   };
 
+  const handleCopy = () => {
+    let copiedCount = 0;
+    const items: Point[][] = [];
+    let fpItem: Point[] | null = null;
+
+    if (isFinalPointsSelected && finalPoints.length > 0) {
+      fpItem = finalPoints.map(p => ({ ...p }));
+      copiedCount++;
+    }
+
+    if (selectedPathIndices.length > 0 && activeLayer.paths) {
+      selectedPathIndices.forEach(idx => {
+        const path = activeLayer.paths?.[idx];
+        if (path) {
+          items.push(path.map(p => ({ ...p })));
+          copiedCount++;
+        }
+      });
+    }
+
+    if (copiedCount > 0) {
+      setCopiedPaths(items);
+      setCopiedFinalPoints(fpItem);
+      logCommandResponse(`Kopyalandı: ${copiedCount} adet obje kopyalandı (Panoya alındı). Yapıştırmak için Ctrl + V kullanabilirsiniz.`);
+    } else {
+      logCommandResponse("Kopyalamak için önce bir şekle tıklayarak seçmelisiniz.");
+    }
+  };
+
+  const handlePaste = () => {
+    saveState();
+    let pastedCount = 0;
+    const offsetVal = 15; // default slide offset if there is no mouse hover
+    
+    let dx = offsetVal;
+    let dy = offsetVal;
+
+    // Use current hover coordinates (mouse center placement) if hover coordinates are active!
+    if (hoverCoords && (copiedPaths.length > 0 || copiedFinalPoints)) {
+      // Find total bounding box center of copied paths & final points
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      const allCopiedPts: Point[] = [];
+      if (copiedFinalPoints) allCopiedPts.push(...copiedFinalPoints);
+      copiedPaths.forEach(path => allCopiedPts.push(...path));
+      
+      allCopiedPts.forEach(p => {
+        if (p.circleData) {
+          minX = Math.min(minX, p.circleData.center.x - p.circleData.radius);
+          maxX = Math.max(maxX, p.circleData.center.x + p.circleData.radius);
+          minY = Math.min(minY, p.circleData.center.y - p.circleData.radius);
+          maxY = Math.max(maxY, p.circleData.center.y + p.circleData.radius);
+        } else {
+          minX = Math.min(minX, p.x);
+          maxX = Math.max(maxX, p.x);
+          minY = Math.min(minY, p.y);
+          maxY = Math.max(maxY, p.y);
+        }
+      });
+      
+      if (minX !== Infinity) {
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        dx = hoverCoords.x - centerX;
+        dy = hoverCoords.y - centerY;
+      }
+    }
+
+    if (copiedFinalPoints && copiedFinalPoints.length > 0) {
+      const translated = copiedFinalPoints.map(p => {
+        const u = { ...p, x: p.x + dx, y: p.y + dy };
+        if (p.circleData) {
+          u.circleData = {
+            center: { x: p.circleData.center.x + dx, y: p.circleData.center.y + dy },
+            radius: p.circleData.radius
+          };
+        }
+        return u;
+      });
+      setFinalPoints(translated);
+      setIsFinalPointsSelected(true);
+      pastedCount++;
+    }
+
+    if (copiedPaths.length > 0 && activeLayer.paths) {
+      const newPaths = [...activeLayer.paths];
+      const newlyCreatedIndices: number[] = [];
+      copiedPaths.forEach(path => {
+        const translated = path.map(p => {
+          const u = { ...p, x: p.x + dx, y: p.y + dy };
+          if (p.circleData) {
+            u.circleData = {
+              center: { x: p.circleData.center.x + dx, y: p.circleData.center.y + dy },
+              radius: p.circleData.radius
+            };
+          }
+          return u;
+        });
+        newPaths.push(translated);
+        newlyCreatedIndices.push(newPaths.length - 1);
+        pastedCount++;
+      });
+      setPaths(newPaths);
+      setSelectedPathIndices(newlyCreatedIndices);
+      setIsFinalPointsSelected(false);
+    }
+
+    if (pastedCount > 0) {
+      logCommandResponse(`Yapıştırıldı: ${pastedCount} adet obje yeni pozisyona başarıyla yerleştirildi.`);
+    } else {
+      logCommandResponse("Pano boş! Kopyalanmış bir şekil bulunamadı.");
+    }
+  };
+
   const applyCadEditMirror = (axis: 'X' | 'Y') => {
     saveState();
     let modified = false;
@@ -624,6 +740,18 @@ export default function App() {
         e.preventDefault();
         handleUndo();
       }
+      if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        handleCopy();
+      }
+      if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault();
+        handlePaste();
+      }
+      if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        applyCadEditCopy();
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         applyCadEditDelete();
       }
@@ -666,7 +794,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [finalPoints, isClosed, historyStack, layers, activeLayerId, activeSegmentStretch, activeSegmentMove, segmentChoicePending]);
+  }, [finalPoints, isClosed, historyStack, layers, activeLayerId, activeSegmentStretch, activeSegmentMove, segmentChoicePending, selectedPathIndices, isFinalPointsSelected, copiedPaths, copiedFinalPoints, hoverCoords]);
 
   // Global mouseup event listener to ensure panning or dragging never lock/stick
   useEffect(() => {
@@ -2291,7 +2419,7 @@ export default function App() {
           const circlePt = finalPoints.find(p => p.circleData);
           if (circlePt && circlePt.circleData) {
             const distToCenter = Math.hypot(x - circlePt.circleData.center.x, y - circlePt.circleData.center.y);
-            if (distToCenter < 15 / viewZoom) {
+            if (Math.abs(distToCenter - circlePt.circleData.radius) < 15 / viewZoom || distToCenter < 15 / viewZoom) {
               minSegmentDist = 0;
               minSegIdx = 0;
             }
@@ -2323,7 +2451,7 @@ export default function App() {
               const circlePt = path.find(p => p.circleData);
               if (circlePt && circlePt.circleData) {
                 const distToCenter = Math.hypot(x - circlePt.circleData.center.x, y - circlePt.circleData.center.y);
-                if (distToCenter < 15 / viewZoom) {
+                if (Math.abs(distToCenter - circlePt.circleData.radius) < 15 / viewZoom || distToCenter < 15 / viewZoom) {
                   minSegmentDist = 0;
                   minSegIdx = 0;
                 }
@@ -2767,10 +2895,19 @@ export default function App() {
         let clickedPathIdx = -1;
 
         if (finalPoints.length > 0) {
-          for (let i = 0; i < finalPoints.length; i++) {
-            if (Math.hypot(finalPoints[i].x - hoverCoords.x, finalPoints[i].y - hoverCoords.y) < 15 / viewZoom) {
+          const circlePt = finalPoints.find(p => p.circleData);
+          if (circlePt && circlePt.circleData) {
+            const distToCenter = Math.hypot(hoverCoords.x - circlePt.circleData.center.x, hoverCoords.y - circlePt.circleData.center.y);
+            if (Math.abs(distToCenter - circlePt.circleData.radius) < 15 / viewZoom || distToCenter < 15 / viewZoom) {
               clickedFinalPoints = true;
-              break;
+            }
+          }
+          if (!clickedFinalPoints) {
+            for (let i = 0; i < finalPoints.length; i++) {
+              if (Math.hypot(finalPoints[i].x - hoverCoords.x, finalPoints[i].y - hoverCoords.y) < 15 / viewZoom) {
+                clickedFinalPoints = true;
+                break;
+              }
             }
           }
           if (!clickedFinalPoints && finalPoints.length > 1) {
@@ -2787,6 +2924,14 @@ export default function App() {
         if (!clickedFinalPoints && activeLayer.paths) {
           for (let pathIdx = 0; pathIdx < activeLayer.paths.length; pathIdx++) {
             const path = activeLayer.paths[pathIdx];
+            const circlePt = path.find(p => p.circleData);
+            if (circlePt && circlePt.circleData) {
+              const distToCenter = Math.hypot(hoverCoords.x - circlePt.circleData.center.x, hoverCoords.y - circlePt.circleData.center.y);
+              if (Math.abs(distToCenter - circlePt.circleData.radius) < 15 / viewZoom || distToCenter < 15 / viewZoom) {
+                clickedPathIdx = pathIdx;
+                break;
+              }
+            }
             let foundVtx = false;
             for (let i = 0; i < path.length; i++) {
               if (Math.hypot(path[i].x - hoverCoords.x, path[i].y - hoverCoords.y) < 15 / viewZoom) {
@@ -3964,15 +4109,33 @@ export default function App() {
 
             {/* Editing Controls Grid */}
             <div className="space-y-3">
-              {/* Row 1: Copy and Delete */}
+              {/* Row 1: Copy, Paste, Duplicate and Delete */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleCopy}
+                  className="py-2 bg-indigo-650 hover:bg-indigo-550 border border-indigo-600 rounded text-xs font-bold font-mono text-indigo-100 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  title="Seçili tüm nesneleri panoya kopyalar (Ctrl + C)"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  Kopyala (Ctrl+C)
+                </button>
+                <button
+                  onClick={handlePaste}
+                  className="py-2 bg-emerald-700 hover:bg-emerald-650 border border-emerald-600 rounded text-xs font-bold font-mono text-emerald-100 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  title="Kopyalanmış nesneleri mouse imlecinin olduğu yere yapıştırır (Ctrl + V)"
+                >
+                  <Clipboard className="w-3.5 h-3.5 text-emerald-300" />
+                  Yapıştır (Ctrl+V)
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={applyCadEditCopy}
-                  className="py-2 bg-indigo-650 hover:bg-indigo-550 border border-indigo-600 rounded text-xs font-bold font-mono text-indigo-100 flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  title="Seçili tüm nesneleri kopyalar ve hafifçe kaydırır"
+                  className="py-2 bg-cyan-750 hover:bg-cyan-650 border border-cyan-700 rounded text-xs font-bold font-mono text-cyan-100 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  title="Seçili tüm nesneleri hemen yanına çoğaltır (Ctrl + D)"
                 >
-                  <Copy className="w-3.5 h-3.5" />
-                  Kopyala
+                  <Copy className="w-3.5 h-3.5 opacity-60" />
+                  Çoğalt (Ctrl+D)
                 </button>
                 <button
                   onClick={applyCadEditDelete}
