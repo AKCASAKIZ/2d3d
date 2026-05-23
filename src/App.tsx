@@ -593,49 +593,106 @@ export default function App() {
       return;
     }
 
-    // Direction unit vector from p1 to p2
-    const ux = dx / currentDist;
-    const uy = dy / currentDist;
+    // Identify which point is closest to an active shape node, so we can move that shape and keep the other point fixed
+    let closestP1: { type: 'finalPoints' | 'paths'; pathIdx: number; ptIdx: number; dist: number } | null = null;
+    let closestP2: { type: 'finalPoints' | 'paths'; pathIdx: number; ptIdx: number; dist: number } | null = null;
 
-    // The target coordinate for p2 is:
-    const targetP2X = p1.x + ux * targetValue;
-    const targetP2Y = p1.y + uy * targetValue;
+    let minD1 = Infinity;
+    let minD2 = Infinity;
 
-    // Shift vector for p2
-    const shiftX = targetP2X - p2.x;
-    const shiftY = targetP2Y - p2.y;
-
-    let pointsShiftedList: Point[] = [];
-    
-    if (moveEntireShapeOnDimChange) {
-      // Find which shape (either finalPoints, or a path in activeLayer.paths) contains the node p2 (proximity check)
-      let foundPathIdx = -1;
-      let isFinalPts = false;
-      const epsilon = 1.0; // vertex proximity limit (1.0 mm)
-
-      // Check finalPoints first
-      if (finalPoints.length > 0) {
-        const containsP2 = finalPoints.some(pt => Math.hypot(pt.x - p2.x, pt.y - p2.y) < epsilon);
-        if (containsP2) {
-          isFinalPts = true;
-        }
+    // Check finalPoints
+    finalPoints.forEach((pt, ptIdx) => {
+      const d1 = Math.hypot(pt.x - p1.x, pt.y - p1.y);
+      if (d1 < minD1) {
+        minD1 = d1;
+        closestP1 = { type: 'finalPoints', pathIdx: -1, ptIdx, dist: d1 };
       }
+      const d2 = Math.hypot(pt.x - p2.x, pt.y - p2.y);
+      if (d2 < minD2) {
+        minD2 = d2;
+        closestP2 = { type: 'finalPoints', pathIdx: -1, ptIdx, dist: d2 };
+      }
+    });
 
-      // Check other layer paths
-      if (!isFinalPts && activeLayer.paths) {
-        for (let i = 0; i < activeLayer.paths.length; i++) {
-          const containsP2 = activeLayer.paths[i].some(pt => Math.hypot(pt.x - p2.x, pt.y - p2.y) < epsilon);
-          if (containsP2) {
-            foundPathIdx = i;
-            break;
+    // Check paths
+    if (activeLayer.paths) {
+      activeLayer.paths.forEach((path, pathIdx) => {
+        path.forEach((pt, ptIdx) => {
+          const d1 = Math.hypot(pt.x - p1.x, pt.y - p1.y);
+          if (d1 < minD1) {
+            minD1 = d1;
+            closestP1 = { type: 'paths', pathIdx, ptIdx, dist: d1 };
           }
-        }
-      }
+          const d2 = Math.hypot(pt.x - p2.x, pt.y - p2.y);
+          if (d2 < minD2) {
+            minD2 = d2;
+            closestP2 = { type: 'paths', pathIdx, ptIdx, dist: d2 };
+          }
+        });
+      });
+    }
 
-      if (isFinalPts) {
+    // Decide which point of the dimension to move (movePoint: 'p1' or 'p2')
+    // A point is near a shape node if its distance is within a generous limit (e.g., 25.0 mm).
+    const snapMatchThreshold = 25.0; 
+    let movePoint: 'p1' | 'p2' = 'p2';
+
+    const isP1NearShape = closestP1 && closestP1.dist < snapMatchThreshold;
+    const isP2NearShape = closestP2 && closestP2.dist < snapMatchThreshold;
+
+    if (isP1NearShape && !isP2NearShape) {
+      // p1 is on a shape, p2 is a reference coordinate (like an axis or origin snap). Move p1 relative to fixed anchor p2.
+      movePoint = 'p1';
+    } else if (!isP1NearShape && isP2NearShape) {
+      // p2 is on a shape, p1 is a coordinate. Keep p1 fixed, move p2.
+      movePoint = 'p2';
+    } else if (isP1NearShape && isP2NearShape) {
+      // Both are near shape nodes. Default to moving the second point (p2) relative to first (p1).
+      movePoint = 'p2';
+    } else {
+      // Neither is close to any drawing node. Move whichever is relatively closer, or default to p2.
+      movePoint = minD1 < minD2 ? 'p1' : 'p2';
+    }
+
+    const targetPt = movePoint === 'p2' ? p2 : p1;
+    const anchorPt = movePoint === 'p2' ? p1 : p2;
+    const closestNodeInfo = movePoint === 'p2' ? closestP2 : closestP1;
+
+    // Vector from fixed anchorPt to movable targetPt
+    const vdx = targetPt.x - anchorPt.x;
+    const vdy = targetPt.y - anchorPt.y;
+    const vdist = Math.hypot(vdx, vdy);
+
+    if (vdist < 0.001) {
+      logCommandResponse("Hata: Başlangıç ve bitiş noktası çakışık olduğundan konumlandırma yönü belirlenemedi.");
+      return;
+    }
+
+    const vux = vdx / vdist;
+    const vuy = vdy / vdist;
+
+    const finalTargetX = anchorPt.x + vux * targetValue;
+    const finalTargetY = anchorPt.y + vuy * targetValue;
+
+    const shiftX = finalTargetX - targetPt.x;
+    const shiftY = finalTargetY - targetPt.y;
+
+    const shiftedOriginalPoints: Point[] = [];
+    if (closestNodeInfo) {
+      const node: any = closestNodeInfo;
+      if (node.type === 'finalPoints') {
+        shiftedOriginalPoints.push(...finalPoints);
+      } else if (node.type === 'paths' && activeLayer.paths) {
+        shiftedOriginalPoints.push(...activeLayer.paths[node.pathIdx]);
+      }
+    }
+
+    if (moveEntireShapeOnDimChange && closestNodeInfo) {
+      const node: any = closestNodeInfo;
+      if (node.type === 'finalPoints') {
         // Shift entire finalPoints
         setFinalPoints(prev => {
-          const updated = prev.map(pt => {
+          return prev.map(pt => {
             const u = { ...pt, x: pt.x + shiftX, y: pt.y + shiftY };
             if (pt.circleData) {
               u.circleData = {
@@ -645,16 +702,15 @@ export default function App() {
             }
             return u;
           });
-          pointsShiftedList = updated;
-          return updated;
         });
         logCommandResponse(`Konumlandırma: Çizim şekli ${targetValue.toFixed(1)} mm olarak konumlandırıldı.`);
-      } else if (foundPathIdx !== -1 && activeLayer.paths) {
-        // Shift entire path elements
+      } else if (node.type === 'paths' && activeLayer.paths) {
+        // Shift entire path elements of the matching path idx
+        const targetPathIdx = node.pathIdx;
         setPaths(prev => {
           return prev.map((path, idx) => {
-            if (idx === foundPathIdx) {
-              const updated = path.map(pt => {
+            if (idx === targetPathIdx) {
+              return path.map(pt => {
                 const u = { ...pt, x: pt.x + shiftX, y: pt.y + shiftY };
                 if (pt.circleData) {
                   u.circleData = {
@@ -664,88 +720,23 @@ export default function App() {
                 }
                 return u;
               });
-              pointsShiftedList = updated;
-              return updated;
             }
             return path;
           });
         });
-        logCommandResponse(`Konumlandırma: Şekil #${foundPathIdx + 1} ${targetValue.toFixed(1)} mm olarak konumlandırıldı.`);
-      } else {
-        // Just shift the single point p2 itself (in the closest shape or raw)
-        let closestPt: { ref: Point, pathIdx: number, ptIdx: number } | null = null;
-        let minDist = epsilon;
-
-        // Check finalPoints
-        finalPoints.forEach((pt, ptIdx) => {
-          const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
-          if (d < minDist) {
-            minDist = d;
-            closestPt = { ref: pt, pathIdx: -1, ptIdx };
-          }
-        });
-
-        // Check paths
-        if (activeLayer.paths) {
-          activeLayer.paths.forEach((path, pathIdx) => {
-            path.forEach((pt, ptIdx) => {
-              const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
-              if (d < minDist) {
-                minDist = d;
-                closestPt = { ref: pt, pathIdx, ptIdx };
-              }
-            });
-          });
-        }
-
-        if (closestPt) {
-          const c: any = closestPt;
-          if (c.pathIdx === -1) {
-            setFinalPoints(prev => prev.map((pt, i) => i === c.ptIdx ? { ...pt, x: pt.x + shiftX, y: pt.y + shiftY } : pt));
-          } else {
-            setPaths(prev => prev.map((path, pIdx) => pIdx === c.pathIdx ? path.map((pt, i) => i === c.ptIdx ? { ...pt, x: pt.x + shiftX, y: pt.y + shiftY } : pt) : path));
-          }
-          logCommandResponse(`Konumlandırma: Yakın düğüm ${targetValue.toFixed(1)} mm mesafeye kaydırıldı.`);
-        } else {
-          logCommandResponse("Konumlandırma yapılamadı: Ölçü noktasına yakın çizim düğümü bulunamadı.");
-        }
+        logCommandResponse(`Konumlandırma: Şekil #${targetPathIdx + 1} ${targetValue.toFixed(1)} mm olarak konumlandırıldı.`);
       }
+    } else if (closestNodeInfo) {
+      // Move single point only
+      const node: any = closestNodeInfo;
+      if (node.type === 'finalPoints') {
+        setFinalPoints(prev => prev.map((pt, i) => i === node.ptIdx ? { ...pt, x: finalTargetX, y: finalTargetY } : pt));
+      } else if (node.type === 'paths' && activeLayer.paths) {
+        setPaths(prev => prev.map((path, pIdx) => pIdx === node.pathIdx ? path.map((pt, i) => i === node.ptIdx ? { ...pt, x: finalTargetX, y: finalTargetY } : pt) : path));
+      }
+      logCommandResponse(`Konumlandırma: Tek nokta ${targetValue.toFixed(1)} mm olarak ayarlandı.`);
     } else {
-      // Move point only mode
-      let closestPt: { ref: Point, pathIdx: number, ptIdx: number } | null = null;
-      let minDist = 3.0;
-
-      finalPoints.forEach((pt, ptIdx) => {
-        const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
-        if (d < minDist) {
-          minDist = d;
-          closestPt = { ref: pt, pathIdx: -1, ptIdx };
-        }
-      });
-
-      if (activeLayer.paths) {
-        activeLayer.paths.forEach((path, pathIdx) => {
-          path.forEach((pt, ptIdx) => {
-            const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
-            if (d < minDist) {
-              minDist = d;
-              closestPt = { ref: pt, pathIdx, ptIdx };
-            }
-          });
-        });
-      }
-
-      if (closestPt) {
-        const c: any = closestPt;
-        if (c.pathIdx === -1) {
-          setFinalPoints(prev => prev.map((pt, i) => i === c.ptIdx ? { ...pt, x: targetP2X, y: targetP2Y } : pt));
-        } else {
-          setPaths(prev => prev.map((path, pIdx) => pIdx === c.pathIdx ? path.map((pt, i) => i === c.ptIdx ? { ...pt, x: targetP2X, y: targetP2Y } : pt) : path));
-        }
-        logCommandResponse(`Konumlandırma: Tek nokta ${targetValue.toFixed(1)} mm olarak ayarlandı.`);
-      } else {
-        logCommandResponse("Konumlandırma: Düğüm noktası bulunamadı.");
-      }
+      logCommandResponse("Konumlandırma yapılamadı: Ölçü noktasına yakın çizim düğümü bulunamadı.");
     }
 
     // Update dimensions share endpoints coordinates
@@ -753,22 +744,59 @@ export default function App() {
       let up1 = { ...d.p1 };
       let up2 = { ...d.p2 };
 
-      if (Math.hypot(d.p2.x - p2.x, d.p2.y - p2.y) < 1.0) {
-        up2 = { ...d.p2, x: targetP2X, y: targetP2Y };
-      }
-      if (Math.hypot(d.p1.x - p2.x, d.p1.y - p2.y) < 1.0) {
-        up1 = { ...d.p1, x: targetP2X, y: targetP2Y };
-      }
-
       if (d.id === dimId) {
+        // Active dimension
+        if (movePoint === 'p2') {
+          up2 = { ...p2, x: finalTargetX, y: finalTargetY };
+          if (moveEntireShapeOnDimChange) {
+            const isP1OnMovedShape = shiftedOriginalPoints.some(pt => Math.hypot(pt.x - p1.x, pt.y - p1.y) < 2.0);
+            if (isP1OnMovedShape) {
+              up1 = { ...p1, x: p1.x + shiftX, y: p1.y + shiftY };
+            }
+          }
+        } else {
+          up1 = { ...p1, x: finalTargetX, y: finalTargetY };
+          if (moveEntireShapeOnDimChange) {
+            const isP2OnMovedShape = shiftedOriginalPoints.some(pt => Math.hypot(pt.x - p2.x, pt.y - p2.y) < 2.0);
+            if (isP2OnMovedShape) {
+              up2 = { ...p2, x: p2.x + shiftX, y: p2.y + shiftY };
+            }
+          }
+        }
+        const newLen = Math.hypot(up2.x - up1.x, up2.y - up1.y);
         return {
           ...d,
           p1: up1,
           p2: up2,
-          value: targetValue
+          value: newLen
+        };
+      } else {
+        // Other dimensions: shift their endpoints if they are attached to the moved shape
+        if (moveEntireShapeOnDimChange) {
+          const isP1OnMovedShape = shiftedOriginalPoints.some(pt => Math.hypot(pt.x - d.p1.x, pt.y - d.p1.y) < 2.0);
+          if (isP1OnMovedShape) {
+            up1 = { ...d.p1, x: d.p1.x + shiftX, y: d.p1.y + shiftY };
+          }
+          const isP2OnMovedShape = shiftedOriginalPoints.some(pt => Math.hypot(pt.x - d.p2.x, pt.y - d.p2.y) < 2.0);
+          if (isP2OnMovedShape) {
+            up2 = { ...d.p2, x: d.p2.x + shiftX, y: d.p2.y + shiftY };
+          }
+        } else {
+          if (Math.hypot(d.p1.x - targetPt.x, d.p1.y - targetPt.y) < 1.5) {
+            up1 = { ...d.p1, x: finalTargetX, y: finalTargetY };
+          }
+          if (Math.hypot(d.p2.x - targetPt.x, d.p2.y - targetPt.y) < 1.5) {
+            up2 = { ...d.p2, x: finalTargetX, y: finalTargetY };
+          }
+        }
+        const newLen = Math.hypot(up2.x - up1.x, up2.y - up1.y);
+        return {
+          ...d,
+          p1: up1,
+          p2: up2,
+          value: newLen
         };
       }
-      return { ...d, p1: up1, p2: up2 };
     }));
 
     setSelectedDimensionId(null);
@@ -2726,6 +2754,15 @@ export default function App() {
         }
       } else if (currentCommand === 'dimension') {
         const pt = snapPoint ? { x: snapPoint.x, y: snapPoint.y } : { x, y };
+        // If coordinate is very close to X/Y axes (e.g. within 12 pixels), snap exactly to the axis coordinate for easy measurement
+        const axisSnapTol = 12 / viewZoom;
+        if (Math.abs(pt.x) < axisSnapTol) {
+          pt.x = 0;
+        }
+        if (Math.abs(pt.y) < axisSnapTol) {
+          pt.y = 0;
+        }
+
         if (clickCount === 0) {
           setDimP1(pt);
           setClickCount(1);
@@ -3233,6 +3270,17 @@ export default function App() {
       const snapData = calculateSnaps(x, y, finalPoints, isClosed, -1, smartSnap, 10 / viewZoom, activeLayer.paths, gridSnap, 50, customAnchor, snapToggles);
       x = snapData.x;
       y = snapData.y;
+
+      if (currentCommand === 'dimension') {
+        const axisSnapTol = 12 / viewZoom;
+        if (Math.abs(x) < axisSnapTol) {
+          x = 0;
+        }
+        if (Math.abs(y) < axisSnapTol) {
+          y = 0;
+        }
+      }
+
       setSnapPoint(snapData.snapPoint);
       setTrackedLines(snapData.trackedLines);
       setTempPoint({ x, y });
