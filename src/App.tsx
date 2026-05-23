@@ -232,6 +232,27 @@ export default function App() {
   const [cadRotateAngle, setCadRotateAngle] = useState<number>(45);
   const [cadScaleFactor, setCadScaleFactor] = useState<number>(1.2);
 
+  // Active Layer Dimensions accessor helper (fully automated undo-redo integrated!)
+  const dimensions = activeLayer.dimensions || [];
+  const setDimensions = (val: any[] | ((prev: any[]) => any[])) => {
+    setLayers((prevLayers) =>
+      prevLayers.map((l) => {
+        if (l.id === activeLayerId) {
+          const currentDims = l.dimensions || [];
+          const newDims = typeof val === 'function' ? val(currentDims) : val;
+          return { ...l, dimensions: newDims };
+        }
+        return l;
+      })
+    );
+  };
+
+  const [dimP1, setDimP1] = useState<Point | null>(null);
+  const [dimP2, setDimP2] = useState<Point | null>(null);
+  const [selectedDimensionId, setSelectedDimensionId] = useState<string | null>(null);
+  const [editingDimensionValueInput, setEditingDimensionValueInput] = useState<string>("");
+  const [moveEntireShapeOnDimChange, setMoveEntireShapeOnDimChange] = useState<boolean>(true);
+
   // BG Image reference
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
   const [bgOpacity, setBgOpacity] = useState(0.4);
@@ -553,6 +574,213 @@ export default function App() {
     }
   };
 
+  const handleApplyDimensionValue = (dimId: string, targetValue: number) => {
+    saveState();
+    
+    // Find the dimension to change
+    const dim = (activeLayer.dimensions || []).find(d => d.id === dimId);
+    if (!dim) return;
+
+    const p1 = dim.p1;
+    const p2 = dim.p2;
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const currentDist = Math.hypot(dx, dy);
+
+    if (currentDist < 0.001) {
+      logCommandResponse("Hata: Başlangıç ve bitiş noktası çakışık olduğundan konumlandırma yönü belirlenemedi.");
+      return;
+    }
+
+    // Direction unit vector from p1 to p2
+    const ux = dx / currentDist;
+    const uy = dy / currentDist;
+
+    // The target coordinate for p2 is:
+    const targetP2X = p1.x + ux * targetValue;
+    const targetP2Y = p1.y + uy * targetValue;
+
+    // Shift vector for p2
+    const shiftX = targetP2X - p2.x;
+    const shiftY = targetP2Y - p2.y;
+
+    let pointsShiftedList: Point[] = [];
+    
+    if (moveEntireShapeOnDimChange) {
+      // Find which shape (either finalPoints, or a path in activeLayer.paths) contains the node p2 (proximity check)
+      let foundPathIdx = -1;
+      let isFinalPts = false;
+      const epsilon = 1.0; // vertex proximity limit (1.0 mm)
+
+      // Check finalPoints first
+      if (finalPoints.length > 0) {
+        const containsP2 = finalPoints.some(pt => Math.hypot(pt.x - p2.x, pt.y - p2.y) < epsilon);
+        if (containsP2) {
+          isFinalPts = true;
+        }
+      }
+
+      // Check other layer paths
+      if (!isFinalPts && activeLayer.paths) {
+        for (let i = 0; i < activeLayer.paths.length; i++) {
+          const containsP2 = activeLayer.paths[i].some(pt => Math.hypot(pt.x - p2.x, pt.y - p2.y) < epsilon);
+          if (containsP2) {
+            foundPathIdx = i;
+            break;
+          }
+        }
+      }
+
+      if (isFinalPts) {
+        // Shift entire finalPoints
+        setFinalPoints(prev => {
+          const updated = prev.map(pt => {
+            const u = { ...pt, x: pt.x + shiftX, y: pt.y + shiftY };
+            if (pt.circleData) {
+              u.circleData = {
+                center: { x: pt.circleData.center.x + shiftX, y: pt.circleData.center.y + shiftY },
+                radius: pt.circleData.radius
+              };
+            }
+            return u;
+          });
+          pointsShiftedList = updated;
+          return updated;
+        });
+        logCommandResponse(`Konumlandırma: Çizim şekli ${targetValue.toFixed(1)} mm olarak konumlandırıldı.`);
+      } else if (foundPathIdx !== -1 && activeLayer.paths) {
+        // Shift entire path elements
+        setPaths(prev => {
+          return prev.map((path, idx) => {
+            if (idx === foundPathIdx) {
+              const updated = path.map(pt => {
+                const u = { ...pt, x: pt.x + shiftX, y: pt.y + shiftY };
+                if (pt.circleData) {
+                  u.circleData = {
+                    center: { x: pt.circleData.center.x + shiftX, y: pt.circleData.center.y + shiftY },
+                    radius: pt.circleData.radius
+                  };
+                }
+                return u;
+              });
+              pointsShiftedList = updated;
+              return updated;
+            }
+            return path;
+          });
+        });
+        logCommandResponse(`Konumlandırma: Şekil #${foundPathIdx + 1} ${targetValue.toFixed(1)} mm olarak konumlandırıldı.`);
+      } else {
+        // Just shift the single point p2 itself (in the closest shape or raw)
+        let closestPt: { ref: Point, pathIdx: number, ptIdx: number } | null = null;
+        let minDist = epsilon;
+
+        // Check finalPoints
+        finalPoints.forEach((pt, ptIdx) => {
+          const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
+          if (d < minDist) {
+            minDist = d;
+            closestPt = { ref: pt, pathIdx: -1, ptIdx };
+          }
+        });
+
+        // Check paths
+        if (activeLayer.paths) {
+          activeLayer.paths.forEach((path, pathIdx) => {
+            path.forEach((pt, ptIdx) => {
+              const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
+              if (d < minDist) {
+                minDist = d;
+                closestPt = { ref: pt, pathIdx, ptIdx };
+              }
+            });
+          });
+        }
+
+        if (closestPt) {
+          const c: any = closestPt;
+          if (c.pathIdx === -1) {
+            setFinalPoints(prev => prev.map((pt, i) => i === c.ptIdx ? { ...pt, x: pt.x + shiftX, y: pt.y + shiftY } : pt));
+          } else {
+            setPaths(prev => prev.map((path, pIdx) => pIdx === c.pathIdx ? path.map((pt, i) => i === c.ptIdx ? { ...pt, x: pt.x + shiftX, y: pt.y + shiftY } : pt) : path));
+          }
+          logCommandResponse(`Konumlandırma: Yakın düğüm ${targetValue.toFixed(1)} mm mesafeye kaydırıldı.`);
+        } else {
+          logCommandResponse("Konumlandırma yapılamadı: Ölçü noktasına yakın çizim düğümü bulunamadı.");
+        }
+      }
+    } else {
+      // Move point only mode
+      let closestPt: { ref: Point, pathIdx: number, ptIdx: number } | null = null;
+      let minDist = 3.0;
+
+      finalPoints.forEach((pt, ptIdx) => {
+        const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
+        if (d < minDist) {
+          minDist = d;
+          closestPt = { ref: pt, pathIdx: -1, ptIdx };
+        }
+      });
+
+      if (activeLayer.paths) {
+        activeLayer.paths.forEach((path, pathIdx) => {
+          path.forEach((pt, ptIdx) => {
+            const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
+            if (d < minDist) {
+              minDist = d;
+              closestPt = { ref: pt, pathIdx, ptIdx };
+            }
+          });
+        });
+      }
+
+      if (closestPt) {
+        const c: any = closestPt;
+        if (c.pathIdx === -1) {
+          setFinalPoints(prev => prev.map((pt, i) => i === c.ptIdx ? { ...pt, x: targetP2X, y: targetP2Y } : pt));
+        } else {
+          setPaths(prev => prev.map((path, pIdx) => pIdx === c.pathIdx ? path.map((pt, i) => i === c.ptIdx ? { ...pt, x: targetP2X, y: targetP2Y } : pt) : path));
+        }
+        logCommandResponse(`Konumlandırma: Tek nokta ${targetValue.toFixed(1)} mm olarak ayarlandı.`);
+      } else {
+        logCommandResponse("Konumlandırma: Düğüm noktası bulunamadı.");
+      }
+    }
+
+    // Update dimensions share endpoints coordinates
+    setDimensions(prev => prev.map(d => {
+      let up1 = { ...d.p1 };
+      let up2 = { ...d.p2 };
+
+      if (Math.hypot(d.p2.x - p2.x, d.p2.y - p2.y) < 1.0) {
+        up2 = { ...d.p2, x: targetP2X, y: targetP2Y };
+      }
+      if (Math.hypot(d.p1.x - p2.x, d.p1.y - p2.y) < 1.0) {
+        up1 = { ...d.p1, x: targetP2X, y: targetP2Y };
+      }
+
+      if (d.id === dimId) {
+        return {
+          ...d,
+          p1: up1,
+          p2: up2,
+          value: targetValue
+        };
+      }
+      return { ...d, p1: up1, p2: up2 };
+    }));
+
+    setSelectedDimensionId(null);
+  };
+
+  const handleDeleteDimension = (dimId: string) => {
+    saveState();
+    setDimensions(prev => prev.filter(d => d.id !== dimId));
+    setSelectedDimensionId(null);
+    logCommandResponse("Ölçülendirme silindi.");
+  };
+
   const applyCadEditMirror = (axis: 'X' | 'Y') => {
     saveState();
     let modified = false;
@@ -783,7 +1011,10 @@ export default function App() {
           clearCommand();
           setTempPoint(null);
           setClickCount(0);
-          logCommandResponse('Command canceled.');
+          setDimP1(null);
+          setDimP2(null);
+          setSelectedDimensionId(null);
+          logCommandResponse('İşlem iptal edildi.');
         }
       }
       if (e.key === 'f' || e.key === 'F') {
@@ -2174,6 +2405,141 @@ export default function App() {
       });
     });
 
+    // Helper to draw a single custom dimension annotation on canvas
+    const drawCustomDimension = (
+      p1: Point,
+      p2: Point,
+      offset: number,
+      isHighlighted: boolean,
+      customValueText?: string
+    ) => {
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.1) return;
+
+      const ux = dx / len;
+      const uy = dy / len;
+      const nx = -uy;
+      const ny = ux;
+
+      const dP1_offX = p1.x + nx * offset;
+      const dP1_offY = p1.y + ny * offset;
+      const dP2_offX = p2.x + nx * offset;
+      const dP2_offY = p2.y + ny * offset;
+
+      // Draw extension lines (faint dashed lines)
+      ctx.save();
+      ctx.strokeStyle = '#52525b'; // Zinc-600
+      ctx.lineWidth = 1.0 / viewZoom;
+      ctx.setLineDash([3 / viewZoom, 3 / viewZoom]);
+      ctx.beginPath();
+      // start slightly offset from vertex
+      ctx.moveTo(p1.x + nx * (offset * 0.1), p1.y + ny * (offset * 0.1));
+      ctx.lineTo(dP1_offX + nx * (5 / viewZoom * (offset < 0 ? -1 : 1)), dP1_offY + ny * (5 / viewZoom * (offset < 0 ? -1 : 1)));
+      ctx.moveTo(p2.x + nx * (offset * 0.1), p2.y + ny * (offset * 0.1));
+      ctx.lineTo(dP2_offX + nx * (5 / viewZoom * (offset < 0 ? -1 : 1)), dP2_offY + ny * (5 / viewZoom * (offset < 0 ? -1 : 1)));
+      ctx.stroke();
+      ctx.restore();
+
+      // Draw dimension line (solid line)
+      ctx.strokeStyle = isHighlighted ? '#f472b6' : '#db2777'; // pink-400 vs pink-600
+      ctx.lineWidth = isHighlighted ? 2.5 / viewZoom : 1.5 / viewZoom;
+      ctx.beginPath();
+      ctx.moveTo(dP1_offX, dP1_offY);
+      ctx.lineTo(dP2_offX, dP2_offY);
+      ctx.stroke();
+
+      // Draw stylish slash/tick end markers
+      ctx.strokeStyle = isHighlighted ? '#f472b6' : '#db2777';
+      ctx.lineWidth = isHighlighted ? 3.0 / viewZoom : 2.0 / viewZoom;
+      ctx.beginPath();
+      ctx.moveTo(dP1_offX - (ux - nx) * (5 / viewZoom), dP1_offY - (uy - ny) * (5 / viewZoom));
+      ctx.lineTo(dP1_offX + (ux - nx) * (5 / viewZoom), dP1_offY + (uy - ny) * (5 / viewZoom));
+      ctx.moveTo(dP2_offX - (ux + nx) * (5 / viewZoom), dP2_offY - (uy + ny) * (5 / viewZoom));
+      ctx.lineTo(dP2_offX + (ux + nx) * (5 / viewZoom), dP2_offY + (uy + ny) * (5 / viewZoom));
+      ctx.stroke();
+
+      // Draw dimension textbox masked over the dimension line
+      const midX = (dP1_offX + dP2_offX) / 2;
+      const midY = (dP1_offY + dP2_offY) / 2;
+      let textAngle = Math.atan2(dy, dx);
+      if (textAngle > Math.PI / 2 || textAngle < -Math.PI / 2) {
+        textAngle += Math.PI;
+      }
+
+      ctx.save();
+      ctx.translate(midX, midY);
+      ctx.rotate(textAngle);
+
+      const valText = customValueText || `${len.toFixed(1)} mm`;
+      ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+      const textWidth = ctx.measureText(valText).width;
+
+      // Background card mask
+      ctx.fillStyle = '#18181b'; // Zinc-900 matches app background
+      ctx.fillRect(-textWidth/2 - 6 / viewZoom, -7 / viewZoom, textWidth + 12 / viewZoom, 14 / viewZoom);
+
+      // Border frame around active dimension label for extra premium polish
+      ctx.strokeStyle = isHighlighted ? '#f472b6' : '#ec4899';
+      ctx.lineWidth = 1.0 / viewZoom;
+      ctx.strokeRect(-textWidth/2 - 6 / viewZoom, -7 / viewZoom, textWidth + 12 / viewZoom, 14 / viewZoom);
+
+      // Text label filled
+      ctx.fillStyle = isHighlighted ? '#fbcfe8' : '#f472b6'; // lighter pink vs dark text
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(valText, 0, 0);
+
+      ctx.restore();
+    };
+
+    // 7.5 Draw Placed and Preview Dimension Annotations
+    if (showDims) {
+      // Draw already placed dimensions for current active layer
+      dimensions.forEach(d => {
+        const isHighlighted = selectedDimensionId === d.id;
+        drawCustomDimension(d.p1, d.p2, d.offset, isHighlighted);
+      });
+
+      // Draw active interactive preview if user is inserting a dimension
+      if (currentCommand === 'dimension' && hoverCoords) {
+        if (clickCount === 1 && dimP1) {
+          // Draw dashed indicator from dimP1 to hoverCoords
+          ctx.save();
+          ctx.strokeStyle = '#f472b6';
+          ctx.lineWidth = 1.5 / viewZoom;
+          ctx.setLineDash([4 / viewZoom, 4 / viewZoom]);
+          ctx.beginPath();
+          ctx.moveTo(dimP1.x, dimP1.y);
+          ctx.lineTo(hoverCoords.x, hoverCoords.y);
+          ctx.stroke();
+          ctx.restore();
+
+          // Draw node markers
+          ctx.fillStyle = '#ec4899';
+          ctx.fillRect(dimP1.x - 4/viewZoom, dimP1.y - 4/viewZoom, 8/viewZoom, 8/viewZoom);
+
+          // Render length text near hover
+          ctx.fillStyle = '#f472b6';
+          ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+          const dist = Math.hypot(hoverCoords.x - dimP1.x, hoverCoords.y - dimP1.y);
+          ctx.fillText(`L: ${dist.toFixed(1)} mm`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
+        } else if (clickCount === 2 && dimP1 && dimP2) {
+          // Both points set, previewing offset and placement of dimension line
+          const dx = dimP2.x - dimP1.x;
+          const dy = dimP2.y - dimP1.y;
+          const len = Math.hypot(dx, dy);
+          if (len > 0.001) {
+            const nx = -dy / len;
+            const ny = dx / len;
+            const previewOffset = (hoverCoords.x - dimP1.x) * nx + (hoverCoords.y - dimP1.y) * ny;
+            drawCustomDimension(dimP1, dimP2, previewOffset, true, `📐 ${len.toFixed(1)} mm`);
+          }
+        }
+      }
+    }
+
     // 8. Draw Right-Click Selection Box
     if (rightClickStart && rightClickEnd) {
       const isCrossing = rightClickEnd.x < rightClickStart.x; // RTL is crossing selection
@@ -2358,12 +2724,84 @@ export default function App() {
           setSelectedPathIdx(-1);
           logCommandResponse(`${currentCommand === 'circle' ? 'Circle' : `Polygon (${polygonSides} sides)`} added to workspace.`);
         }
+      } else if (currentCommand === 'dimension') {
+        const pt = snapPoint ? { x: snapPoint.x, y: snapPoint.y } : { x, y };
+        if (clickCount === 0) {
+          setDimP1(pt);
+          setClickCount(1);
+          logCommandResponse(`Ölçülendirme: 1. Nokta seçildi (${pt.x.toFixed(1)}, ${pt.y.toFixed(1)}). Bitiş noktasını seçin.`);
+        } else if (clickCount === 1) {
+          setDimP2(pt);
+          setClickCount(2);
+          logCommandResponse("Ölçülendirme: 2. Nokta seçildi. Şimdi ölçü çizgisini konumlandırmak için ekranda bir yere tıklayın.");
+        } else if (clickCount === 2) {
+          // Calculate offset in mm
+          if (dimP1 && dimP2) {
+            const dx = dimP2.x - dimP1.x;
+            const dy = dimP2.y - dimP1.y;
+            const len = Math.hypot(dx, dy);
+            let finalOffset = 20;
+            if (len > 0.001) {
+              const nx = -dy / len;
+              const ny = dx / len;
+              finalOffset = (x - dimP1.x) * nx + (y - dimP1.y) * ny;
+            }
+            const newDim = {
+              id: Math.random().toString(36).substring(2, 9),
+              p1: { ...dimP1 },
+              p2: { ...dimP2 },
+              offset: finalOffset,
+              value: len
+            };
+            saveState();
+            setDimensions(prev => [...prev, newDim]);
+            logCommandResponse(`Ölçülendirme başarıyla eklendi! Ölçü: ${len.toFixed(1)} mm.`);
+          }
+          setDimP1(null);
+          setDimP2(null);
+          setClickCount(0);
+          setTempPoint(null);
+          clearCommand();
+        }
       }
       return;
     }
 
     // Standard drawing sandbox techniques
     if (drawMode === 'drag') {
+      // Check if clicked any placed dimension annotation on active layer
+      let clickedDim = null;
+      for (const d of dimensions) {
+        const dx = d.p2.x - d.p1.x;
+        const dy = d.p2.y - d.p1.y;
+        const len = Math.hypot(dx, dy);
+        if (len > 0) {
+          const nx = -dy / len;
+          const ny = dx / len;
+          // Midpoint of dimension text placement
+          const dP1_offX = d.p1.x + nx * d.offset;
+          const dP1_offY = d.p1.y + ny * d.offset;
+          const dP2_offX = d.p2.x + nx * d.offset;
+          const dP2_offY = d.p2.y + ny * d.offset;
+          const midX = (dP1_offX + dP2_offX) / 2;
+          const midY = (dP1_offY + dP2_offY) / 2;
+
+          // If click is within 15 virtual units or 18/viewZoom screen units
+          if (Math.hypot(midX - x, midY - y) < Math.max(15, 18 / viewZoom)) {
+            clickedDim = d;
+            break;
+          }
+        }
+      }
+
+      if (clickedDim) {
+        setSelectedDimensionId(clickedDim.id);
+        const actualLen = Math.hypot(clickedDim.p2.x - clickedDim.p1.x, clickedDim.p2.y - clickedDim.p1.y);
+        setEditingDimensionValueInput(actualLen.toFixed(1));
+        logCommandResponse(`Ölçülendirme seçildi. Değeri girerek konumlandırmayı ayarlayabilirsiniz.`);
+        return;
+      }
+
       let found = false;
       // Seek dragging point node in finalPoints
       if (finalPoints.length > 0) {
@@ -3352,6 +3790,22 @@ export default function App() {
           >
             <Maximize className="w-3 h-3 rotate-45" />
             <span>Poly</span>
+          </button>
+          <button
+            onClick={() => {
+              setCommand('dimension');
+              setDimP1(null);
+              setDimP2(null);
+              setClickCount(0);
+              logCommandResponse("Akıllı Ölçülendirme ve Konumlandırma aktif. Ölçülendirmek istediğiniz ilk noktayı seçin.");
+            }}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
+              currentCommand === 'dimension' ? 'bg-pink-600/30 border-pink-500 text-pink-400 font-bold' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+            }`}
+            title="Akıllı Ölçülendirme ve Konumlandırma (DIM) - Çizim noktalarını seçip konumlandırın"
+          >
+            <Ruler className="w-3 h-3 text-pink-400" />
+            <span>Ölçülendir</span>
           </button>
 
           {finalPoints.length >= 2 && (
@@ -4672,6 +5126,111 @@ export default function App() {
                     className="px-2 py-1 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded transition text-[11px] font-mono"
                   >
                     İptal
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Interactive parametric measurement/dimension positioning editor popup */}
+            {selectedDimensionId !== null && (
+              <div className="absolute top-14 left-3 bg-zinc-900/95 border-2 border-pink-500 rounded-lg p-3 text-xs w-[280px] shadow-2xl z-40 space-y-3 backdrop-blur animate-fade-in text-zinc-100">
+                <div className="flex justify-between items-center pb-1.5 border-b border-zinc-850">
+                  <span className="font-bold text-pink-400 font-mono flex items-center gap-1.5 uppercase tracking-wide text-[10px]">
+                    <span className="inline-block w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
+                    📐 Akıllı Konumlandırma
+                  </span>
+                  <button 
+                    onClick={() => {
+                      setSelectedDimensionId(null);
+                    }}
+                    className="text-zinc-500 hover:text-zinc-200 transition text-[11px] font-bold"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div>
+                  <p className="text-[10px] text-zinc-400 mb-2 font-mono leading-relaxed">
+                    Noktalar arası mesafeyi ayarlayarak şekli veya düğüm noktasını konumlandırın.
+                  </p>
+                  
+                  {/* Target Distance Input */}
+                  <label className="block text-[10px] text-zinc-400 font-mono mb-1">Hedef Mesafe:</label>
+                  <div className="flex gap-1.5 items-center">
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={editingDimensionValueInput}
+                      onChange={(e) => setEditingDimensionValueInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const distVal = parseFloat(editingDimensionValueInput);
+                          if (!isNaN(distVal) && distVal > 0) {
+                            handleApplyDimensionValue(selectedDimensionId, distVal);
+                          }
+                        }
+                      }}
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-zinc-100 text-xs font-mono outline-none focus:border-pink-500 font-bold"
+                      placeholder="Örn: 150"
+                      autoFocus
+                    />
+                    <span className="text-zinc-400 font-mono font-bold font-bold">mm</span>
+                  </div>
+                </div>
+
+                {/* Positioning Options Toggles */}
+                <div className="p-2 bg-zinc-950 border border-zinc-850 rounded space-y-2">
+                  <span className="text-[9px] uppercase font-mono text-zinc-500 block">Konumlandırma Modu:</span>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
+                      <input
+                        type="radio"
+                        name="positioning_mode"
+                        checked={moveEntireShapeOnDimChange}
+                        onChange={() => setMoveEntireShapeOnDimChange(true)}
+                        className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
+                      />
+                      <span>Tüm Şekli Kaydır (Önerilen)</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
+                      <input
+                        type="radio"
+                        name="positioning_mode"
+                        checked={!moveEntireShapeOnDimChange}
+                        onChange={() => setMoveEntireShapeOnDimChange(false)}
+                        className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
+                      />
+                      <span>Sadece Bu Noktayı Taşı</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Apply Actions */}
+                <div className="flex gap-2 pt-1 border-t border-zinc-800/60">
+                  <button
+                    onClick={() => {
+                      const distVal = parseFloat(editingDimensionValueInput);
+                      if (!isNaN(distVal) && distVal > 0) {
+                        handleApplyDimensionValue(selectedDimensionId, distVal);
+                      }
+                    }}
+                    className="flex-1 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded font-bold transition text-center cursor-pointer text-[11px] font-mono"
+                  >
+                    Konumlandır (Apply)
+                  </button>
+                  <button
+                    onClick={() => handleDeleteDimension(selectedDimensionId)}
+                    className="px-2 py-1.5 bg-red-950 hover:bg-red-900 border border-red-900 text-red-100 rounded transition text-[11px] font-mono"
+                    title="Ölçülendirmeyi çizimden siler"
+                  >
+                    Sil
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedDimensionId(null);
+                    }}
+                    className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded transition text-[11px] font-mono"
+                  >
+                    Vazgeç
                   </button>
                 </div>
               </div>
