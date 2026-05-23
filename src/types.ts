@@ -32,7 +32,7 @@ export interface TrackLine {
   type: 'H' | 'V';
 }
 
-export type CommandType = 'line' | 'rect' | 'circle' | 'polygon' | 'trim' | 'extend' | 'offset' | 'stretch' | '';
+export type CommandType = 'line' | 'rect' | 'circle' | 'polygon' | 'trim' | 'extend' | 'offset' | 'stretch' | 'dimension' | '';
 
 export type DrawModeType = 'freehand' | 'point' | 'drag';
 
@@ -55,6 +55,7 @@ export interface CADLayer {
   depth: number;
   revolveAxis?: 'left' | 'center' | 'right' | 'origin-y' | 'origin-x';
   paths?: Point[][];
+  dimensions?: Array<{ id: string; p1: Point; p2: Point; offset: number; value: number }>;
   pathSettings?: PathSettings[];
   finalPointsSettings?: PathSettings;
 }
