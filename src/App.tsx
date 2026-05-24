@@ -39,6 +39,123 @@ import { Point, CommandType, DrawModeType, HistoryItem, SnapPoint, TrackLine, CA
 import { calculateSnaps, distance, douglasPeucker, getClosestPointOnSegment, findSegmentIntersection, offsetPolygon } from './utils/geometry';
 import { ThreeViewport } from './components/ThreeViewport';
 
+const getDimensionLinePoints = (
+  p1: Point,
+  p2: Point,
+  offset: number,
+  dimType: 'horizontal' | 'vertical' | 'aligned' = 'aligned'
+) => {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const len = Math.hypot(dx, dy);
+  const midX = (p1.x + p2.x) / 2;
+  const midY = (p1.y + p2.y) / 2;
+
+  let dP1_offX = p1.x;
+  let dP1_offY = p1.y;
+  let dP2_offX = p2.x;
+  let dP2_offY = p2.y;
+
+  if (dimType === 'horizontal') {
+    dP1_offX = p1.x;
+    dP1_offY = midY + offset;
+    dP2_offX = p2.x;
+    dP2_offY = midY + offset;
+  } else if (dimType === 'vertical') {
+    dP1_offX = midX + offset;
+    dP1_offY = p1.y;
+    dP2_offX = midX + offset;
+    dP2_offY = p2.y;
+  } else {
+    if (len > 0.001) {
+      const nx = -dy / len;
+      const ny = dx / len;
+      dP1_offX = p1.x + nx * offset;
+      dP1_offY = p1.y + ny * offset;
+      dP2_offX = p2.x + nx * offset;
+      dP2_offY = p2.y + ny * offset;
+    }
+  }
+
+  return {
+    dP1_offX,
+    dP1_offY,
+    dP2_offX,
+    dP2_offY,
+    midX: (dP1_offX + dP2_offX) / 2,
+    midY: (dP1_offY + dP2_offY) / 2,
+  };
+};
+
+const getAutoDimensionDetails = (
+  p1: Point,
+  p2: Point,
+  cx: number,
+  cy: number
+) => {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const len = Math.hypot(dx, dy);
+
+  const midX = (p1.x + p2.x) / 2;
+  const midY = (p1.y + p2.y) / 2;
+
+  if (len < 0.001) {
+    return { dimType: 'aligned' as const, value: 0, offset: 0 };
+  }
+
+  if (Math.abs(dx) < 0.05) {
+    return {
+      dimType: 'vertical' as const,
+      value: Math.abs(dy),
+      offset: cx - midX,
+    };
+  }
+
+  if (Math.abs(dy) < 0.05) {
+    return {
+      dimType: 'horizontal' as const,
+      value: Math.abs(dx),
+      offset: cy - midY,
+    };
+  }
+
+  const segAngle = Math.atan2(dy, dx);
+  const perpAngle = segAngle + Math.PI / 2;
+  const cursorAngle = Math.atan2(cy - midY, cx - midX);
+
+  const getDiff = (a1: number, a2: number) => {
+    const d = Math.abs(a1 - a2) % Math.PI;
+    return d > Math.PI / 2 ? Math.PI - d : d;
+  };
+
+  const devToVertical = getDiff(cursorAngle, Math.PI / 2);
+  const devToHorizontal = getDiff(cursorAngle, 0);
+  const devToPerp = getDiff(cursorAngle, perpAngle);
+
+  let dimType: 'horizontal' | 'vertical' | 'aligned' = 'aligned';
+  let value = len;
+  let offset = 0;
+
+  if (devToPerp <= devToVertical && devToPerp <= devToHorizontal) {
+    dimType = 'aligned';
+    value = len;
+    const nx = -dy / len;
+    const ny = dx / len;
+    offset = (cx - p1.x) * nx + (cy - p1.y) * ny;
+  } else if (devToVertical <= devToHorizontal) {
+    dimType = 'horizontal';
+    value = Math.abs(dx);
+    offset = cy - midY;
+  } else {
+    dimType = 'vertical';
+    value = Math.abs(dy);
+    offset = cx - midX;
+  }
+
+  return { dimType, value, offset };
+};
+
 export default function App() {
   // Layer state
   const [layers, setLayers] = useState<CADLayer[]>([
@@ -668,11 +785,25 @@ export default function App() {
       return;
     }
 
-    const vux = vdx / vdist;
-    const vuy = vdy / vdist;
+    const dType = dim.dimType || 'aligned';
+    let finalTargetX = targetPt.x;
+    let finalTargetY = targetPt.y;
 
-    const finalTargetX = anchorPt.x + vux * targetValue;
-    const finalTargetY = anchorPt.y + vuy * targetValue;
+    if (dType === 'horizontal') {
+      const direction = Math.sign(targetPt.x - anchorPt.x) || 1;
+      finalTargetX = anchorPt.x + direction * targetValue;
+      finalTargetY = targetPt.y;
+    } else if (dType === 'vertical') {
+      const direction = Math.sign(targetPt.y - anchorPt.y) || 1;
+      finalTargetY = anchorPt.y + direction * targetValue;
+      finalTargetX = targetPt.x;
+    } else {
+      // aligned
+      const vux = vdx / vdist;
+      const vuy = vdy / vdist;
+      finalTargetX = anchorPt.x + vux * targetValue;
+      finalTargetY = anchorPt.y + vuy * targetValue;
+    }
 
     const shiftX = finalTargetX - targetPt.x;
     const shiftY = finalTargetY - targetPt.y;
@@ -743,6 +874,7 @@ export default function App() {
     setDimensions(prev => prev.map(d => {
       let up1 = { ...d.p1 };
       let up2 = { ...d.p2 };
+      const dType = d.dimType || 'aligned';
 
       if (d.id === dimId) {
         // Active dimension
@@ -763,7 +895,12 @@ export default function App() {
             }
           }
         }
-        const newLen = Math.hypot(up2.x - up1.x, up2.y - up1.y);
+        let newLen = Math.hypot(up2.x - up1.x, up2.y - up1.y);
+        if (dType === 'horizontal') {
+          newLen = Math.abs(up2.x - up1.x);
+        } else if (dType === 'vertical') {
+          newLen = Math.abs(up2.y - up1.y);
+        }
         return {
           ...d,
           p1: up1,
@@ -789,7 +926,12 @@ export default function App() {
             up2 = { ...d.p2, x: finalTargetX, y: finalTargetY };
           }
         }
-        const newLen = Math.hypot(up2.x - up1.x, up2.y - up1.y);
+        let newLen = Math.hypot(up2.x - up1.x, up2.y - up1.y);
+        if (dType === 'horizontal') {
+          newLen = Math.abs(up2.x - up1.x);
+        } else if (dType === 'vertical') {
+          newLen = Math.abs(up2.y - up1.y);
+        }
         return {
           ...d,
           p1: up1,
@@ -2439,22 +2581,63 @@ export default function App() {
       p2: Point,
       offset: number,
       isHighlighted: boolean,
-      customValueText?: string
+      customValueText?: string,
+      dimType: 'horizontal' | 'vertical' | 'aligned' = 'aligned'
     ) => {
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
       const len = Math.hypot(dx, dy);
       if (len < 0.1) return;
 
-      const ux = dx / len;
-      const uy = dy / len;
-      const nx = -uy;
-      const ny = ux;
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
 
-      const dP1_offX = p1.x + nx * offset;
-      const dP1_offY = p1.y + ny * offset;
-      const dP2_offX = p2.x + nx * offset;
-      const dP2_offY = p2.y + ny * offset;
+      let dP1_offX = p1.x;
+      let dP1_offY = p1.y;
+      let dP2_offX = p2.x;
+      let dP2_offY = p2.y;
+
+      let ux = 0;
+      let uy = 0;
+      let nx = 0;
+      let ny = 0;
+
+      let displayValue = len;
+
+      if (dimType === 'horizontal') {
+        displayValue = Math.abs(dx);
+        dP1_offX = p1.x;
+        dP1_offY = midY + offset;
+        dP2_offX = p2.x;
+        dP2_offY = midY + offset;
+
+        ux = Math.sign(dx) || 1;
+        uy = 0;
+        nx = 0;
+        ny = Math.sign(offset) || 1;
+      } else if (dimType === 'vertical') {
+        displayValue = Math.abs(dy);
+        dP1_offX = midX + offset;
+        dP1_offY = p1.y;
+        dP2_offX = midX + offset;
+        dP2_offY = p2.y;
+
+        ux = 0;
+        uy = Math.sign(dy) || 1;
+        nx = Math.sign(offset) || 1;
+        ny = 0;
+      } else {
+        displayValue = len;
+        ux = dx / len;
+        uy = dy / len;
+        nx = -uy;
+        ny = ux;
+
+        dP1_offX = p1.x + nx * offset;
+        dP1_offY = p1.y + ny * offset;
+        dP2_offX = p2.x + nx * offset;
+        dP2_offY = p2.y + ny * offset;
+      }
 
       // Draw extension lines (faint dashed lines)
       ctx.save();
@@ -2462,11 +2645,22 @@ export default function App() {
       ctx.lineWidth = 1.0 / viewZoom;
       ctx.setLineDash([3 / viewZoom, 3 / viewZoom]);
       ctx.beginPath();
-      // start slightly offset from vertex
-      ctx.moveTo(p1.x + nx * (offset * 0.1), p1.y + ny * (offset * 0.1));
-      ctx.lineTo(dP1_offX + nx * (5 / viewZoom * (offset < 0 ? -1 : 1)), dP1_offY + ny * (5 / viewZoom * (offset < 0 ? -1 : 1)));
-      ctx.moveTo(p2.x + nx * (offset * 0.1), p2.y + ny * (offset * 0.1));
-      ctx.lineTo(dP2_offX + nx * (5 / viewZoom * (offset < 0 ? -1 : 1)), dP2_offY + ny * (5 / viewZoom * (offset < 0 ? -1 : 1)));
+      if (dimType === 'horizontal') {
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p1.x, midY + offset + (5 / viewZoom * (offset < 0 ? -1 : 1)));
+        ctx.moveTo(p2.x, p2.y);
+        ctx.lineTo(p2.x, midY + offset + (5 / viewZoom * (offset < 0 ? -1 : 1)));
+      } else if (dimType === 'vertical') {
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(midX + offset + (5 / viewZoom * (offset < 0 ? -1 : 1)), p1.y);
+        ctx.moveTo(p2.x, p2.y);
+        ctx.lineTo(midX + offset + (5 / viewZoom * (offset < 0 ? -1 : 1)), p2.y);
+      } else {
+        ctx.moveTo(p1.x + nx * (offset * 0.1), p1.y + ny * (offset * 0.1));
+        ctx.lineTo(dP1_offX + nx * (5 / viewZoom * (offset < 0 ? -1 : 1)), dP1_offY + ny * (5 / viewZoom * (offset < 0 ? -1 : 1)));
+        ctx.moveTo(p2.x + nx * (offset * 0.1), p2.y + ny * (offset * 0.1));
+        ctx.lineTo(dP2_offX + nx * (5 / viewZoom * (offset < 0 ? -1 : 1)), dP2_offY + ny * (5 / viewZoom * (offset < 0 ? -1 : 1)));
+      }
       ctx.stroke();
       ctx.restore();
 
@@ -2489,18 +2683,25 @@ export default function App() {
       ctx.stroke();
 
       // Draw dimension textbox masked over the dimension line
-      const midX = (dP1_offX + dP2_offX) / 2;
-      const midY = (dP1_offY + dP2_offY) / 2;
-      let textAngle = Math.atan2(dy, dx);
-      if (textAngle > Math.PI / 2 || textAngle < -Math.PI / 2) {
-        textAngle += Math.PI;
+      const textMidX = (dP1_offX + dP2_offX) / 2;
+      const textMidY = (dP1_offY + dP2_offY) / 2;
+      let textAngle = 0;
+      if (dimType === 'horizontal') {
+        textAngle = 0;
+      } else if (dimType === 'vertical') {
+        textAngle = -Math.PI / 2;
+      } else {
+        textAngle = Math.atan2(dy, dx);
+        if (textAngle > Math.PI / 2 || textAngle < -Math.PI / 2) {
+          textAngle += Math.PI;
+        }
       }
 
       ctx.save();
-      ctx.translate(midX, midY);
+      ctx.translate(textMidX, textMidY);
       ctx.rotate(textAngle);
 
-      const valText = customValueText || `${len.toFixed(1)} mm`;
+      const valText = customValueText || `${displayValue.toFixed(1)} mm`;
       ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
       const textWidth = ctx.measureText(valText).width;
 
@@ -2527,7 +2728,7 @@ export default function App() {
     // Draw already placed dimensions for current active layer
     dimensions.forEach(d => {
       const isHighlighted = selectedDimensionId === d.id;
-      drawCustomDimension(d.p1, d.p2, d.offset, isHighlighted);
+      drawCustomDimension(d.p1, d.p2, d.offset, isHighlighted, undefined, d.dimType || 'aligned');
     });
 
     // Draw active interactive preview if user is inserting a dimension
@@ -2555,15 +2756,8 @@ export default function App() {
         ctx.fillText(`L: ${dist.toFixed(1)} mm`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
       } else if (clickCount === 2 && dimP1 && dimP2) {
         // Both points set, previewing offset and placement of dimension line
-        const dx = dimP2.x - dimP1.x;
-        const dy = dimP2.y - dimP1.y;
-        const len = Math.hypot(dx, dy);
-        if (len > 0.001) {
-          const nx = -dy / len;
-          const ny = dx / len;
-          const previewOffset = (hoverCoords.x - dimP1.x) * nx + (hoverCoords.y - dimP1.y) * ny;
-          drawCustomDimension(dimP1, dimP2, previewOffset, true, `📐 ${len.toFixed(1)} mm`);
-        }
+        const details = getAutoDimensionDetails(dimP1, dimP2, hoverCoords.x, hoverCoords.y);
+        drawCustomDimension(dimP1, dimP2, details.offset, true, `📐 ${details.value.toFixed(1)} mm`, details.dimType);
       }
     }
 
@@ -2771,27 +2965,20 @@ export default function App() {
           setClickCount(2);
           logCommandResponse("Ölçülendirme: 2. Nokta seçildi. Şimdi ölçü çizgisini konumlandırmak için ekranda bir yere tıklayın.");
         } else if (clickCount === 2) {
-          // Calculate offset in mm
+          // Calculate offset, type, and value dynamically using auto detection
           if (dimP1 && dimP2) {
-            const dx = dimP2.x - dimP1.x;
-            const dy = dimP2.y - dimP1.y;
-            const len = Math.hypot(dx, dy);
-            let finalOffset = 20;
-            if (len > 0.001) {
-              const nx = -dy / len;
-              const ny = dx / len;
-              finalOffset = (x - dimP1.x) * nx + (y - dimP1.y) * ny;
-            }
+            const details = getAutoDimensionDetails(dimP1, dimP2, x, y);
             const newDim = {
               id: Math.random().toString(36).substring(2, 9),
               p1: { ...dimP1 },
               p2: { ...dimP2 },
-              offset: finalOffset,
-              value: len
+              offset: details.offset,
+              value: details.value,
+              dimType: details.dimType
             };
             saveState();
             setDimensions(prev => [...prev, newDim]);
-            logCommandResponse(`Ölçülendirme başarıyla eklendi! Ölçü: ${len.toFixed(1)} mm.`);
+            logCommandResponse(`Ölçülendirme başarıyla eklendi! Ölçü: ${details.value.toFixed(1)} mm (${details.dimType === 'horizontal' ? 'Yatay' : details.dimType === 'vertical' ? 'Dikey' : 'Hizalı'}).`);
           }
           setDimP1(null);
           setDimP2(null);
@@ -2808,31 +2995,23 @@ export default function App() {
       // Check if clicked any placed dimension annotation on active layer
       let clickedDim = null;
       for (const d of dimensions) {
-        const dx = d.p2.x - d.p1.x;
-        const dy = d.p2.y - d.p1.y;
-        const len = Math.hypot(dx, dy);
-        if (len > 0) {
-          const nx = -dy / len;
-          const ny = dx / len;
-          // Midpoint of dimension text placement
-          const dP1_offX = d.p1.x + nx * d.offset;
-          const dP1_offY = d.p1.y + ny * d.offset;
-          const dP2_offX = d.p2.x + nx * d.offset;
-          const dP2_offY = d.p2.y + ny * d.offset;
-          const midX = (dP1_offX + dP2_offX) / 2;
-          const midY = (dP1_offY + dP2_offY) / 2;
-
-          // If click is within 15 virtual units or 18/viewZoom screen units
-          if (Math.hypot(midX - x, midY - y) < Math.max(15, 18 / viewZoom)) {
-            clickedDim = d;
-            break;
-          }
+        const geom = getDimensionLinePoints(d.p1, d.p2, d.offset, d.dimType || 'aligned');
+        // If click is within 15 virtual units or 18/viewZoom screen units
+        if (Math.hypot(geom.midX - x, geom.midY - y) < Math.max(15, 18 / viewZoom)) {
+          clickedDim = d;
+          break;
         }
       }
 
       if (clickedDim) {
         setSelectedDimensionId(clickedDim.id);
-        const actualLen = Math.hypot(clickedDim.p2.x - clickedDim.p1.x, clickedDim.p2.y - clickedDim.p1.y);
+        const dType = clickedDim.dimType || 'aligned';
+        let actualLen = Math.hypot(clickedDim.p2.x - clickedDim.p1.x, clickedDim.p2.y - clickedDim.p1.y);
+        if (dType === 'horizontal') {
+          actualLen = Math.abs(clickedDim.p2.x - clickedDim.p1.x);
+        } else if (dType === 'vertical') {
+          actualLen = Math.abs(clickedDim.p2.y - clickedDim.p1.y);
+        }
         setEditingDimensionValueInput(actualLen.toFixed(1));
         logCommandResponse(`Ölçülendirme seçildi. Değeri girerek konumlandırmayı ayarlayabilirsiniz.`);
         return;
