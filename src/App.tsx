@@ -511,6 +511,8 @@ export default function App() {
   const [offsetDistance, setOffsetDistance] = useState<number>(15);
   const [cadRotateAngle, setCadRotateAngle] = useState<number>(45);
   const [pendingRotateAngle, setPendingRotateAngle] = useState<number | null>(null);
+  const [rotationCenter, setRotationCenter] = useState<Point | null>(null);
+  const [rotationCenterSelectMode, setRotationCenterSelectMode] = useState<boolean>(false);
   const [cadScaleFactor, setCadScaleFactor] = useState<number>(1.2);
   const [aiRefinePrompt, setAiRefinePrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -1532,6 +1534,44 @@ export default function App() {
     }
   };
 
+  const applyRelativeRotation = (deltaAngle: number) => {
+    // 1. Is there a selection?
+    const hasSelection = (isFinalPointsSelected && finalPoints.length > 0) || (selectedPathIndices.length > 0 && activeLayer.paths && activeLayer.paths.some((_, idx) => selectedPathIndices.includes(idx)));
+    if (!hasSelection) {
+      logCommandResponse("Hata: Dönme hassaslaştırma yapmadan önce lütfen döndürülecek nesne(leri) seçin.");
+      return;
+    }
+
+    // 2. Resolve rotation center
+    let center = rotationCenter;
+    if (!center) {
+      // Calculate selection center as fallback
+      const pointsToMeasure: Point[] = [];
+      if (isFinalPointsSelected && finalPoints.length > 0) {
+        pointsToMeasure.push(...finalPoints);
+      }
+      if (selectedPathIndices.length > 0 && activeLayer.paths) {
+        selectedPathIndices.forEach(idx => {
+          const p = activeLayer.paths?.[idx];
+          if (p) pointsToMeasure.push(...p);
+        });
+      }
+      if (pointsToMeasure.length > 0) {
+        center = getSelectedCenter(pointsToMeasure);
+        setRotationCenter(center);
+        logCommandResponse(`Döndürme Merkezi otomatik olarak seçimin orta noktası (X: ${center.x.toFixed(1)}, Y: ${center.y.toFixed(1)}) olarak belirlendi.`);
+      }
+    }
+
+    if (!center) {
+      logCommandResponse("Hata: Dönme merkezi belirlenemedi.");
+      return;
+    }
+
+    // 3. Apply rotation of delta angle around Resolved center
+    applyCadEditRotate(deltaAngle, center);
+  };
+
   const requestRotateAngle = (angle: number) => {
     const hasSelection = (isFinalPointsSelected && finalPoints.length > 0) || (selectedPathIndices.length > 0 && activeLayer.paths && activeLayer.paths.some((_, idx) => selectedPathIndices.includes(idx)));
     if (!hasSelection) {
@@ -1669,6 +1709,9 @@ export default function App() {
         } else if (pendingRotateAngle !== null) {
           setPendingRotateAngle(null);
           logCommandResponse('Döndürme işlemi iptal edildi.');
+        } else if (rotationCenterSelectMode) {
+          setRotationCenterSelectMode(false);
+          logCommandResponse('Döndürme merkez noktası seçimi iptal edildi.');
         } else if (segmentChoicePending) {
           setSegmentChoicePending(null);
           logCommandResponse('Seçim kutusu kapatıldı.');
@@ -1690,7 +1733,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [finalPoints, isClosed, historyStack, layers, activeLayerId, activeSegmentStretch, activeSegmentMove, segmentChoicePending, selectedPathIndices, isFinalPointsSelected, copiedPaths, copiedFinalPoints, hoverCoords, pendingRotateAngle]);
+  }, [finalPoints, isClosed, historyStack, layers, activeLayerId, activeSegmentStretch, activeSegmentMove, segmentChoicePending, selectedPathIndices, isFinalPointsSelected, copiedPaths, copiedFinalPoints, hoverCoords, pendingRotateAngle, rotationCenterSelectMode]);
 
   // Global mouseup event listener to ensure panning or dragging never lock/stick
   useEffect(() => {
@@ -3459,6 +3502,40 @@ export default function App() {
       );
     }
 
+    // Draw Rotation Center indicator if defined
+    if (rotationCenter) {
+      ctx.save();
+      ctx.strokeStyle = '#f59e0b'; // Amber-500
+      ctx.lineWidth = 1.5 / viewZoom;
+      ctx.setLineDash([3 / viewZoom, 3 / viewZoom]);
+      
+      // Draw crosshair lines
+      ctx.beginPath();
+      ctx.moveTo(rotationCenter.x - 12 / viewZoom, rotationCenter.y);
+      ctx.lineTo(rotationCenter.x + 12 / viewZoom, rotationCenter.y);
+      ctx.moveTo(rotationCenter.x, rotationCenter.y - 12 / viewZoom);
+      ctx.lineTo(rotationCenter.x, rotationCenter.y + 12 / viewZoom);
+      ctx.stroke();
+
+      // Draw outer circle
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(rotationCenter.x, rotationCenter.y, 8 / viewZoom, 0, 2 * Math.PI);
+      ctx.stroke();
+
+      // Draw solid center dot
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.arc(rotationCenter.x, rotationCenter.y, 3 / viewZoom, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Text label "DÖNDÜRME MERKEZİ"
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px sans-serif`;
+      ctx.fillText("🔄 DÖNDÜRME MERKEZİ", rotationCenter.x + 12 / viewZoom, rotationCenter.y - 12 / viewZoom);
+      ctx.restore();
+    }
+
     ctx.restore();
   };
 
@@ -3523,6 +3600,13 @@ export default function App() {
       setCustomAnchor({ x, y });
       setAnchorSelectMode(false);
       logCommandResponse(`Referans Noktası Belirlendi: (X: ${x.toFixed(1)} mm, Y: ${y.toFixed(1)} mm).`);
+      return;
+    }
+
+    if (rotationCenterSelectMode) {
+      setRotationCenter({ x, y });
+      setRotationCenterSelectMode(false);
+      logCommandResponse(`Döndürme merkez noktası seçildi: (X: ${x.toFixed(1)} mm, Y: ${y.toFixed(1)} mm).`);
       return;
     }
 
@@ -5980,37 +6064,105 @@ export default function App() {
                   </span>
                   <span className="text-[9px] text-zinc-500 font-mono">Derece (°)</span>
                 </div>
-                {/* Degree Presets */}
-                <div className="grid grid-cols-5 gap-1">
-                  {[-90, -45, 45, 90, 180].map((deg) => (
+
+                {/* Pivot (Rotation Center) controls */}
+                <div className="space-y-1">
+                  <span className="text-[9px] text-zinc-400 font-bold font-mono uppercase block text-left">📍 Dönme Merkezi</span>
+                  {rotationCenter ? (
+                    <div className="flex items-center justify-between bg-amber-950/20 border border-amber-500/30 px-2 py-1 rounded text-[10px] font-mono text-amber-300">
+                      <span>X: {rotationCenter.x.toFixed(1)} / Y: {rotationCenter.y.toFixed(1)} mm</span>
+                      <button
+                        onClick={() => {
+                          setRotationCenter(null);
+                          logCommandResponse("Döndürme merkez noktası temizlendi (seçim ortasından devam edecek).");
+                        }}
+                        className="text-[9px] text-rose-400 hover:text-rose-300 px-1 rounded bg-rose-950/45 border border-rose-900/40 cursor-pointer"
+                      >
+                        Temizle
+                      </button>
+                    </div>
+                  ) : (
                     <button
-                      key={deg}
-                      onClick={() => requestRotateAngle(deg)}
-                      className="py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-850 rounded text-[9px] font-bold font-mono text-zinc-400 hover:text-white transition cursor-pointer"
+                      onClick={() => {
+                        setRotationCenterSelectMode(true);
+                        logCommandResponse("Döndürme Eksen Noktası Seçin: Lütfen döndürme merkez noktasını belirlemek için 2D ekran üzerinde bir noktaya tıklayın.");
+                      }}
+                      className={`w-full py-1 rounded text-[9px] font-mono font-bold border transition cursor-pointer text-center ${
+                        rotationCenterSelectMode
+                          ? 'bg-amber-600/30 border-amber-500 text-amber-200 animate-pulse'
+                          : 'bg-zinc-900 hover:bg-zinc-850 border-zinc-800 text-zinc-400 hover:text-white'
+                      }`}
                     >
-                      {deg > 0 ? `+${deg}` : deg}°
+                      {rotationCenterSelectMode ? '📍 Ekrana Tıkla...' : '📍 Merkez Noktası Belirle'}
                     </button>
-                  ))}
+                  )}
                 </div>
-                {/* Arbitrary rotation input */}
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    value={cadRotateAngle}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      setCadRotateAngle(isNaN(val) ? 0 : val);
-                    }}
-                    placeholder="45"
-                    className="w-16 bg-zinc-900 border border-zinc-800 rounded text-center text-xs text-white font-mono outline-none focus:border-amber-500"
-                  />
-                  <button
-                    onClick={() => requestRotateAngle(cadRotateAngle)}
-                    className="flex-1 py-1 bg-amber-600/20 hover:bg-amber-600 border border-amber-500 rounded text-[10px] font-bold font-mono text-amber-300 hover:text-white transition cursor-pointer"
-                  >
-                    Özel Açıyla Döndür
-                  </button>
+
+                {/* Dynamic & Precise Stepper Controls */}
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[9px] text-zinc-400 font-bold font-mono uppercase block text-left">⚡ Hassas Döndürme Adımı</span>
+                  <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                    {/* CCW Rotate Arrow Button */}
+                    <button
+                      onClick={() => applyRelativeRotation(-cadRotateAngle)}
+                      className="p-1 px-2 pb-1.5 bg-zinc-900 border border-zinc-850 rounded text-amber-500 hover:text-amber-400 hover:bg-zinc-800 font-black text-xs transition cursor-pointer shrink-0"
+                      title={`Saat yönünün tersine -${cadRotateAngle}° döndür`}
+                    >
+                      ◀
+                    </button>
+                    
+                    {/* Editable custom step in degrees */}
+                    <div className="flex-1 flex items-center justify-center gap-1 bg-zinc-900 border border-zinc-855 px-2 rounded">
+                      <input
+                        type="number"
+                        value={cadRotateAngle}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setCadRotateAngle(isNaN(val) ? 0 : val);
+                        }}
+                        placeholder="5"
+                        className="w-full bg-transparent text-center text-xs text-zinc-100 font-mono outline-none border-none py-1"
+                        title="Döndürme adım açısını girin"
+                      />
+                      <span className="text-[10px] text-zinc-500 font-mono leading-none">°</span>
+                    </div>
+
+                    {/* CW Rotate Arrow Button */}
+                    <button
+                      onClick={() => applyRelativeRotation(cadRotateAngle)}
+                      className="p-1 px-2 pb-1.5 bg-zinc-900 border border-zinc-850 rounded text-amber-500 hover:text-amber-400 hover:bg-zinc-800 font-black text-xs transition cursor-pointer shrink-0"
+                      title={`Saat yönünde +${cadRotateAngle}° döndür`}
+                    >
+                      ▶
+                    </button>
+                  </div>
+
+                  {/* Quick Precisions Stepper Presets */}
+                  <div className="grid grid-cols-4 gap-1">
+                    {[1, 5, 15, 45].map((step) => (
+                      <button
+                        key={step}
+                        onClick={() => setCadRotateAngle(step)}
+                        className={`py-1 rounded text-[8px] font-mono transition cursor-pointer text-center border ${
+                          cadRotateAngle === step
+                            ? 'bg-amber-600/20 border-amber-500 text-amber-300 font-bold'
+                            : 'bg-zinc-900/40 border-zinc-850 text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {step}° Adım
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {/* Legacy absolute rotate prompt as alternative fallback */}
+                <button
+                  onClick={() => requestRotateAngle(cadRotateAngle)}
+                  className="w-full py-1 bg-amber-600/10 hover:bg-amber-600 border border-amber-500/40 rounded text-[9px] font-bold font-mono text-amber-400 hover:text-white transition cursor-pointer uppercase mt-1"
+                  title="Klasik yöntemle tek seferlik döndürür (ekrandan tıkla-döndür)"
+                >
+                  Klasik Açılı Döndür (Tek Sefer)
+                </button>
               </div>
 
               {/* Row 4: Scaling Engine */}
@@ -6535,6 +6687,36 @@ export default function App() {
                     onClick={() => {
                       setPendingRotateAngle(null);
                       logCommandResponse("Döndürme işlemi iptal edildi.");
+                    }}
+                    className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-[10px] font-mono font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer uppercase text-center"
+                  >
+                    İptal (ESC)
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Dynamic Rotation Center Selection Banner Overlay */}
+            {rotationCenterSelectMode && (
+              <div className="absolute top-14 left-3 right-3 z-30 bg-zinc-900/95 border-2 border-amber-500/80 backdrop-blur rounded-lg p-3 shadow-xl flex items-center justify-between gap-3 text-left animate-pulse">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-1 px-2 rounded font-bold font-mono text-[10px] bg-amber-600/30 text-amber-200 uppercase shrink-0">
+                    🔄 DÖNDÜRME MERKEZİ SEÇİN
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-zinc-200 block">
+                      Döndürme Merkez Noktası Belirleme
+                    </span>
+                    <span className="text-[10px] text-zinc-400 block">
+                      Döndürme merkezi (pivot) yapmak istediğiniz bir noktaya tıklayın. Bu nokta etrafındaki döndürme adımlarıyla çizimi hassaslaştırabilirsiniz.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      setRotationCenterSelectMode(false);
+                      logCommandResponse("Döndürme merkezi seçimi iptal edildi.");
                     }}
                     className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-[10px] font-mono font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer uppercase text-center"
                   >
