@@ -510,6 +510,7 @@ export default function App() {
   const [chamferDistance, setChamferDistance] = useState<number>(20);
   const [offsetDistance, setOffsetDistance] = useState<number>(15);
   const [cadRotateAngle, setCadRotateAngle] = useState<number>(45);
+  const [pendingRotateAngle, setPendingRotateAngle] = useState<number | null>(null);
   const [cadScaleFactor, setCadScaleFactor] = useState<number>(1.2);
   const [aiRefinePrompt, setAiRefinePrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -1462,7 +1463,7 @@ export default function App() {
     return closestSeg;
   };
 
-  const applyCadEditRotate = (angleInput: number) => {
+  const applyCadEditRotate = (angleInput: number, explicitCenter?: Point) => {
     saveState();
     let modified = false;
     const rad = (angleInput * Math.PI) / 180;
@@ -1470,7 +1471,7 @@ export default function App() {
     const sinVal = Math.sin(rad);
 
     const rotatePoints = (points: Point[]): Point[] => {
-      const center = customAnchor ? customAnchor : getSelectedCenter(points);
+      const center = explicitCenter || (customAnchor ? customAnchor : getSelectedCenter(points));
       return points.map((p) => {
         const dx = p.x - center.x;
         const dy = p.y - center.y;
@@ -1521,10 +1522,24 @@ export default function App() {
     }
 
     if (modified) {
-      logCommandResponse(`Döndürüldü: ${angleInput}° Derece Döndürme Tamamlandı.`);
+      if (explicitCenter) {
+        logCommandResponse(`Döndürüldü: Obje(ler) (X: ${explicitCenter.x.toFixed(1)}, Y: ${explicitCenter.y.toFixed(1)}) merkezi etrafında ${angleInput}° döndürüldü.`);
+      } else {
+        logCommandResponse(`Döndürüldü: ${angleInput}° Derece Döndürme Tamamlandı.`);
+      }
     } else {
       logCommandResponse("Döndürülecek seçili çizgi veya poligon bulunamadı.");
     }
+  };
+
+  const requestRotateAngle = (angle: number) => {
+    const hasSelection = (isFinalPointsSelected && finalPoints.length > 0) || (selectedPathIndices.length > 0 && activeLayer.paths && activeLayer.paths.some((_, idx) => selectedPathIndices.includes(idx)));
+    if (!hasSelection) {
+      logCommandResponse("Hata: Lütfen döndürme işlemi yapmadan önce döndürmek istediğiniz nesneleri (şekilleri) seçin.");
+      return;
+    }
+    setPendingRotateAngle(angle);
+    logCommandResponse("Döndürme Eksen Noktası Seçin: Lütfen döndürme merkez noktasını belirlemek için 2D ekran üzerinde bir noktaya tıklayın.");
   };
 
   const applyCadEditScale = (factorInput: number) => {
@@ -1651,6 +1666,9 @@ export default function App() {
           }
           setActiveSegmentMove(null);
           logCommandResponse('Şekil taşıma (Move) iptal edildi.');
+        } else if (pendingRotateAngle !== null) {
+          setPendingRotateAngle(null);
+          logCommandResponse('Döndürme işlemi iptal edildi.');
         } else if (segmentChoicePending) {
           setSegmentChoicePending(null);
           logCommandResponse('Seçim kutusu kapatıldı.');
@@ -1672,7 +1690,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [finalPoints, isClosed, historyStack, layers, activeLayerId, activeSegmentStretch, activeSegmentMove, segmentChoicePending, selectedPathIndices, isFinalPointsSelected, copiedPaths, copiedFinalPoints, hoverCoords]);
+  }, [finalPoints, isClosed, historyStack, layers, activeLayerId, activeSegmentStretch, activeSegmentMove, segmentChoicePending, selectedPathIndices, isFinalPointsSelected, copiedPaths, copiedFinalPoints, hoverCoords, pendingRotateAngle]);
 
   // Global mouseup event listener to ensure panning or dragging never lock/stick
   useEffect(() => {
@@ -3485,6 +3503,12 @@ export default function App() {
     }
 
     let { x, y } = tempPoint ? tempPoint : getVirtualCoords(e.clientX, e.clientY);
+
+    if (pendingRotateAngle !== null) {
+      applyCadEditRotate(pendingRotateAngle, { x, y });
+      setPendingRotateAngle(null);
+      return;
+    }
 
     if (activeSegmentStretch || activeSegmentMove) {
       setActiveSegmentStretch(null);
@@ -5961,7 +5985,7 @@ export default function App() {
                   {[-90, -45, 45, 90, 180].map((deg) => (
                     <button
                       key={deg}
-                      onClick={() => applyCadEditRotate(deg)}
+                      onClick={() => requestRotateAngle(deg)}
                       className="py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-850 rounded text-[9px] font-bold font-mono text-zinc-400 hover:text-white transition cursor-pointer"
                     >
                       {deg > 0 ? `+${deg}` : deg}°
@@ -5981,7 +6005,7 @@ export default function App() {
                     className="w-16 bg-zinc-900 border border-zinc-800 rounded text-center text-xs text-white font-mono outline-none focus:border-amber-500"
                   />
                   <button
-                    onClick={() => applyCadEditRotate(cadRotateAngle)}
+                    onClick={() => requestRotateAngle(cadRotateAngle)}
                     className="flex-1 py-1 bg-amber-600/20 hover:bg-amber-600 border border-amber-500 rounded text-[10px] font-bold font-mono text-amber-300 hover:text-white transition cursor-pointer"
                   >
                     Özel Açıyla Döndür
@@ -6485,6 +6509,36 @@ export default function App() {
                     className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-[10px] font-mono font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer uppercase text-center"
                   >
                     Vazgeç
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Pending Rotation Point Input Banner Overlay */}
+            {pendingRotateAngle !== null && (
+              <div className="absolute top-14 left-3 right-3 z-30 bg-zinc-900/95 border-2 border-amber-500/80 backdrop-blur rounded-lg p-3 shadow-xl flex items-center justify-between gap-3 text-left animate-pulse">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-1 px-2 rounded font-bold font-mono text-[10px] bg-amber-600/30 text-amber-200 uppercase shrink-0">
+                    🔄 DÖNDÜRME NOKTASI SEÇİN
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-zinc-200 block">
+                      Döndürme {pendingRotateAngle}° derece olarak uygulanacak.
+                    </span>
+                    <span className="text-[10px] text-zinc-400 block">
+                      Döndürme merkez noktasını belirlemek için lütfen ekran üzerinde bir yere veya bir düğüm noktasına tıklayın. İptal için 'İptal'e tıklayın.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      setPendingRotateAngle(null);
+                      logCommandResponse("Döndürme işlemi iptal edildi.");
+                    }}
+                    className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-[10px] font-mono font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer uppercase text-center"
+                  >
+                    İptal (ESC)
                   </button>
                 </div>
               </div>
