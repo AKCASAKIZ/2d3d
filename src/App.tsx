@@ -974,6 +974,161 @@ export default function App() {
     const shiftX = finalTargetX - targetPt.x;
     const shiftY = finalTargetY - targetPt.y;
 
+    const isEdgeDimension = isP1NearShape && isP2NearShape &&
+      closestP1.type === closestP2.type &&
+      (closestP1.type === 'finalPoints' || closestP1.pathIdx === closestP2.pathIdx);
+
+    if (isEdgeDimension) {
+      let shapePoints: Point[] = [];
+      if (closestP1.type === 'finalPoints') {
+        shapePoints = finalPoints;
+      } else if (activeLayer.paths) {
+        shapePoints = activeLayer.paths[closestP1.pathIdx];
+      }
+
+      const v1 = shapePoints[closestP1.ptIdx];
+      const v2 = shapePoints[closestP2.ptIdx];
+      const polyData = (v1?.polygonData) || (v2?.polygonData);
+      const circleData = (v1?.circleData) || (v2?.circleData);
+
+      const scaleFactor = targetValue / currentDist;
+
+      let polyId = polyData?.id;
+      if (polyId) {
+        const center = polyData.center;
+        const updatePoints = (prev: Point[]) => {
+          return prev.map(pt => {
+            if (pt.polygonData?.id === polyId) {
+              const ncx = center.x + (pt.x - center.x) * scaleFactor;
+              const ncy = center.y + (pt.y - center.y) * scaleFactor;
+              return {
+                ...pt,
+                x: ncx,
+                y: ncy,
+                polygonData: {
+                  ...pt.polygonData,
+                  center: { ...center },
+                  radius: pt.polygonData.radius * scaleFactor
+                }
+              };
+            }
+            return pt;
+          });
+        };
+
+        if (closestP1.type === 'finalPoints') {
+          setFinalPoints(updatePoints);
+        } else {
+          const targetPathIdx = closestP1.pathIdx;
+          setPaths(prev => prev.map((path, idx) => idx === targetPathIdx ? updatePoints(path) : path));
+        }
+        logCommandResponse(`Kenar Boyutlandırma: Çokgen kenarı ${targetValue.toFixed(1)} mm olarak ayarlandı, tüm çokgen orantılı ölçeklendi.`);
+      } else if (circleData) {
+        const center = circleData.center;
+        const updatePoints = (prev: Point[]) => {
+          return prev.map(pt => {
+            if (pt.circleData) {
+              const ncx = center.x + (pt.x - center.x) * scaleFactor;
+              const ncy = center.y + (pt.y - center.y) * scaleFactor;
+              return {
+                ...pt,
+                x: ncx,
+                y: ncy,
+                circleData: {
+                  center: { ...center },
+                  radius: pt.circleData.radius * scaleFactor
+                }
+              };
+            }
+            return pt;
+          });
+        };
+
+        if (closestP1.type === 'finalPoints') {
+          setFinalPoints(updatePoints);
+        } else {
+          const targetPathIdx = closestP1.pathIdx;
+          setPaths(prev => prev.map((path, idx) => idx === targetPathIdx ? updatePoints(path) : path));
+        }
+        logCommandResponse(`Kenar Boyutlandırma: Çember boyutu ${targetValue.toFixed(1)} mm olarak ayarlandı.`);
+      } else {
+        // Generic segment/vector stretch: move only targetPt to finalTargetX, finalTargetY
+        const updateSinglePoint = (prev: Point[]) => {
+          const updated = prev.map((pt, i) => {
+            if (i === closestNodeInfo.ptIdx) {
+              return { ...pt, x: finalTargetX, y: finalTargetY };
+            }
+            return pt;
+          });
+          if (updated.length > 2) {
+            if (closestNodeInfo.ptIdx === 0) {
+              updated[updated.length - 1] = { ...updated[0] };
+            } else if (closestNodeInfo.ptIdx === updated.length - 1) {
+              updated[0] = { ...updated[updated.length - 1] };
+            }
+          }
+          return updated;
+        };
+
+        if (closestP1.type === 'finalPoints') {
+          setFinalPoints(updateSinglePoint);
+        } else {
+          const targetPathIdx = closestP1.pathIdx;
+          setPaths(prev => prev.map((path, idx) => idx === targetPathIdx ? updateSinglePoint(path) : path));
+        }
+        logCommandResponse(`Kenar Boyutlandırma: Çizgi boyutu ${targetValue.toFixed(1)} mm olarak ayarlandı.`);
+      }
+
+      // Update dimensions
+      setDimensions(prev => prev.map(d => {
+        let up1 = { ...d.p1 };
+        let up2 = { ...d.p2 };
+        const dType = d.dimType || 'aligned';
+
+        if (d.id === dimId) {
+          if (movePoint === 'p2') {
+            up2 = { ...p2, x: finalTargetX, y: finalTargetY };
+          } else {
+            up1 = { ...p1, x: finalTargetX, y: finalTargetY };
+          }
+          let newLen = Math.hypot(up2.x - up1.x, up2.y - up1.y);
+          if (dType === 'horizontal') {
+            newLen = Math.abs(up2.x - up1.x);
+          } else if (dType === 'vertical') {
+            newLen = Math.abs(up2.y - up1.y);
+          }
+          return {
+            ...d,
+            p1: up1,
+            p2: up2,
+            value: newLen
+          };
+        } else {
+          if (Math.hypot(d.p1.x - targetPt.x, d.p1.y - targetPt.y) < 1.5) {
+            up1 = { ...d.p1, x: finalTargetX, y: finalTargetY };
+          }
+          if (Math.hypot(d.p2.x - targetPt.x, d.p2.y - targetPt.y) < 1.5) {
+            up2 = { ...d.p2, x: finalTargetX, y: finalTargetY };
+          }
+          let newLen = Math.hypot(up2.x - up1.x, up2.y - up1.y);
+          if (dType === 'horizontal') {
+            newLen = Math.abs(up2.x - up1.x);
+          } else if (dType === 'vertical') {
+            newLen = Math.abs(up2.y - up1.y);
+          }
+          return {
+            ...d,
+            p1: up1,
+            p2: up2,
+            value: newLen
+          };
+        }
+      }));
+
+      setSelectedDimensionId(null);
+      return;
+    }
+
     const shiftedOriginalPoints: Point[] = [];
     if (closestNodeInfo) {
       const node: any = closestNodeInfo;
