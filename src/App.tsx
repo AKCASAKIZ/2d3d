@@ -4920,6 +4920,56 @@ export default function App() {
     return `${mins} dakika`;
   };
 
+  // Check if selected dimension is an edge dimension (for custom edge dimensioning title and hiding positioning selections)
+  let isSelectedDimAnEdge = false;
+  if (selectedDimensionId !== null) {
+    const d = (activeLayer.dimensions || []).find((dim) => dim.id === selectedDimensionId);
+    if (d) {
+      let closestP1: { type: 'finalPoints' | 'paths'; pathIdx: number; ptIdx: number; dist: number } | null = null;
+      let closestP2: { type: 'finalPoints' | 'paths'; pathIdx: number; ptIdx: number; dist: number } | null = null;
+      let minD1 = Infinity;
+      let minD2 = Infinity;
+
+      finalPoints.forEach((pt, ptIdx) => {
+        const d1 = Math.hypot(pt.x - d.p1.x, pt.y - d.p1.y);
+        if (d1 < minD1) {
+          minD1 = d1;
+          closestP1 = { type: 'finalPoints', pathIdx: -1, ptIdx, dist: d1 };
+        }
+        const d2 = Math.hypot(pt.x - d.p2.x, pt.y - d.p2.y);
+        if (d2 < minD2) {
+          minD2 = d2;
+          closestP2 = { type: 'finalPoints', pathIdx: -1, ptIdx, dist: d2 };
+        }
+      });
+
+      if (activeLayer.paths) {
+        activeLayer.paths.forEach((path, pathIdx) => {
+          path.forEach((pt, ptIdx) => {
+            const d1 = Math.hypot(pt.x - d.p1.x, pt.y - d.p1.y);
+            if (d1 < minD1) {
+              minD1 = d1;
+              closestP1 = { type: 'paths', pathIdx, ptIdx, dist: d1 };
+            }
+            const d2 = Math.hypot(pt.x - d.p2.x, pt.y - d.p2.y);
+            if (d2 < minD2) {
+              minD2 = d2;
+              closestP2 = { type: 'paths', pathIdx, ptIdx, dist: d2 };
+            }
+          });
+        });
+      }
+
+      const snapMatchThreshold = 25.0;
+      const isP1Near = closestP1 && (closestP1 as any).dist < snapMatchThreshold;
+      const isP2Near = closestP2 && (closestP2 as any).dist < snapMatchThreshold;
+
+      if (isP1Near && isP2Near && (closestP1 as any).type === (closestP2 as any).type && ((closestP1 as any).type === 'finalPoints' || (closestP1 as any).pathIdx === (closestP2 as any).pathIdx)) {
+        isSelectedDimAnEdge = true;
+      }
+    }
+  }
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100 select-none">
       
@@ -6513,7 +6563,7 @@ export default function App() {
                 <div className="flex justify-between items-center pb-1.5 border-b border-zinc-850">
                   <span className="font-bold text-pink-400 font-mono flex items-center gap-1.5 uppercase tracking-wide text-[10px]">
                     <span className="inline-block w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
-                    📐 Akıllı Konumlandırma
+                    {isSelectedDimAnEdge ? "📐 Kenar Ölçüsü ve Boyutlandırma" : "📐 Akıllı Konumlandırma"}
                   </span>
                   <button 
                     onClick={() => {
@@ -6526,11 +6576,15 @@ export default function App() {
                 </div>
                 <div>
                   <p className="text-[10px] text-zinc-400 mb-2 font-mono leading-relaxed">
-                    Noktalar arası mesafeyi ayarlayarak şekli veya düğüm noktasını konumlandırın.
+                    {isSelectedDimAnEdge 
+                      ? "Seçili kenarın boyutunu girerek şekli orantılı veya orantısız şekilde boyutlandırın." 
+                      : "Noktalar arası mesafeyi ayarlayarak şekli veya düğüm noktasını konumlandırın."}
                   </p>
                   
                   {/* Target Distance Input */}
-                  <label className="block text-[10px] text-zinc-400 font-mono mb-1">Hedef Mesafe:</label>
+                  <label className="block text-[10px] text-zinc-400 font-mono mb-1">
+                    {isSelectedDimAnEdge ? "Yeni Kenar Uzunluğu:" : "Hedef Mesafe:"}
+                  </label>
                   <div className="flex gap-1.5 items-center">
                     <input
                       type="number"
@@ -6549,36 +6603,38 @@ export default function App() {
                       placeholder="Örn: 150"
                       autoFocus
                     />
-                    <span className="text-zinc-400 font-mono font-bold font-bold">mm</span>
+                    <span className="text-zinc-400 font-mono font-bold">mm</span>
                   </div>
                 </div>
 
                 {/* Positioning Options Toggles */}
-                <div className="p-2 bg-zinc-950 border border-zinc-850 rounded space-y-2">
-                  <span className="text-[9px] uppercase font-mono text-zinc-500 block">Konumlandırma Modu:</span>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
-                      <input
-                        type="radio"
-                        name="positioning_mode"
-                        checked={moveEntireShapeOnDimChange}
-                        onChange={() => setMoveEntireShapeOnDimChange(true)}
-                        className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
-                      />
-                      <span>Tüm Şekli Kaydır (Önerilen)</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
-                      <input
-                        type="radio"
-                        name="positioning_mode"
-                        checked={!moveEntireShapeOnDimChange}
-                        onChange={() => setMoveEntireShapeOnDimChange(false)}
-                        className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
-                      />
-                      <span>Sadece Bu Noktayı Taşı</span>
-                    </label>
+                {!isSelectedDimAnEdge && (
+                  <div className="p-2 bg-zinc-950 border border-zinc-850 rounded space-y-2">
+                    <span className="text-[9px] uppercase font-mono text-zinc-500 block">Konumlandırma Modu:</span>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
+                        <input
+                          type="radio"
+                          name="positioning_mode"
+                          checked={moveEntireShapeOnDimChange}
+                          onChange={() => setMoveEntireShapeOnDimChange(true)}
+                          className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
+                        />
+                        <span>Tüm Şekli Kaydır (Önerilen)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
+                        <input
+                          type="radio"
+                          name="positioning_mode"
+                          checked={!moveEntireShapeOnDimChange}
+                          onChange={() => setMoveEntireShapeOnDimChange(false)}
+                          className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
+                        />
+                        <span>Sadece Bu Noktayı Taşı</span>
+                      </label>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Apply Actions */}
                 <div className="flex gap-2 pt-1 border-t border-zinc-800/60">
@@ -6591,7 +6647,7 @@ export default function App() {
                     }}
                     className="flex-1 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded font-bold transition text-center cursor-pointer text-[11px] font-mono"
                   >
-                    Konumlandır (Apply)
+                    {isSelectedDimAnEdge ? "Boyutlandır (Apply)" : "Konumlandır (Apply)"}
                   </button>
                   <button
                     onClick={() => handleDeleteDimension(selectedDimensionId)}
