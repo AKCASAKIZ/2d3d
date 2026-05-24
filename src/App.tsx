@@ -156,9 +156,158 @@ const getAutoDimensionDetails = (
   return { dimType, value, offset };
 };
 
+interface PointAnchor {
+  type: 'finalPoints' | 'path';
+  pathIdx?: number;
+  vertexIdx: number;
+  isCircleCenter?: boolean;
+}
+
+const findAnchorForPointInLayer = (
+  pt: { x: number; y: number },
+  finalPoints: Point[],
+  paths: Point[][]
+): PointAnchor | null => {
+  const tolerance = 4.0; // Snapping anchor tolerance in mm
+  let bestDist = tolerance;
+  let bestAnchor: PointAnchor | null = null;
+
+  // 1. Check finalPoints
+  finalPoints.forEach((v, idx) => {
+    // Check main vertex
+    const d1 = Math.hypot(v.x - pt.x, v.y - pt.y);
+    if (d1 < bestDist) {
+      bestDist = d1;
+      bestAnchor = { type: 'finalPoints', vertexIdx: idx };
+    }
+    // Check circle center
+    if (v.circleData) {
+      const d2 = Math.hypot(v.circleData.center.x - pt.x, v.circleData.center.y - pt.y);
+      if (d2 < bestDist) {
+        bestDist = d2;
+        bestAnchor = { type: 'finalPoints', vertexIdx: idx, isCircleCenter: true };
+      }
+    }
+  });
+
+  // 2. Check paths
+  paths.forEach((path, pathIdx) => {
+    path.forEach((v, idx) => {
+      // Check main vertex
+      const d1 = Math.hypot(v.x - pt.x, v.y - pt.y);
+      if (d1 < bestDist) {
+        bestDist = d1;
+        bestAnchor = { type: 'path', pathIdx, vertexIdx: idx };
+      }
+      // Check circle center
+      if (v.circleData) {
+        const d2 = Math.hypot(v.circleData.center.x - pt.x, v.circleData.center.y - pt.y);
+        if (d2 < bestDist) {
+          bestDist = d2;
+          bestAnchor = { type: 'path', pathIdx, vertexIdx: idx, isCircleCenter: true };
+        }
+      }
+    });
+  });
+
+  return bestAnchor;
+};
+
+const resolveAnchorInLayer = (
+  anchor: PointAnchor,
+  finalPoints: Point[],
+  paths: Point[][]
+): { x: number; y: number } | null => {
+  if (anchor.type === 'finalPoints') {
+    const v = finalPoints[anchor.vertexIdx];
+    if (v) {
+      if (anchor.isCircleCenter && v.circleData) {
+        return { x: v.circleData.center.x, y: v.circleData.center.y };
+      }
+      return { x: v.x, y: v.y };
+    }
+  } else if (anchor.type === 'path' && anchor.pathIdx !== undefined) {
+    const path = paths[anchor.pathIdx];
+    if (path) {
+      const v = path[anchor.vertexIdx];
+      if (v) {
+        if (anchor.isCircleCenter && v.circleData) {
+          return { x: v.circleData.center.x, y: v.circleData.center.y };
+        }
+        return { x: v.x, y: v.y };
+      }
+    }
+  }
+  return null;
+};
+
+const syncLayerDimensions = (layer: CADLayer): CADLayer => {
+  const currentFinalPoints = layer.finalPoints || [];
+  const currentPaths = layer.paths || [];
+  const dims = layer.dimensions || [];
+
+  const updatedDims = dims.map(d => {
+    // 1. If anchor is missing, try to auto-bind it to closest vertex
+    let p1Anchor = (d as any).p1Anchor;
+    if (!p1Anchor) {
+      p1Anchor = findAnchorForPointInLayer(d.p1, currentFinalPoints, currentPaths);
+    }
+    let p2Anchor = (d as any).p2Anchor;
+    if (!p2Anchor) {
+      p2Anchor = findAnchorForPointInLayer(d.p2, currentFinalPoints, currentPaths);
+    }
+
+    const nextP1 = { ...d.p1 };
+    const nextP2 = { ...d.p2 };
+
+    // 2. If anchor is resolved, update position to the new vertex position
+    if (p1Anchor) {
+      const coord = resolveAnchorInLayer(p1Anchor, currentFinalPoints, currentPaths);
+      if (coord) {
+        nextP1.x = coord.x;
+        nextP1.y = coord.y;
+      }
+    }
+    if (p2Anchor) {
+      const coord = resolveAnchorInLayer(p2Anchor, currentFinalPoints, currentPaths);
+      if (coord) {
+        nextP2.x = coord.x;
+        nextP2.y = coord.y;
+      }
+    }
+
+    // 3. Re-calculate value (distance/delta) dynamically based on updated endpoints
+    let nextVal = d.value;
+    if (d.dimType === 'horizontal') {
+      nextVal = Math.abs(nextP2.x - nextP1.x);
+    } else if (d.dimType === 'vertical') {
+      nextVal = Math.abs(nextP2.y - nextP1.y);
+    } else {
+      nextVal = Math.hypot(nextP2.x - nextP1.x, nextP2.y - nextP1.y);
+    }
+
+    return {
+      ...d,
+      p1: nextP1,
+      p2: nextP2,
+      value: nextVal,
+      p1Anchor,
+      p2Anchor
+    };
+  });
+
+  return { ...layer, dimensions: updatedDims };
+};
+
+const syncAllLayersDimensions = (layersList: CADLayer[]): CADLayer[] => {
+  return layersList.map((l) => {
+    return syncLayerDimensions(l);
+  });
+};
+
 export default function App() {
   // Layer state
-  const [layers, setLayers] = useState<CADLayer[]>([
+  const [layers, setLayersRaw] = useState<CADLayer[]>([
     {
       id: 'default',
       name: 'Base Plate',
@@ -194,6 +343,13 @@ export default function App() {
     },
   ]);
   const [activeLayerId, setActiveLayerId] = useState<string>('default');
+
+  const setLayers = (val: CADLayer[] | ((prev: CADLayer[]) => CADLayer[])) => {
+    setLayersRaw((prev) => {
+      const nextLayers = typeof val === 'function' ? val(prev) : val;
+      return syncAllLayersDimensions(nextLayers);
+    });
+  };
 
   const activeLayer = layers.find((l) => l.id === activeLayerId) || layers[0];
   const finalPoints = activeLayer.finalPoints;
