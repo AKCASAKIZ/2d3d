@@ -336,6 +336,8 @@ export default function App() {
   });
   const [customAnchor, setCustomAnchor] = useState<Point | null>(null);
   const [anchorSelectMode, setAnchorSelectMode] = useState(false);
+  const [axisMirrorSelectMode, setAxisMirrorSelectMode] = useState(false);
+  const [mirrorFirstPoint, setMirrorFirstPoint] = useState<Point | null>(null);
   const [editingSegmentIdx, setEditingSegmentIdx] = useState<number | null>(null);
   const [editingPathIdx, setEditingPathIdx] = useState<number | null>(null);
   const [editingDimensionValue, setEditingDimensionValue] = useState<string>("");
@@ -348,6 +350,8 @@ export default function App() {
   const [offsetDistance, setOffsetDistance] = useState<number>(15);
   const [cadRotateAngle, setCadRotateAngle] = useState<number>(45);
   const [cadScaleFactor, setCadScaleFactor] = useState<number>(1.2);
+  const [aiRefinePrompt, setAiRefinePrompt] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   // Active Layer Dimensions accessor helper (fully automated undo-redo integrated!)
   const dimensions = activeLayer.dimensions || [];
@@ -1004,6 +1008,114 @@ export default function App() {
     } else {
       logCommandResponse("Aynalanacak seçili çizgi veya poligon bulunamadı.");
     }
+  };
+
+  const applyCadEditMirrorAcrossLine = (p1: Point, p2: Point) => {
+    saveState();
+    let modified = false;
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 0.0001) {
+      logCommandResponse("Ayna doğrusu sıfır uzunlukta olamaz.");
+      return;
+    }
+
+    const mirrorPoints = (points: Point[]): Point[] => {
+      return points.map((p) => {
+        const t = ((p.x - p1.x) * dx + (p.y - p1.y) * dy) / lenSq;
+        const projX = p1.x + t * dx;
+        const projY = p1.y + t * dy;
+        const newX = 2 * projX - p.x;
+        const newY = 2 * projY - p.y;
+        const u: Point = { ...p, x: newX, y: newY };
+        if (p.circleData) {
+          const cx = p.circleData.center.x;
+          const cy = p.circleData.center.y;
+          const tc = ((cx - p1.x) * dx + (cy - p1.y) * dy) / lenSq;
+          const cProjX = p1.x + tc * dx;
+          const cProjY = p1.y + tc * dy;
+          u.circleData = {
+            center: {
+              x: 2 * cProjX - cx,
+              y: 2 * cProjY - cy
+            },
+            radius: p.circleData.radius
+          };
+        }
+        return u;
+      });
+    };
+
+    if (isFinalPointsSelected && finalPoints.length > 0) {
+      setFinalPoints(mirrorPoints(finalPoints));
+      modified = true;
+    }
+
+    if (selectedPathIndices.length > 0 && activeLayer.paths) {
+      const updatedPaths = [...activeLayer.paths];
+      selectedPathIndices.forEach((idx) => {
+        if (updatedPaths[idx]) {
+          updatedPaths[idx] = mirrorPoints(updatedPaths[idx]);
+        }
+      });
+      setPaths(updatedPaths);
+      modified = true;
+    }
+
+    if (modified) {
+      logCommandResponse("Seçili nesneler belirlenen eksene göre aynalandı.");
+    } else {
+      logCommandResponse("Aynalanacak seçili çizgi veya poligon bulunamadı.");
+    }
+  };
+
+  const findClosestSegment = (pt: Point, currentZoom: number) => {
+    let closestSeg: { p1: Point; p2: Point } | null = null;
+    let minDist = 18 / currentZoom; // Threshold in virtual units
+
+    if (finalPoints.length > 1) {
+      for (let i = 0; i < finalPoints.length - 1; i++) {
+        const p1 = finalPoints[i];
+        const p2 = finalPoints[i + 1];
+        const proj = getClosestPointOnSegment(pt, p1, p2);
+        const d = Math.hypot(proj.x - pt.x, proj.y - pt.y);
+        if (d < minDist) {
+          minDist = d;
+          closestSeg = { p1, p2 };
+        }
+      }
+      if (isClosed && finalPoints.length > 2) {
+        const p1 = finalPoints[finalPoints.length - 1];
+        const p2 = finalPoints[0];
+        const proj = getClosestPointOnSegment(pt, p1, p2);
+        const d = Math.hypot(proj.x - pt.x, proj.y - pt.y);
+        if (d < minDist) {
+          minDist = d;
+          closestSeg = { p1, p2 };
+        }
+      }
+    }
+
+    if (activeLayer.paths) {
+      activeLayer.paths.forEach(path => {
+        if (path.length > 1) {
+          for (let i = 0; i < path.length - 1; i++) {
+            const p1 = path[i];
+            const p2 = path[i + 1];
+            const proj = getClosestPointOnSegment(pt, p1, p2);
+            const d = Math.hypot(proj.x - pt.x, proj.y - pt.y);
+            if (d < minDist) {
+              minDist = d;
+              closestSeg = { p1, p2 };
+            }
+          }
+        }
+      });
+    }
+
+    return closestSeg;
   };
 
   const applyCadEditRotate = (angleInput: number) => {
@@ -2761,6 +2873,49 @@ export default function App() {
       }
     }
 
+    // Render custom axis selection preview
+    if (axisMirrorSelectMode && hoverCoords) {
+      ctx.save();
+      // If we have selected a first point, draw the custom rubberline to hoverCoords
+      if (mirrorFirstPoint) {
+        ctx.strokeStyle = '#f97316'; // Orange-500
+        ctx.lineWidth = 2.0 / viewZoom;
+        ctx.setLineDash([4 / viewZoom, 4 / viewZoom]);
+        ctx.beginPath();
+        ctx.moveTo(mirrorFirstPoint.x, mirrorFirstPoint.y);
+        ctx.lineTo(hoverCoords.x, hoverCoords.y);
+        ctx.stroke();
+
+        // Draw node markers
+        ctx.fillStyle = '#ea580c'; // Orange-600
+        ctx.fillRect(mirrorFirstPoint.x - 5 / viewZoom, mirrorFirstPoint.y - 5 / viewZoom, 10 / viewZoom, 10 / viewZoom);
+        
+        ctx.fillStyle = '#f97316';
+        ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+        ctx.fillText("Ayna Eksen Çizgisi", hoverCoords.x + 12 / viewZoom, hoverCoords.y - 12 / viewZoom);
+      } else {
+        // Find if hovering over a segment
+        const closestSeg = findClosestSegment(hoverCoords, viewZoom);
+        if (closestSeg) {
+          ctx.strokeStyle = '#f97316'; // Orange-500
+          ctx.lineWidth = 4 / viewZoom;
+          ctx.beginPath();
+          ctx.moveTo(closestSeg.p1.x, closestSeg.p1.y);
+          ctx.lineTo(closestSeg.p2.x, closestSeg.p2.y);
+          ctx.stroke();
+
+          ctx.fillStyle = '#f97316';
+          ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+          ctx.fillText("✨ AYNA EKSENİ OLARAK SEÇ", hoverCoords.x + 12 / viewZoom, hoverCoords.y - 12 / viewZoom);
+        } else {
+          ctx.fillStyle = '#f97316';
+          ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+          ctx.fillText("Ayna ekseni belirlemek için bir çizgiye tıklayın veya 2 nokta ile çizin", hoverCoords.x + 12 / viewZoom, hoverCoords.y - 12 / viewZoom);
+        }
+      }
+      ctx.restore();
+    }
+
     // 8. Draw Right-Click Selection Box
     if (rightClickStart && rightClickEnd) {
       const isCrossing = rightClickEnd.x < rightClickStart.x; // RTL is crossing selection
@@ -2856,6 +3011,28 @@ export default function App() {
       setCustomAnchor({ x, y });
       setAnchorSelectMode(false);
       logCommandResponse(`Referans Noktası Belirlendi: (X: ${x.toFixed(1)} mm, Y: ${y.toFixed(1)} mm).`);
+      return;
+    }
+
+    if (axisMirrorSelectMode) {
+      // First check if user clicked close to an existing segment to use as mirror axis
+      const closestSeg = findClosestSegment({ x, y }, viewZoom);
+      if (closestSeg) {
+        // Success! Use the segment's start and end points as the mirror line
+        applyCadEditMirrorAcrossLine(closestSeg.p1, closestSeg.p2);
+        setAxisMirrorSelectMode(false);
+        setMirrorFirstPoint(null);
+        return;
+      }
+
+      if (!mirrorFirstPoint) {
+        setMirrorFirstPoint({ x, y });
+        logCommandResponse(`Ayna ekseninin ilk noktası seçildi: (X: ${x.toFixed(1)} mm, Y: ${y.toFixed(1)} mm). Eksen çizgisini tamamlamak için ikinci bir noktaya tıklayın veya bir çizgi üzerine tıklayarak ekseni belirleyin.`);
+      } else {
+        applyCadEditMirrorAcrossLine(mirrorFirstPoint, { x, y });
+        setAxisMirrorSelectMode(false);
+        setMirrorFirstPoint(null);
+      }
       return;
     }
 
@@ -3848,22 +4025,56 @@ export default function App() {
 
   // DXF export generator
   const exportToDXF = () => {
-    if (finalPoints.length < 2) {
-      logCommandResponse('DXF Export requires at least 1 sketch segment.');
+    // Collect all paths to export:
+    const allPaths: Point[][] = [];
+    if (finalPoints.length > 0) {
+      allPaths.push(finalPoints);
+    }
+    if (activeLayer.paths) {
+      activeLayer.paths.forEach((p) => {
+        if (p.length > 0) {
+          allPaths.push(p);
+        }
+      });
+    }
+
+    if (allPaths.length === 0) {
+      logCommandResponse('DXF Export için çizimde en az bir eleman bulunmalıdır.');
       return;
     }
+
     let dxf = '0\nSECTION\n2\nENTITIES\n';
-    for (let i = 0; i < finalPoints.length - 1; i++) {
-      dxf += `0\nLINE\n8\n0\n10\n${finalPoints[i].x.toFixed(4)}\n20\n${(-finalPoints[i].y).toFixed(4)}\n30\n0.0\n11\n${finalPoints[i + 1].x.toFixed(4)}\n21\n${(-finalPoints[i + 1].y).toFixed(4)}\n31\n0.0\n`;
-    }
+
+    allPaths.forEach((path) => {
+      for (let i = 0; i < path.length; i++) {
+        const pt = path[i];
+
+        // Export circle if circleData is present
+        if (pt.circleData) {
+          dxf += `0\nCIRCLE\n8\n0\n10\n${pt.circleData.center.x.toFixed(4)}\n20\n${(-pt.circleData.center.y).toFixed(4)}\n30\n0.0\n40\n${pt.circleData.radius.toFixed(4)}\n`;
+        }
+
+        // Connect segment line to next point
+        if (i < path.length - 1) {
+          const nextPt = path[i + 1];
+          dxf += `0\nLINE\n8\n0\n10\n${pt.x.toFixed(4)}\n20\n${(-pt.y).toFixed(4)}\n30\n0.0\n11\n${nextPt.x.toFixed(4)}\n21\n${(-nextPt.y).toFixed(4)}\n31\n0.0\n`;
+        } else if (isClosed && path === finalPoints && path.length > 2) {
+          const firstPt = path[0];
+          dxf += `0\nLINE\n8\n0\n10\n${pt.x.toFixed(4)}\n20\n${(-pt.y).toFixed(4)}\n30\n0.0\n11\n${firstPt.x.toFixed(4)}\n21\n${(-firstPt.y).toFixed(4)}\n31\n0.0\n`;
+        }
+      }
+    });
+
     dxf += '0\nENDSEC\n0\nEOF\n';
 
     const blob = new Blob([dxf], { type: 'application/dxf' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = 'ZekiCAD_2D_Profile.dxf';
+    link.download = `ZekiCAD_${activeLayer.name || 'Sketch'}.dxf`;
+    document.body.appendChild(link);
     link.click();
-    logCommandResponse('2D Profile exported to DXF successfully.');
+    document.body.removeChild(link);
+    logCommandResponse('2D Profil başarıyla DXF olarak kaydedildi.');
   };
 
   // Save entire sketch session as JSON
@@ -3922,6 +4133,56 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  const handleAIRedefineSketch = async () => {
+    if (!aiRefinePrompt.trim()) {
+      logCommandResponse("Lütfen bir yapay zeka komutu girin.");
+      return;
+    }
+
+    setAiLoading(true);
+    logCommandResponse("AI Redefine Sketch: Parametrik geometri güncelleniyor, lütfen bekleyin...");
+
+    try {
+      const response = await fetch("/api/redefine-sketch", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          prompt: aiRefinePrompt,
+          currentSketch: {
+            isClosed,
+            finalPoints,
+            paths: activeLayer.paths || []
+          }
+        })
+      });
+
+      const data = await response.json();
+      if (data.success && data.sketch) {
+        saveState();
+        
+        // Safely map the returned structures
+        setIsClosed(!!data.sketch.isClosed);
+        if (Array.isArray(data.sketch.finalPoints)) {
+          setFinalPoints(data.sketch.finalPoints);
+        }
+        if (Array.isArray(data.sketch.paths)) {
+          setPaths(data.sketch.paths);
+        }
+
+        logCommandResponse("✨ AI Redefine Sketch: Geometri yapay zeka ile başarıyla yeniden şekillendirildi.");
+        setAiRefinePrompt("");
+      } else {
+        logCommandResponse(`AI Redefine Sketch Hatası: ${data.error || "Beklenmeyen yanıt formatı"}`);
+      }
+    } catch (err: any) {
+      logCommandResponse(`AI Redefine Sketch Hatası: ${err.message || err}`);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100 select-none">
       
@@ -3972,6 +4233,39 @@ export default function App() {
               className="hidden"
             />
           </label>
+        </div>
+
+        {/* CENTERED SPECIAL AI REDEFINE GEOMETRY BOX */}
+        <div className="flex items-center gap-1.5 px-3 py-1 bg-zinc-950 border border-amber-500/40 rounded-full font-sans shadow-lg shadow-amber-950/20 shrink-0 select-none">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+          <span className="text-[10px] uppercase font-mono text-amber-400 font-extrabold pb-0.5">AI Redefine:</span>
+          <input
+            type="text"
+            value={aiRefinePrompt}
+            onChange={(e) => setAiRefinePrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAIRedefineSketch();
+            }}
+            placeholder="E.g., 'Make a 40mm circle at center' or 'round the corners'"
+            className="w-80 bg-zinc-900 border border-zinc-800 placeholder-zinc-500 text-xs px-3 py-1 text-zinc-100 rounded-full focus:outline-none focus:border-amber-500/80 transition font-mono"
+            disabled={aiLoading}
+          />
+          <button
+            onClick={handleAIRedefineSketch}
+            disabled={aiLoading || !aiRefinePrompt.trim()}
+            className={`px-3 py-1 font-mono font-bold text-[10px] rounded-full transition cursor-pointer flex items-center gap-1 ${
+              aiLoading || !aiRefinePrompt.trim()
+                ? 'bg-zinc-800 border border-zinc-700 text-zinc-500 cursor-not-allowed'
+                : 'bg-gradient-to-r from-amber-500 to-yellow-600 text-zinc-950 hover:from-amber-400 hover:to-yellow-500 font-extrabold border border-amber-400'
+            }`}
+          >
+            {aiLoading ? (
+              <span className="w-2.5 h-2.5 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Flame className="w-2.5 h-2.5" />
+            )}
+            <span>{aiLoading ? "Uygulanıyor..." : "Uygula"}</span>
+          </button>
         </div>
 
         {/* Draw Tools */}
@@ -4847,6 +5141,21 @@ export default function App() {
                     title="Düşey eksene göre simetriğini alır"
                   >
                     ↕ Dikey Aynala
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAxisMirrorSelectMode(!axisMirrorSelectMode);
+                      setMirrorFirstPoint(null);
+                      logCommandResponse(axisMirrorSelectMode ? "Ayna ekseni seçimi iptal edildi." : "Eksen seçerek aynalama aktif. Orijinal çizgilerden birine tıklayarak onu ayna ekseni yapabilir, ya da boşlukta 2 noktaya tıklayarak yeni bir eksen oluşturabilirsiniz.");
+                    }}
+                    className={`col-span-2 py-1.5 border rounded font-mono text-[9px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                      axisMirrorSelectMode 
+                        ? 'bg-amber-600/30 border-amber-500 text-amber-200 animate-pulse' 
+                        : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-850'
+                    }`}
+                    title="Çizimden bir referans çizgiyi ayna ekseni olarak seçer veya serbest eksen çizer"
+                  >
+                    ✨ {axisMirrorSelectMode ? "Eksen Seçiliyor..." : "🪄 Eksen Seçerek Aynala"}
                   </button>
                 </div>
               </div>
