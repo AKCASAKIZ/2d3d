@@ -7,6 +7,14 @@ export interface Point {
     center: { x: number; y: number };
     radius: number;
   };
+  polygonData?: {
+    id: string;
+    center: { x: number; y: number };
+    radius: number;
+    initialAngle: number;
+    sides: number;
+    vertexIndex: number;
+  };
 }
 
 export type SnapType = 'end' | 'mid' | 'int' | 'origin' | 'grid' | 'anchor' | 'quad' | 'tan';
