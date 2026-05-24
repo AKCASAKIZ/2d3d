@@ -33,6 +33,7 @@ import {
   FlipHorizontal,
   Scissors,
   Clipboard,
+  Sliders,
 } from 'lucide-react';
 
 import { Point, CommandType, DrawModeType, HistoryItem, SnapPoint, TrackLine, CADLayer, PathSettings, SnapToggles } from './types';
@@ -508,6 +509,7 @@ export default function App() {
   const [cadScaleFactor, setCadScaleFactor] = useState<number>(1.2);
   const [aiRefinePrompt, setAiRefinePrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [infill, setInfill] = useState<number>(20);
 
   // Active Layer Dimensions accessor helper (fully automated undo-redo integrated!)
   const dimensions = activeLayer.dimensions || [];
@@ -4339,6 +4341,150 @@ export default function App() {
     }
   };
 
+  // 3D Volume & Time Estimation helpers
+  const getPolygonArea = (poly: Point[]): number => {
+    if (poly.length < 3) return 0;
+    let area = 0;
+    for (let i = 0; i < poly.length; i++) {
+      const p1 = poly[i];
+      const p2 = poly[(i + 1) % poly.length];
+      area += p1.x * p2.y - p2.x * p1.y;
+    }
+    return Math.abs(area / 2);
+  };
+
+  const isPointInPolygon = (pt: { x: number; y: number }, poly: Point[]): boolean => {
+    if (poly.length < 3) return false;
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      
+      const intersect = ((yi > pt.y) !== (yj > pt.y))
+          && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi || 1) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  };
+
+  const getPointsCentroid = (pts: Point[]) => {
+    const circlePt = pts.find(p => p.circleData);
+    if (circlePt && circlePt.circleData) {
+      return circlePt.circleData.center;
+    }
+    let sx = 0, sy = 0;
+    pts.forEach(p => { sx += p.x; sy += p.y; });
+    return { x: sx / (pts.length || 1), y: sy / (pts.length || 1) };
+  };
+
+  const getPointsArea = (pts: Point[]): number => {
+    const circlePt = pts.find(p => p.circleData);
+    if (circlePt && circlePt.circleData) {
+      return Math.PI * circlePt.circleData.radius * circlePt.circleData.radius;
+    }
+    return getPolygonArea(pts);
+  };
+
+  const calculateActiveLayerVolume = (): number => {
+    const loops: Point[][] = [];
+    if (finalPoints.length >= 3 && isClosed) {
+      loops.push(finalPoints);
+    }
+    if (activeLayer.paths) {
+      activeLayer.paths.forEach(p => {
+        if (p.length >= 3 || p.some(pt => pt.circleData)) {
+          loops.push(p);
+        }
+      });
+    }
+
+    if (loops.length === 0) return 0;
+
+    const sortedLoops = loops
+      .map(points => ({
+        points,
+        area: getPointsArea(points),
+        center: getPointsCentroid(points)
+      }))
+      .sort((a, b) => b.area - a.area);
+
+    const unions: { outer: any; holes: any[] }[] = [];
+    sortedLoops.forEach((loop) => {
+      let nestedIndex = -1;
+      for (let i = 0; i < unions.length; i++) {
+        if (isPointInPolygon(loop.center, unions[i].outer.points)) {
+          nestedIndex = i;
+          break;
+        }
+      }
+      if (nestedIndex !== -1) {
+        unions[nestedIndex].holes.push(loop);
+      } else {
+        unions.push({ outer: loop, holes: [] });
+      }
+    });
+
+    let totalVolume = 0;
+
+    unions.forEach(({ outer, holes }) => {
+      const activeArea = Math.max(0, outer.area - holes.reduce((acc, h) => acc + h.area, 0));
+      if (opType === 'extrude') {
+        totalVolume += activeArea * depth;
+      } else if (opType === 'revolve') {
+        let minX = Infinity;
+        let maxX = -Infinity;
+        outer.points.forEach((p: Point) => {
+          if (p.circleData) {
+            minX = Math.min(minX, p.circleData.center.x - p.circleData.radius);
+            maxX = Math.max(maxX, p.circleData.center.x + p.circleData.radius);
+          } else {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+          }
+        });
+        const lCx = (minX + maxX) / 2;
+
+        const centroid = outer.center;
+        let R = 0;
+        if (revolveAxis === 'left') {
+          R = Math.abs(centroid.x - minX);
+        } else if (revolveAxis === 'right') {
+          R = Math.abs(maxX - centroid.x);
+        } else if (revolveAxis === 'origin-y') {
+          R = Math.abs(centroid.x);
+        } else if (revolveAxis === 'origin-x') {
+          R = Math.abs(centroid.y);
+        } else {
+          R = Math.abs(centroid.x - lCx);
+        }
+        R = Math.max(R, 1.0);
+        totalVolume += 2 * Math.PI * R * activeArea;
+      }
+    });
+
+    return totalVolume;
+  };
+
+  const volumeMm3 = calculateActiveLayerVolume();
+  const volumeCm3 = volumeMm3 / 1000;
+  
+  // Weight estimation with typical PLA density = 1.24 g/cm3 and infill shell offset
+  const solidFraction = 0.18 + 0.82 * (infill / 100);
+  const estimatedWeightG = volumeCm3 * 1.24 * solidFraction;
+
+  // Print speed simulation: volumetric print speed approx 12mm3/s on standard slicers, infilled at standard 80mm/s.
+  const estimatedMinutes = volumeCm3 > 0 ? (volumeCm3 * (4.2 + 6.8 * (infill / 100))) : 0;
+
+  const formatPrintTime = (totalMinutes: number): string => {
+    if (totalMinutes <= 0) return '0 dk';
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = Math.round(totalMinutes % 60);
+    if (hours > 0) {
+      return `${hours} saat ${mins} dakika`;
+    }
+    return `${mins} dakika`;
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100 select-none">
       
@@ -5608,7 +5754,7 @@ export default function App() {
               5. 3D Model & Export
             </h2>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div>
                 <label className="block text-[10px] font-mono text-zinc-500 mb-1">Process Type:</label>
                 <select
@@ -5657,6 +5803,110 @@ export default function App() {
                   </select>
                 </div>
               )}
+
+              {/* Infill (Doluluk) Settings & Presets */}
+              <div className="border-t border-zinc-850 pt-2 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-mono text-zinc-400 uppercase font-bold flex items-center gap-1">
+                    <Sliders className="w-3 h-3 text-amber-500" />
+                    Baskı Doluluk Oranı:
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={infill}
+                      onChange={(e) => setInfill(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                      className="w-12 bg-zinc-900 border border-zinc-800 text-center text-xs py-0.5 rounded font-mono text-amber-400 font-bold outline-none focus:border-amber-500"
+                    />
+                    <span className="text-[10px] font-mono text-zinc-500">%</span>
+                  </div>
+                </div>
+
+                {/* Range Slider for quick drag control */}
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={infill}
+                  onChange={(e) => setInfill(parseInt(e.target.value))}
+                  className="w-full h-1.5 bg-zinc-900 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                />
+
+                {/* Preset Fast Selection Tabs */}
+                <div className="grid grid-cols-4 gap-1">
+                  {[
+                    { val: 10, label: '%10', title: 'Görsel Mac.' },
+                    { val: 20, label: '%20', title: 'Standart' },
+                    { val: 40, label: '%40', title: 'Fonksiyon.' },
+                    { val: 75, label: '%75', title: 'Güçlü' }
+                  ].map((pres, pIdx) => (
+                    <button
+                      key={pIdx}
+                      onClick={() => setInfill(pres.val)}
+                      className={`py-1 rounded font-mono text-[9px] text-center border transition-all cursor-pointer ${
+                        infill === pres.val
+                          ? 'bg-amber-500/10 border-amber-500/70 text-amber-400 font-extrabold'
+                          : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
+                      }`}
+                      title={pres.title}
+                    >
+                      {pres.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Dinamik Doluluk Açıklama Kutusu */}
+                <div className="bg-amber-950/20 border border-amber-500/20 rounded p-2 text-[10px] text-amber-400/90 leading-relaxed active-status">
+                  {infill <= 15 ? (
+                    <p>
+                      <strong className="text-amber-300">%0 - %15 Doluluk:</strong> Sadece görsel amaçlı maketler, figürler ve vitrin modelleri için kullanılır. Minimum malzeme tüketir ve en hızlı sürede basılır.
+                    </p>
+                  ) : infill <= 30 ? (
+                    <p>
+                      <strong className="text-amber-300">%15 - %30 Doluluk:</strong> Günlük kullanımdaki biblolar, basit kutular, telefon standları gibi parçalar için en çok tercih edilen <strong className="text-amber-300">"ideal standart"</strong> aralıktır.
+                    </p>
+                  ) : infill <= 50 ? (
+                    <p>
+                      <strong className="text-amber-300">%30 - %50 Doluluk:</strong> Az da olsa yük taşıyacak, mekanik veya fonksiyonel parçalar (örneğin ufak aparatlar ve braketler) için idealdir.
+                    </p>
+                  ) : (
+                    <p>
+                      <strong className="text-amber-300">%50 ve Üzeri Doluluk:</strong> Ciddi ağırlık ve basınca maruz kalacak ağır hizmet parçaları için tercih edilir.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* 3D Print Metrics & Estimates Desk */}
+              <div className="border-t border-zinc-850 pt-2 space-y-1.5 font-mono text-[10px] text-zinc-400">
+                <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-wide text-zinc-500 pb-1 font-bold">
+                  <span>3D Baskı Tahminleri</span>
+                  <span className="text-[9px] px-1 bg-zinc-900 rounded text-zinc-400 uppercase text-[8px]">Hızlı Hesap</span>
+                </div>
+                
+                <div className="flex justify-between bg-zinc-900/40 p-1.5 rounded border border-zinc-900/65 items-center">
+                  <span>Toplam Katı Hacmi:</span>
+                  <span className="text-zinc-200 font-bold">
+                    {volumeCm3 > 0 ? `${volumeCm3.toFixed(2)} cm³ (${volumeMm3.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} mm³)` : '0.00 cm³'}
+                  </span>
+                </div>
+
+                <div className="flex justify-between bg-zinc-900/40 p-1.5 rounded border border-zinc-900/65 items-center">
+                  <span>Filament Ağırlığı:</span>
+                  <span className="text-emerald-400 font-extrabold">
+                    {volumeCm3 > 0 ? `${estimatedWeightG.toFixed(1)} gram (PLA)` : '0.0 gram'}
+                  </span>
+                </div>
+
+                <div className="flex justify-between bg-zinc-900/40 p-1.5 rounded border border-zinc-900/65 items-center">
+                  <span>Tahmini Baskı Süresi:</span>
+                  <span className="text-blue-400 font-extrabold flex items-center gap-1">
+                    <Flame className="w-2.5 h-2.5 animate-pulse text-amber-500" />
+                    {formatPrintTime(estimatedMinutes)}
+                  </span>
+                </div>
+              </div>
+
             </div>
 
             <div className="grid grid-cols-2 gap-2 pt-2">
