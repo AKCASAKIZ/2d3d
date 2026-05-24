@@ -2523,47 +2523,46 @@ export default function App() {
     };
 
     // 7.5 Draw Placed and Preview Dimension Annotations
-    if (showDims) {
-      // Draw already placed dimensions for current active layer
-      dimensions.forEach(d => {
-        const isHighlighted = selectedDimensionId === d.id;
-        drawCustomDimension(d.p1, d.p2, d.offset, isHighlighted);
-      });
+    // Always show custom dimensions (her durumda gözüksün), independent of showDims checkbox
+    // Draw already placed dimensions for current active layer
+    dimensions.forEach(d => {
+      const isHighlighted = selectedDimensionId === d.id;
+      drawCustomDimension(d.p1, d.p2, d.offset, isHighlighted);
+    });
 
-      // Draw active interactive preview if user is inserting a dimension
-      if (currentCommand === 'dimension' && hoverCoords) {
-        if (clickCount === 1 && dimP1) {
-          // Draw dashed indicator from dimP1 to hoverCoords
-          ctx.save();
-          ctx.strokeStyle = '#f472b6';
-          ctx.lineWidth = 1.5 / viewZoom;
-          ctx.setLineDash([4 / viewZoom, 4 / viewZoom]);
-          ctx.beginPath();
-          ctx.moveTo(dimP1.x, dimP1.y);
-          ctx.lineTo(hoverCoords.x, hoverCoords.y);
-          ctx.stroke();
-          ctx.restore();
+    // Draw active interactive preview if user is inserting a dimension
+    if (currentCommand === 'dimension' && hoverCoords) {
+      if (clickCount === 1 && dimP1) {
+        // Draw dashed indicator from dimP1 to hoverCoords
+        ctx.save();
+        ctx.strokeStyle = '#f472b6';
+        ctx.lineWidth = 1.5 / viewZoom;
+        ctx.setLineDash([4 / viewZoom, 4 / viewZoom]);
+        ctx.beginPath();
+        ctx.moveTo(dimP1.x, dimP1.y);
+        ctx.lineTo(hoverCoords.x, hoverCoords.y);
+        ctx.stroke();
+        ctx.restore();
 
-          // Draw node markers
-          ctx.fillStyle = '#ec4899';
-          ctx.fillRect(dimP1.x - 4/viewZoom, dimP1.y - 4/viewZoom, 8/viewZoom, 8/viewZoom);
+        // Draw node markers
+        ctx.fillStyle = '#ec4899';
+        ctx.fillRect(dimP1.x - 4/viewZoom, dimP1.y - 4/viewZoom, 8/viewZoom, 8/viewZoom);
 
-          // Render length text near hover
-          ctx.fillStyle = '#f472b6';
-          ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
-          const dist = Math.hypot(hoverCoords.x - dimP1.x, hoverCoords.y - dimP1.y);
-          ctx.fillText(`L: ${dist.toFixed(1)} mm`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
-        } else if (clickCount === 2 && dimP1 && dimP2) {
-          // Both points set, previewing offset and placement of dimension line
-          const dx = dimP2.x - dimP1.x;
-          const dy = dimP2.y - dimP1.y;
-          const len = Math.hypot(dx, dy);
-          if (len > 0.001) {
-            const nx = -dy / len;
-            const ny = dx / len;
-            const previewOffset = (hoverCoords.x - dimP1.x) * nx + (hoverCoords.y - dimP1.y) * ny;
-            drawCustomDimension(dimP1, dimP2, previewOffset, true, `📐 ${len.toFixed(1)} mm`);
-          }
+        // Render length text near hover
+        ctx.fillStyle = '#f472b6';
+        ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+        const dist = Math.hypot(hoverCoords.x - dimP1.x, hoverCoords.y - dimP1.y);
+        ctx.fillText(`L: ${dist.toFixed(1)} mm`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
+      } else if (clickCount === 2 && dimP1 && dimP2) {
+        // Both points set, previewing offset and placement of dimension line
+        const dx = dimP2.x - dimP1.x;
+        const dy = dimP2.y - dimP1.y;
+        const len = Math.hypot(dx, dy);
+        if (len > 0.001) {
+          const nx = -dy / len;
+          const ny = dx / len;
+          const previewOffset = (hoverCoords.x - dimP1.x) * nx + (hoverCoords.y - dimP1.y) * ny;
+          drawCustomDimension(dimP1, dimP2, previewOffset, true, `📐 ${len.toFixed(1)} mm`);
         }
       }
     }
