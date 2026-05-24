@@ -502,8 +502,10 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [showDims, setShowDims] = useState(true);
   const [polygonSides, setPolygonSides] = useState(6);
+  const [polygonType, setPolygonType] = useState<'corner' | 'midpoint'>('corner');
   const [showPolygonPrompt, setShowPolygonPrompt] = useState(false);
   const [polygonSidesInput, setPolygonSidesInput] = useState("6");
+  const [polygonTypeInput, setPolygonTypeInput] = useState<'corner' | 'midpoint'>('corner');
   const [filletRadius, setFilletRadius] = useState<number>(24);
   const [chamferDistance, setChamferDistance] = useState<number>(20);
   const [offsetDistance, setOffsetDistance] = useState<number>(15);
@@ -1571,8 +1573,9 @@ export default function App() {
     setSelectedPathIdx(-1);
   };
 
-  const handleStartPolygonDrawing = (sides: number) => {
+  const handleStartPolygonDrawing = (sides: number, drawType: 'corner' | 'midpoint' = 'corner') => {
     setPolygonSides(sides);
+    setPolygonType(drawType);
     setShowPolygonPrompt(false);
 
     saveState();
@@ -1602,13 +1605,14 @@ export default function App() {
     setClickCount(0);
     setTempPoint(null);
     setDrawMode('point'); // switch to geometric point entry
-    logCommandResponse(`Düzgün Çokgen Çizimi: ${sides} kenarlı poligon hazır. İlk tıklamayla merkez noktasını belirleyin, parmağınızı kaydırarak sürükleyip boyutu ayarlayın.`);
+    logCommandResponse(`Düzgün Çokgen Çizimi: ${sides} kenarlı poligon hazır (${drawType === 'corner' ? 'Köşegenden' : 'İç Teğetten'}). İlk tıklamayla merkez noktasını belirleyin, parmağınızı kaydırarak sürükleyip boyutu ayarlayın.`);
   };
 
   const setCommand = (cmd: CommandType) => {
     if (cmd === 'polygon') {
       setShowPolygonPrompt(true);
       setPolygonSidesInput(polygonSides.toString());
+      setPolygonTypeInput(polygonType);
       return;
     }
 
@@ -2015,10 +2019,42 @@ export default function App() {
     if (selectedPathIdx === -1) {
       setFinalPoints(prev => {
         const updated = [...prev];
-        updated[selectedVertexIdx!] = { ...updated[selectedVertexIdx!], x: newX, y: newY };
-        if (isClosed && updated.length > 2) {
-          if (selectedVertexIdx === 0) updated[updated.length - 1] = { ...updated[updated.length - 1], x: newX, y: newY };
-          if (selectedVertexIdx === updated.length - 1) updated[0] = { ...updated[0], x: newX, y: newY };
+        const draggedPt = updated[selectedVertexIdx!];
+        
+        if (draggedPt && draggedPt.polygonData) {
+          const polyId = draggedPt.polygonData.id;
+          const sides = draggedPt.polygonData.sides;
+          const vIndex = draggedPt.polygonData.vertexIndex;
+          const center = draggedPt.polygonData.center;
+
+          const newRadius = Math.hypot(newX - center.x, newY - center.y);
+          const newAngle = Math.atan2(newY - center.y, newX - center.x);
+          const newInitialAngle = newAngle - (vIndex * Math.PI * 2) / sides;
+
+          for (let i = 0; i < updated.length; i++) {
+            if (updated[i].polygonData?.id === polyId) {
+              const currentVIndex = updated[i].polygonData.vertexIndex;
+              const targetAngle = newInitialAngle + (currentVIndex * Math.PI * 2) / sides;
+              updated[i] = {
+                ...updated[i],
+                x: center.x + newRadius * Math.cos(targetAngle),
+                y: center.y + newRadius * Math.sin(targetAngle),
+                polygonData: {
+                  ...updated[i].polygonData,
+                  radius: newRadius,
+                  initialAngle: newInitialAngle
+                }
+              };
+            }
+          }
+          if (selectedVertexIdx === 0) updated[updated.length - 1] = { ...updated[0] };
+          if (selectedVertexIdx === updated.length - 1) updated[0] = { ...updated[updated.length - 1] };
+        } else {
+          updated[selectedVertexIdx!] = { ...updated[selectedVertexIdx!], x: newX, y: newY };
+          if (isClosed && updated.length > 2) {
+            if (selectedVertexIdx === 0) updated[updated.length - 1] = { ...updated[updated.length - 1], x: newX, y: newY };
+            if (selectedVertexIdx === updated.length - 1) updated[0] = { ...updated[0], x: newX, y: newY };
+          }
         }
         return updated;
       });
@@ -2027,13 +2063,45 @@ export default function App() {
         if (l.id === activeLayerId && l.paths) {
           const updatedPaths = [...l.paths];
           const updatedPath = [...updatedPaths[selectedPathIdx]];
-          updatedPath[selectedVertexIdx!] = { ...updatedPath[selectedVertexIdx!], x: newX, y: newY };
-          
-          if (updatedPath.length > 2) {
-            const isClosedLoop = Math.hypot(updatedPath[0].x - updatedPath[updatedPath.length - 1].x, updatedPath[0].y - updatedPath[updatedPath.length - 1].y) < 0.1;
-            if (isClosedLoop) {
-              if (selectedVertexIdx === 0) updatedPath[updatedPath.length - 1] = { ...updatedPath[updatedPath.length - 1], x: newX, y: newY };
-              if (selectedVertexIdx === updatedPath.length - 1) updatedPath[0] = { ...updatedPath[0], x: newX, y: newY };
+          const draggedPt = updatedPath[selectedVertexIdx!];
+
+          if (draggedPt && draggedPt.polygonData) {
+            const polyId = draggedPt.polygonData.id;
+            const sides = draggedPt.polygonData.sides;
+            const vIndex = draggedPt.polygonData.vertexIndex;
+            const center = draggedPt.polygonData.center;
+
+            const newRadius = Math.hypot(newX - center.x, newY - center.y);
+            const newAngle = Math.atan2(newY - center.y, newX - center.x);
+            const newInitialAngle = newAngle - (vIndex * Math.PI * 2) / sides;
+
+            for (let i = 0; i < updatedPath.length; i++) {
+              if (updatedPath[i].polygonData?.id === polyId) {
+                const currentVIndex = updatedPath[i].polygonData.vertexIndex;
+                const targetAngle = newInitialAngle + (currentVIndex * Math.PI * 2) / sides;
+                updatedPath[i] = {
+                  ...updatedPath[i],
+                  x: center.x + newRadius * Math.cos(targetAngle),
+                  y: center.y + newRadius * Math.sin(targetAngle),
+                  polygonData: {
+                    ...updatedPath[i].polygonData,
+                    radius: newRadius,
+                    initialAngle: newInitialAngle
+                  }
+                };
+              }
+            }
+            if (selectedVertexIdx === 0) updatedPath[updatedPath.length - 1] = { ...updatedPath[0] };
+            if (selectedVertexIdx === updatedPath.length - 1) updatedPath[0] = { ...updatedPath[updatedPath.length - 1] };
+          } else {
+            updatedPath[selectedVertexIdx!] = { ...updatedPath[selectedVertexIdx!], x: newX, y: newY };
+            
+            if (updatedPath.length > 2) {
+              const isClosedLoop = Math.hypot(updatedPath[0].x - updatedPath[updatedPath.length - 1].x, updatedPath[0].y - updatedPath[updatedPath.length - 1].y) < 0.1;
+              if (isClosedLoop) {
+                if (selectedVertexIdx === 0) updatedPath[updatedPath.length - 1] = { ...updatedPath[updatedPath.length - 1], x: newX, y: newY };
+                if (selectedVertexIdx === updatedPath.length - 1) updatedPath[0] = { ...updatedPath[0], x: newX, y: newY };
+              }
             }
           }
           updatedPaths[selectedPathIdx] = updatedPath;
@@ -2749,10 +2817,13 @@ export default function App() {
         } else {
           const sides = polygonSides;
           const initialAngle = Math.atan2(tempPoint.y - center.y, tempPoint.x - center.x);
+          const isMidpoint = polygonType === 'midpoint';
+          const drawRadius = isMidpoint ? r / Math.cos(Math.PI / sides) : r;
+          const startAngle = isMidpoint ? initialAngle - Math.PI / sides : initialAngle;
           for (let i = 0; i <= sides; i++) {
-            const angle = initialAngle + (i * Math.PI * 2) / sides;
-            const px = center.x + r * Math.cos(angle);
-            const py = center.y + r * Math.sin(angle);
+            const angle = startAngle + (i * Math.PI * 2) / sides;
+            const px = center.x + drawRadius * Math.cos(angle);
+            const py = center.y + drawRadius * Math.sin(angle);
             if (i === 0) ctx.moveTo(px, py);
             else ctx.lineTo(px, py);
           }
@@ -3366,21 +3437,25 @@ export default function App() {
           const points: Point[] = [];
           const polyId = 'poly_' + Math.random().toString(36).substring(2, 9);
           const initialAngle = currentCommand === 'polygon' ? Math.atan2(y - center.y, x - center.x) : 0;
+          const isMidpoint = currentCommand === 'polygon' && polygonType === 'midpoint';
+          const drawRadius = isMidpoint ? radius / Math.cos(Math.PI / sides) : radius;
+          const startAngle = isMidpoint ? initialAngle - Math.PI / sides : initialAngle;
 
           for (let i = 0; i <= sides; i++) {
-            const angle = initialAngle + (i * Math.PI * 2) / sides;
+            const angle = startAngle + (i * Math.PI * 2) / sides;
             points.push({
-              x: center.x + radius * Math.cos(angle),
-              y: center.y + radius * Math.sin(angle),
+              x: center.x + drawRadius * Math.cos(angle),
+              y: center.y + drawRadius * Math.sin(angle),
               isCurvePoint: currentCommand === 'circle',
               circleData: currentCommand === 'circle' ? { center: { x: center.x, y: center.y }, radius } : undefined,
               polygonData: currentCommand === 'polygon' ? {
                 id: polyId,
                 center: { x: center.x, y: center.y },
-                radius,
-                initialAngle,
+                radius: drawRadius,
+                initialAngle: startAngle,
                 sides,
-                vertexIndex: i % sides
+                vertexIndex: i % sides,
+                polygonType: polygonType
               } : undefined
             });
           }
@@ -6519,7 +6594,7 @@ export default function App() {
                   key={s}
                   type="button"
                   onClick={() => {
-                    handleStartPolygonDrawing(s);
+                    handleStartPolygonDrawing(s, polygonTypeInput);
                   }}
                   className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 text-zinc-300 font-mono text-[11px] py-1.5 rounded transition font-bold"
                 >
@@ -6529,6 +6604,41 @@ export default function App() {
                   </div>
                 </button>
               ))}
+            </div>
+
+            {/* Polygon Construction Type Selector */}
+            <div className="space-y-1.5 mb-4 text-left">
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-mono font-bold">Çizim Yöntemi:</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPolygonTypeInput('corner')}
+                  className={`rounded text-xs px-2 py-2 font-mono font-bold border transition text-center cursor-pointer ${
+                    polygonTypeInput === 'corner'
+                      ? 'bg-blue-600/20 border-blue-500 text-blue-400'
+                      : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-300'
+                  }`}
+                >
+                  Köşegenden
+                  <div className="text-[8px] opacity-70 font-sans tracking-tight leading-none mt-0.5 font-normal">
+                    Dış Teğet Çember
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPolygonTypeInput('midpoint')}
+                  className={`rounded text-xs px-2 py-2 font-mono font-bold border transition text-center cursor-pointer ${
+                    polygonTypeInput === 'midpoint'
+                      ? 'bg-blue-600/20 border-blue-500 text-blue-400'
+                      : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-300'
+                  }`}
+                >
+                  İç Teğetten
+                  <div className="text-[8px] opacity-70 font-sans tracking-tight leading-none mt-0.5 font-normal">
+                    İç Teğet Çember
+                  </div>
+                </button>
+              </div>
             </div>
 
             {/* Custom Input */}
@@ -6546,7 +6656,7 @@ export default function App() {
                       e.preventDefault();
                       const val = parseInt(polygonSidesInput);
                       if (!isNaN(val) && val >= 3 && val <= 32) {
-                        handleStartPolygonDrawing(val);
+                        handleStartPolygonDrawing(val, polygonTypeInput);
                       }
                     } else if (e.key === 'Escape') {
                       setShowPolygonPrompt(false);
@@ -6574,7 +6684,7 @@ export default function App() {
                 onClick={() => {
                   const val = parseInt(polygonSidesInput);
                   if (!isNaN(val) && val >= 3 && val <= 32) {
-                    handleStartPolygonDrawing(val);
+                    handleStartPolygonDrawing(val, polygonTypeInput);
                   }
                 }}
                 className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold transition shadow cursor-pointer"
