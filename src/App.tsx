@@ -1889,15 +1889,78 @@ export default function App() {
   };
 
   // Geometric modifiers
-  const applyFillet = (r: number = filletRadius) => {
+  const applyFillet = (r: number = filletRadius, targetIdx: number | null = selectedVertexIdx) => {
     if (activeLayer.locked) {
       logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Fillet.`);
       return;
     }
     if (finalPoints.length < 4) {
-      logCommandResponse('Need at least 3 segments to apply Fillet (Corner rounding).');
+      logCommandResponse('Need at least 3 segments to apply Fillet.');
       return;
     }
+
+    if (targetIdx !== null) {
+      if (targetIdx < 0 || targetIdx >= finalPoints.length) {
+        logCommandResponse('Invalid selected vertex index.');
+        return;
+      }
+      saveState();
+      const roundedPts: Point[] = [];
+      let idx = targetIdx;
+      if (idx === finalPoints.length - 1) {
+        idx = 0;
+      }
+
+      for (let i = 0; i < finalPoints.length - 1; i++) {
+        const p1 = finalPoints[i];
+        if (i === idx) {
+          const p0 = finalPoints[i === 0 ? finalPoints.length - 2 : i - 1];
+          const p2 = finalPoints[i + 1];
+
+          const dx1 = p0.x - p1.x;
+          const dy1 = p0.y - p1.y;
+          const len1 = Math.hypot(dx1, dy1);
+
+          const dx2 = p2.x - p1.x;
+          const dy2 = p2.y - p1.y;
+          const len2 = Math.hypot(dx2, dy2);
+
+          if (len1 > r && len2 > r) {
+            roundedPts.push({
+              x: p1.x + (dx1 / len1) * r,
+              y: p1.y + (dy1 / len1) * r,
+              isCurvePoint: false,
+            });
+            roundedPts.push({
+              x: p1.x + (dx1 / len1) * r * 0.5 + (dx2 / len2) * r * 0.1,
+              y: p1.y + (dy1 / len1) * r * 0.5 + (dy2 / len2) * r * 0.1,
+              isCurvePoint: true,
+            });
+            roundedPts.push({
+              x: p1.x + (dx1 / len1) * r * 0.1 + (dx2 / len2) * r * 0.5,
+              y: p1.y + (dy1 / len1) * r * 0.1 + (dy2 / len2) * r * 0.5,
+              isCurvePoint: true,
+            });
+            roundedPts.push({
+              x: p1.x + (dx2 / len2) * r,
+              y: p1.y + (dy2 / len2) * r,
+              isCurvePoint: false,
+            });
+          } else {
+            roundedPts.push(p1);
+          }
+        } else {
+          roundedPts.push(p1);
+        }
+      }
+      roundedPts.push({ ...roundedPts[0] });
+      setFinalPoints(roundedPts);
+      setIsClosed(true);
+      setSelectedVertexIdx(null);
+      logCommandResponse(`Fillet applied (r: ${r} mm) to selected corner.`);
+      return;
+    }
+
     saveState();
     const roundedPts: Point[] = [];
     for (let i = 0; i < finalPoints.length - 1; i++) {
@@ -1944,10 +2007,10 @@ export default function App() {
     roundedPts.push({ ...roundedPts[0] });
     setFinalPoints(roundedPts);
     setIsClosed(true);
-    logCommandResponse(`Fillet applied (r: ${r} mm) to corners.`);
+    logCommandResponse(`Fillet applied (r: ${r} mm) to all corners.`);
   };
 
-  const applyChamfer = (d: number = chamferDistance) => {
+  const applyChamfer = (d: number = chamferDistance, targetIdx: number | null = selectedVertexIdx) => {
     if (activeLayer.locked) {
       logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Chamfer.`);
       return;
@@ -1956,6 +2019,57 @@ export default function App() {
       logCommandResponse('Need at least 3 segments to apply Chamfer.');
       return;
     }
+
+    if (targetIdx !== null) {
+      if (targetIdx < 0 || targetIdx >= finalPoints.length) {
+        logCommandResponse('Invalid selected vertex index.');
+        return;
+      }
+      saveState();
+      const chamferPts: Point[] = [];
+      let idx = targetIdx;
+      if (idx === finalPoints.length - 1) {
+        idx = 0;
+      }
+
+      for (let i = 0; i < finalPoints.length - 1; i++) {
+        const p1 = finalPoints[i];
+        if (i === idx) {
+          const p0 = finalPoints[i === 0 ? finalPoints.length - 2 : i - 1];
+          const p2 = finalPoints[i + 1];
+
+          const dx1 = p0.x - p1.x;
+          const dy1 = p0.y - p1.y;
+          const len1 = Math.hypot(dx1, dy1);
+
+          const dx2 = p2.x - p1.x;
+          const dy2 = p2.y - p1.y;
+          const len2 = Math.hypot(dx2, dy2);
+
+          if (len1 > d * 1.5 && len2 > d * 1.5) {
+            chamferPts.push({
+              x: p1.x + (dx1 / len1) * d,
+              y: p1.y + (dy1 / len1) * d,
+            });
+            chamferPts.push({
+              x: p1.x + (dx2 / len2) * d,
+              y: p1.y + (dy2 / len2) * d,
+            });
+          } else {
+            chamferPts.push(p1);
+          }
+        } else {
+          chamferPts.push(p1);
+        }
+      }
+      chamferPts.push({ ...chamferPts[0] });
+      setFinalPoints(chamferPts);
+      setIsClosed(true);
+      setSelectedVertexIdx(null);
+      logCommandResponse(`Chamfer applied (d: ${d} mm) to selected corner.`);
+      return;
+    }
+
     saveState();
     const chamferPts: Point[] = [];
     for (let i = 0; i < finalPoints.length - 1; i++) {
@@ -1987,7 +2101,7 @@ export default function App() {
     chamferPts.push({ ...chamferPts[0] });
     setFinalPoints(chamferPts);
     setIsClosed(true);
-    logCommandResponse(`Chamfer applied (d: ${d} mm) to corners.`);
+    logCommandResponse(`Chamfer applied (d: ${d} mm) to all corners.`);
   };
 
   const applyOffset = (d: number = offsetDistance) => {
@@ -5548,7 +5662,7 @@ export default function App() {
         <div className="flex items-center gap-1.5 pr-3 border-r border-slate-200 shrink-0">
           <Workflow className="w-4 h-4 text-orange-500" />
           <span className="text-xs font-black tracking-wider uppercase text-slate-900">
-            CADE<span className="text-orange-500">RİM</span>
+            CADE<span className="text-orange-500">RIM</span>
           </span>
           <span className="text-[9px] font-mono bg-slate-100 border border-slate-200 px-1 py-0.2 rounded text-slate-500">
             v14.1
@@ -5560,10 +5674,10 @@ export default function App() {
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 transition cursor-pointer font-bold font-mono"
-            title={sidebarCollapsed ? "Sayısal Değerleri Göster (Show Sidebar)" : "Sayısal Değerleri Gizle (Hide Sidebar)"}
+            title={sidebarCollapsed ? "Show Sidebar panel" : "Hide Sidebar panel"}
           >
             {sidebarCollapsed ? <ChevronRight className="w-3 h-3 text-orange-500" /> : <ChevronLeft className="w-3 h-3 text-orange-500" />}
-            <span>Panel</span>
+            <span>Sidebar</span>
           </button>
         </div>
 
@@ -5572,17 +5686,17 @@ export default function App() {
           <button
             onClick={saveSketchJSON}
             className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 hover:border-slate-300 rounded text-[11px] transition cursor-pointer font-bold font-mono"
-            title="Sketch dosyasını bilgisayarına kaydet (.json)"
+            title="Save sketch design to computer (.json)"
           >
             <Save className="w-3 h-3 text-orange-500" />
-            <span>Kaydet</span>
+            <span>Save</span>
           </button>
           <label
             className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 hover:border-slate-300 rounded text-[11px] transition cursor-pointer font-bold font-mono"
-            title="Daha önce kaydettiğin sketch dosyasını yükle"
+            title="Load previously saved sketch JSON file"
           >
             <Upload className="w-3 h-3 text-emerald-600" />
-            <span>Yükle</span>
+            <span>Load</span>
             <input
               type="file"
               accept=".json"
@@ -5621,13 +5735,13 @@ export default function App() {
             ) : (
               <Flame className="w-2.5 h-2.5" />
             )}
-            <span>{aiLoading ? "Uygulanıyor..." : "Uygula"}</span>
+            <span>{aiLoading ? "Applying..." : "Apply"}</span>
           </button>
         </div>
 
         {/* Draw Tools */}
         <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
-          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Çizim:</span>
+          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Draw:</span>
           <button
             onClick={() => setCommand('line')}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
@@ -5674,15 +5788,15 @@ export default function App() {
               setDimP1(null);
               setDimP2(null);
               setClickCount(0);
-              logCommandResponse("Akıllı Ölçülendirme ve Konumlandırma aktif. Ölçülendirmek istediğiniz ilk noktayı seçin.");
+              logCommandResponse("Smart dimensioning active. Click starting point.");
             }}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
               currentCommand === 'dimension' ? 'bg-orange-600 border-orange-700 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
-            title="Akıllı Ölçülendirme ve Konumlandırma (DIM) - Çizim noktalarını seçip konumlandırın"
+            title="Smart dimensioning & constraint tool"
           >
             <Ruler className="w-3 h-3 text-white" />
-            <span>Ölçülendir</span>
+            <span>Dimension</span>
           </button>
 
           {finalPoints.length >= 2 && (
@@ -5722,7 +5836,7 @@ export default function App() {
 
         {/* Dynamic Draw Mode / Operations Switcher */}
         <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0 font-sans">
-          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Mod:</span>
+          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Mode:</span>
           <button
             onClick={() => {
               clearCommand();
@@ -5733,7 +5847,7 @@ export default function App() {
             }`}
             title="Freehand Mode"
           >
-            <span>✏️ Serbest Çizim</span>
+            <span>✏️ Freehand</span>
           </button>
           <button
             onClick={() => {
@@ -5743,9 +5857,9 @@ export default function App() {
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
               drawMode === 'point' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
-            title="Point Entry"
+            title="Coordinate Input Mode"
           >
-            <span>📐 Nokta Girişi</span>
+            <span>📐 Coordinate Input</span>
           </button>
           <button
             onClick={() => {
@@ -5755,15 +5869,15 @@ export default function App() {
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
               drawMode === 'drag' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
-            title="Vertex Edit & Drag"
+            title="Vertex Edit & Drag Mode"
           >
-            <span>👆 Nokta Taşı</span>
+            <span>👆 Edit Vertex</span>
           </button>
         </div>
 
         {/* Modifiers */}
         <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
-          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Düzenle:</span>
+          <span className="text-[10px] uppercase font-mono text-slate-405 mr-1 font-bold">Edit:</span>
           <button
             onClick={() => applyFillet()}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-slate-900 transition font-mono font-bold"
@@ -5792,7 +5906,7 @@ export default function App() {
             title="Trim segment (Makas Budama)"
           >
             <Trash2 className="w-3 h-3 text-red-500" />
-            <span>Budama</span>
+            <span>Trim</span>
           </button>
           <button
             onClick={() => {
@@ -5806,7 +5920,7 @@ export default function App() {
             title="Extend segment (Uzatma)"
           >
             <Maximize className="w-3 h-3 text-cyan-600" />
-            <span>Uzatma</span>
+            <span>Extend</span>
           </button>
           <button
             onClick={handleUndo}
@@ -5814,7 +5928,7 @@ export default function App() {
             title="Undo (Ctrl+Z)"
           >
             <Undo2 className="w-3 h-3 text-orange-500" />
-            <span>Geri Al</span>
+            <span>Undo</span>
           </button>
         </div>
 
@@ -5916,7 +6030,7 @@ export default function App() {
                 sidebarTab === 'sketch' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
               }`}
             >
-              🛠 Araçlar
+              🛠 Tools
             </button>
             <button
               onClick={() => setSidebarTab('layers')}
@@ -5924,7 +6038,7 @@ export default function App() {
                 sidebarTab === 'layers' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
               }`}
             >
-              🔍 Katman
+              🔍 Layers
             </button>
             <button
               onClick={() => setSidebarTab('dimensions')}
@@ -5932,7 +6046,7 @@ export default function App() {
                 sidebarTab === 'dimensions' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
               }`}
             >
-              📐 Ölçü
+              📐 Dim/Pos
             </button>
             <button
               onClick={() => setSidebarTab('3d')}
@@ -5940,7 +6054,7 @@ export default function App() {
                 sidebarTab === '3d' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
               }`}
             >
-              📦 3D / Çıktı
+              📦 3D View
             </button>
           </div>
           
@@ -5952,11 +6066,11 @@ export default function App() {
               <div className="p-4">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5 mb-3">
                   <Activity className="w-4 h-4 text-orange-600" />
-                  <span>1. Çizim Araç Kutusu</span>
+                  <span>1. Sketch Toolbox</span>
                 </h2>
 
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-2 shadow-xs">
-                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono block">Aktif Çizim Modu:</span>
+                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono block">Active Sketch Mode:</span>
                   <label className="flex items-center gap-2 cursor-pointer text-xs p-1.5 rounded hover:bg-slate-50 transition font-sans font-medium text-slate-700">
                     <input
                       type="radio"
@@ -5968,7 +6082,7 @@ export default function App() {
                       }}
                       className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
                     />
-                    <span>✏️ Serbest Çizim Modu</span>
+                    <span>✏️ Freehand Mode</span>
                   </label>
 
                   <label className="flex items-center gap-2 cursor-pointer text-xs p-1.5 rounded hover:bg-slate-50 transition font-sans font-medium text-slate-700">
@@ -5982,7 +6096,7 @@ export default function App() {
                       }}
                       className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
                     />
-                    <span>📐 Milimetrik Nokta Girişi</span>
+                    <span>📐 Coordinate Point Input</span>
                   </label>
 
                   <label className="flex items-center gap-2 cursor-pointer text-xs p-1.5 rounded hover:bg-slate-50 transition font-sans font-medium text-slate-700">
@@ -5996,17 +6110,17 @@ export default function App() {
                       }}
                       className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
                     />
-                    <span>👆 Köşe Noktası Düzenle / Sürükle</span>
+                    <span>👆 Vertex Edit / Drag</span>
                   </label>
                 </div>
 
                 {/* Fillet & Chamfer Controls */}
                 <div className="mt-3 bg-white p-2.5 rounded-lg border border-slate-200 space-y-2.5 shadow-xs">
-                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono block">Geometri Düzenleyiciler</span>
+                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono block">Geometry Modifiers</span>
                   
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-                      <span>Fillet Yarıçapı (Radius r):</span>
+                      <span>Fillet Radius (r):</span>
                       <span className="text-orange-600 font-bold">{filletRadius} mm</span>
                     </div>
                     <div className="flex gap-1.5">
@@ -6021,7 +6135,7 @@ export default function App() {
                       <button
                         onClick={() => applyFillet(filletRadius)}
                         className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
-                        title="Seçili köşelere yumuşatma yarıçapı uygula"
+                        title="Apply rounding radius to all corners"
                       >
                         Fillet
                       </button>
@@ -6030,7 +6144,7 @@ export default function App() {
 
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-                      <span>Chamfer Pah Uzunluğu (d):</span>
+                      <span>Chamfer Distance (d):</span>
                       <span className="text-orange-600 font-bold">{chamferDistance} mm</span>
                     </div>
                     <div className="flex gap-1.5">
@@ -6045,7 +6159,7 @@ export default function App() {
                       <button
                         onClick={() => applyChamfer(chamferDistance)}
                         className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
-                        title="Seçili köşelere pah kırma mesafesi uygula"
+                        title="Apply corner chamfer to all corners"
                       >
                         Chamfer
                       </button>
@@ -6054,7 +6168,7 @@ export default function App() {
 
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-                      <span>Genişletme / Offset Uzaklığı:</span>
+                      <span>Offset Distance (d):</span>
                       <span className="text-orange-600 font-bold">{offsetDistance} mm</span>
                     </div>
                     <div className="flex gap-1.5">
@@ -6070,16 +6184,16 @@ export default function App() {
                         <button
                           onClick={() => applyOffset(-offsetDistance)}
                           className="px-2.5 py-1 bg-slate-105 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
-                          title="İçe Doğru Offset Çıkar"
+                          title="Offset selected shape inward"
                         >
-                          İçe
+                          Inward
                         </button>
                         <button
                           onClick={() => applyOffset(offsetDistance)}
                           className="px-2.5 py-1 bg-slate-105 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
-                          title="Dışa Doğru Offset Çıkar"
+                          title="Offset selected shape outward"
                         >
-                          Dışa
+                          Outward
                         </button>
                       </div>
                     </div>
@@ -6087,28 +6201,26 @@ export default function App() {
                 </div>
 
                 <div className="mt-3 bg-white p-3 rounded-lg border border-slate-200 text-[10px] space-y-1.5 font-mono text-slate-500 shadow-xs">
-                  <p className="text-orange-600 font-bold">KULLANIŞLI İPUÇLARI:</p>
-                  <p>• Çizgilere <span className="text-slate-700 font-bold">Çift Tıklayarak</span> yeni köşe noktası (vertex) ekleyebilirsiniz.</p>
-                  <p>• <span className="text-slate-700 font-bold">Sağ Tık</span> ile aktif çizimi kapatıp kaydedebilirsiniz.</p>
-                  <p>• Köşe noktalarını sürükleyerek milimetrik ölçüleri canlı olarak güncelleyebilirsiniz.</p>
+                  <p className="text-orange-600 font-bold">USEFUL TIPS:</p>
+                  <p>• <span className="text-slate-700 font-bold">Double-click</span> on lines to insert a new corner point (vertex).</p>
+                  <p>• <span className="text-slate-700 font-bold">Right-click</span> to close and save the active polygon sketch.</p>
+                  <p>• Drag vertices to dynamically update and measure coordinates and segment lengths.</p>
                 </div>
               </div>
             </div>
           )}
-
-          {/* Section B: Parametric Dimension Constraints & Location (Ölçülendirme ve Konumlandırma) */}
           {sidebarTab === 'dimensions' && (
             <div className="p-4 border-b border-slate-200 flex flex-col shrink-0">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-850 flex items-center gap-1.5 mb-2.5">
                 <Ruler className="w-4 h-4 text-orange-600 font-extrabold" />
-                <span>2. Boyutlar ve Koordinatlar</span>
+                <span>2. Dimensions & Coordinates</span>
               </h2>
 
               {selectedVertexIdx === null ? (
                 <div className="space-y-3">
                   <div className="bg-white border border-slate-200 p-3 rounded-lg text-[10.5px] text-slate-500 font-sans leading-relaxed shadow-xs">
-                    <p className="font-semibold text-slate-800 mb-1">💡 Parametrik Konumlandırma & 3D Boolean:</p>
-                    Vertex Düzenleme modunda (Nokta Taşı) bir noktanın üzerine tıklayarak koordinatlarını veya bağlı çizgilerin uzunluklarını buradaki kutulardan milimetrik ve hassas olarak değiştirebilirsiniz. Dairelerin yarıçap ve merkezlerini de buradan ayarlayabilirsiniz.
+                    <p className="font-semibold text-slate-800 mb-1">💡 Parametric Placement & 3D Boolean:</p>
+                    In Vertex Selection mode, click any vertex on the screen to view and adjust its precise coordinates, connected lines lengths, or round/bevel parameters. You can also configure circle dimensions precisely here.
                   </div>
                   {renderShapeSolidSettings()}
                 </div>
@@ -6124,20 +6236,20 @@ export default function App() {
                 <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3 font-sans shadow-xs">
                   {/* Selected label */}
                   <div className="flex items-center justify-between text-[10px] font-mono text-slate-450 border-b border-slate-200 pb-2 mb-1">
-                    <span>Seçili Vektör Noktası:</span>
-                    <span className="text-orange-600 font-bold bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200 font-mono">Nokta #{selectedVertexIdx}</span>
+                    <span>Selected Vertex:</span>
+                    <span className="text-orange-600 font-bold bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200 font-mono">Node #{selectedVertexIdx}</span>
                   </div>
 
                   {isCircle && circleData ? (
                     /* Circle specific dimension inputs */
                     <div className="space-y-3">
                       <div className="text-[10px] font-bold tracking-wider text-slate-700 uppercase font-sans text-left pb-1 border-b border-slate-100">
-                        🔵 Daire Parametreleri (Circle)
+                        🔵 Circle Parameters
                       </div>
                       
                       {/* Radius */}
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Yarıçap (R):</span>
+                        <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Radius (R):</span>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -6155,7 +6267,7 @@ export default function App() {
 
                       {/* Center X */}
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Merkez X (Cx):</span>
+                        <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Center X (Cx):</span>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -6173,7 +6285,7 @@ export default function App() {
 
                       {/* Center Y */}
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Merkez Y (Cy):</span>
+                        <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Center Y (Cy):</span>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -6193,13 +6305,13 @@ export default function App() {
                     /* General segment path inputs */
                     <div className="space-y-3">
                       <div className="text-[10px] font-bold tracking-wider text-slate-700 uppercase font-sans text-left pb-1 border-b border-slate-100">
-                        📍 Nokta Koordinatları (Vertex)
+                        📍 Vertex Coordinates
                       </div>
 
                       {/* Direct Absolute Coordinates */}
                       <div className="grid grid-cols-2 gap-2">
                         <div className="space-y-1">
-                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Pozisyon X:</span>
+                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Position X:</span>
                           <input
                             type="number"
                             step="any"
@@ -6212,7 +6324,7 @@ export default function App() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Pozisyon Y:</span>
+                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Position Y:</span>
                           <input
                             type="number"
                             step="any"
@@ -6227,13 +6339,13 @@ export default function App() {
                       </div>
 
                       <div className="text-[10px] font-bold tracking-wider text-slate-700 uppercase font-sans text-left pt-1.5 border-t border-slate-200">
-                        📐 Bağlı Çizgi Uzunlukları
+                        📐 Connected Segment Lengths
                       </div>
 
                       {/* L1 Length (to previous) */}
                       {d1 !== null && (
                         <div className="space-y-1">
-                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Önceki Çizgi Boyu (L1):</span>
+                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Prev Line Length (L1):</span>
                           <div className="flex gap-2">
                             <input
                               type="number"
@@ -6253,7 +6365,7 @@ export default function App() {
                       {/* L2 Length (to next) */}
                       {d2 !== null && (
                         <div className="space-y-1">
-                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Sonraki Çizgi Boyu (L2):</span>
+                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Next Line Length (L2):</span>
                           <div className="flex gap-2">
                             <input
                               type="number"
@@ -6269,6 +6381,47 @@ export default function App() {
                           </div>
                         </div>
                       )}
+
+                      {/* Fillet & Chamfer ON selected vertex */}
+                      <div className="text-[10px] font-bold tracking-wider text-slate-700 uppercase font-sans text-left pt-1.5 border-t border-slate-200">
+                        📐 Corner Round / Bevel
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-0.5">
+                          <span className="text-[9px] text-slate-500 block font-sans text-left font-semibold">Fillet Radius (r):</span>
+                          <input
+                            type="number"
+                            value={filletRadius}
+                            onChange={(e) => setFilletRadius(Math.max(1, parseInt(e.target.value) || 1))}
+                            className="w-full bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-805 outline-none focus:border-orange-500 font-mono"
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <span className="text-[9px] text-slate-500 block font-sans text-left font-semibold">Chamfer Size (d):</span>
+                          <input
+                            type="number"
+                            value={chamferDistance}
+                            onChange={(e) => setChamferDistance(Math.max(1, parseInt(e.target.value) || 1))}
+                            className="w-full bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-805 outline-none focus:border-orange-500 font-mono"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 pt-1">
+                        <button
+                          onClick={() => applyFillet(filletRadius, selectedVertexIdx)}
+                          className="py-1.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[10px] font-bold font-sans text-orange-700 rounded transition cursor-pointer text-center"
+                          title="Apply rounding fillet to this specific corner corner node"
+                        >
+                          Fillet Corner
+                        </button>
+                        <button
+                          onClick={() => applyChamfer(chamferDistance, selectedVertexIdx)}
+                          className="py-1.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[10px] font-bold font-sans text-orange-700 rounded transition cursor-pointer text-center"
+                          title="Apply chamfer bevel to this specific corner node"
+                        >
+                          Chamfer Corner
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -6276,14 +6429,14 @@ export default function App() {
                   <div className="pt-2.5 border-t border-slate-200 space-y-2">
                     <div className="text-[10px] font-bold tracking-wider text-orange-650 uppercase font-sans text-left flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
-                      CAD Referans Konumlandırma
+                      CAD Ref Positioning
                     </div>
                     <p className="text-[9px] text-slate-400 leading-normal text-left">
-                      Seçili noktayı referans alarak bütün sketch'i X/Y koordinat sistemine yerleştirin:
+                      Place the entire sketch onto coordinate space using this point as reference:
                     </p>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <span className="text-[9px] text-slate-500 block font-sans text-left">Hedef X (Yatay):</span>
+                        <span className="text-[9px] text-slate-500 block font-sans text-left">Target X (Horiz):</span>
                         <input
                           type="number"
                           step="any"
@@ -6296,7 +6449,7 @@ export default function App() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <span className="text-[9px] text-slate-500 block font-sans text-left">Hedef Y (Düşey):</span>
+                        <span className="text-[9px] text-slate-500 block font-sans text-left">Target Y (Vert):</span>
                         <input
                           type="number"
                           step="any"
@@ -6313,16 +6466,16 @@ export default function App() {
                       <button
                         onClick={() => alignEntireSketchBySelectedVertex(0, 0)}
                         className="flex-1 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-250 text-[9px] text-slate-600 hover:text-slate-900 rounded font-mono font-bold transition cursor-pointer text-center"
-                        title="Seçili noktayı doğrudan mutlak (0,0) orijinal merkezine taşır"
+                        title="Move entire sketch so this node lines up at absolute 0,0"
                       >
-                        Orijine Sıfırla (0,0)
+                        Reset to Origin (0,0)
                       </button>
                       <button
                         onClick={() => alignEntireSketchBySelectedVertex(alignTargetX, alignTargetY)}
                         className="flex-1 py-1.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[9px] text-orange-700 hover:text-orange-950 rounded font-mono font-bold transition cursor-pointer text-center"
-                        title="Tüm skeçi seçili nokta o koordinatlara gelecek şekilde öteler"
+                        title="Align the complete drawing group relative to the selected target"
                       >
-                        Hizala & Taşı
+                        Align & Move
                       </button>
                     </div>
                   </div>
@@ -6334,9 +6487,9 @@ export default function App() {
                       setSelectedVertexIdx(null);
                       setSelectedPathIdx(-1);
                     }}
-                    className="w-full mt-2 py-1.5 bg-slate-100 hover:bg-slate-200/85 border border-slate-200 text-[10px] text-slate-700 rounded font-sans font-bold transition cursor-pointer"
+                    className="w-full mt-2 py-1.5 bg-slate-100 hover:bg-slate-250/85 border border-slate-200 text-[10px] text-slate-700 rounded font-sans font-bold transition cursor-pointer"
                   >
-                    Seçimi Kaldır
+                    Clear Selection
                   </button>
                 </div>
               );
@@ -6350,15 +6503,15 @@ export default function App() {
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-850 flex items-center justify-between mb-3">
                 <span className="flex items-center gap-1.5">
                   <Layers className="w-4 h-4 text-orange-600 font-extrabold" />
-                  <span>2. Katman Yöneticisi (Layers)</span>
+                  <span>2. Layer Manager (Layers)</span>
                 </span>
                 <button
                   onClick={addNewLayer}
                   className="px-2 py-0.5 rounded text-[10px] font-mono bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 font-bold transition flex items-center gap-1 cursor-pointer"
-                  title="Yeni bir CAD taslak katmanı oluştur"
+                  title="Create a new CAD draft layer"
                 >
                   <Plus className="w-3 h-3 text-orange-600" />
-                  <span>Katman Ekle</span>
+                  <span>Add Layer</span>
                 </button>
               </h2>
 
@@ -6398,7 +6551,7 @@ export default function App() {
                     {/* Layer Action Controls Right Section */}
                     <div className="flex items-center gap-1 shrink-0">
                       {/* Color Palette Input Wrapper */}
-                      <div className="relative w-4 h-4 rounded cursor-pointer shrink-0 border border-slate-300" style={{ backgroundColor: layer.color }} title="Katman rengini değiştir">
+                      <div className="relative w-4 h-4 rounded cursor-pointer shrink-0 border border-slate-300" style={{ backgroundColor: layer.color }} title="Change layer color">
                         <input
                           type="color"
                           value={layer.color}
@@ -6414,7 +6567,7 @@ export default function App() {
                         className={`p-1 rounded hover:bg-slate-100 transition shrink-0 ${
                           layer.visible ? 'text-slate-500 hover:text-slate-700' : 'text-slate-300 hover:text-slate-400'
                         }`}
-                        title={layer.visible ? 'Katmanı Gizle' : 'Katmanı Göster'}
+                        title={layer.visible ? 'Hide Layer' : 'Show Layer'}
                       >
                         {layer.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                       </button>
@@ -6425,7 +6578,7 @@ export default function App() {
                         className={`p-1 rounded hover:bg-slate-100 transition shrink-0 ${
                           layer.locked ? 'text-orange-500 hover:text-orange-600' : 'text-slate-300 hover:text-slate-500'
                         }`}
-                        title={layer.locked ? 'Katman Kilidini Aç' : 'Katmanı Kilitle'}
+                        title={layer.locked ? 'Unlock Layer' : 'Lock Layer'}
                       >
                         {layer.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
                       </button>
@@ -6435,7 +6588,7 @@ export default function App() {
                         <button
                           onClick={() => deleteLayer(layer.id)}
                           className="p-1 rounded text-slate-400 hover:text-red-650 hover:bg-red-500/10 transition shrink-0"
-                          title="Katmanı Sil"
+                          title="Delete Layer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -6447,7 +6600,7 @@ export default function App() {
             </div>
             {/* Info label */}
             <div className="mt-1.5 text-[9px] font-mono text-slate-400 leading-tight text-center">
-              * Gizlenen katmanlar 3D katı model üretimine dahil edilmez *
+              * Hidden layers are excluded from 3D solid model generation *
             </div>
           </div>
           )}
@@ -6458,30 +6611,30 @@ export default function App() {
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <Scissors className="w-4 h-4 text-orange-600" />
-                  <span>2. Blok Düzenleme & Transform</span>
+                  <span>2. Block Editing & Transform</span>
                 </span>
                 <span className="text-[10px] font-mono text-orange-650 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200 font-bold">
-                  PRO ARAÇLAR
+                  PRO TOOLS
                 </span>
               </h2>
 
             {/* Current Selection Status Banner */}
             <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-left space-y-1 shadow-xs">
               <div className="text-[9px] font-mono font-bold uppercase text-slate-400">
-                SEÇİM DURUMU (SELECTION)
+                SELECTION STATUS
               </div>
               {isFinalPointsSelected || selectedPathIndices.length > 0 ? (
                 <div className="text-xs font-bold text-orange-600 flex items-center gap-1">
                   <span className="inline-block w-2.5 h-2.5 rounded-full bg-orange-500 animate-pulse" />
                   <span>
-                    {isFinalPointsSelected ? "Aktif Poligon" : ""}
-                    {isFinalPointsSelected && selectedPathIndices.length > 0 ? " ve " : ""}
-                    {selectedPathIndices.length > 0 ? `${selectedPathIndices.length} adet Şekil` : ""} Seçili!
+                    {isFinalPointsSelected ? "Active Polygon" : ""}
+                    {isFinalPointsSelected && selectedPathIndices.length > 0 ? " and " : ""}
+                    {selectedPathIndices.length > 0 ? `${selectedPathIndices.length} Shape(s)` : ""} Selected!
                   </span>
                 </div>
               ) : (
                 <div className="text-xs text-slate-500 italic leading-snug font-medium">
-                  Seçili nesne yok. Nesneyi seçip kopyalamak, silmek, döndürmek veya ölçeklemek için üzerine tıklayın ya da sağ tıklayıp kutu içine alın. (Del tuşu siler)
+                  No object selected. Click on a shape to select, copy, delete, rotate, or scale it. Or right-click and drag a box. (Del deletes)
                 </div>
               )}
             </div>
@@ -6493,36 +6646,36 @@ export default function App() {
                 <button
                   onClick={handleCopy}
                   className="py-2 bg-slate-50 hover:bg-slate-100 border border-slate-250 rounded text-xs font-bold font-mono text-slate-700 flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  title="Seçili tüm nesneleri panoya kopyalar (Ctrl + C)"
+                  title="Copy selected items to clipboard (Ctrl + C)"
                 >
                   <Copy className="w-3.5 h-3.5 text-orange-500" />
-                  Kopyala (Ctrl+C)
+                  Copy (Ctrl+C)
                 </button>
                 <button
                   onClick={handlePaste}
                   className="py-2 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded text-xs font-bold font-mono text-orange-700 flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  title="Kopyalanmış nesneleri mouse imlecinin olduğu yere yapıştırır (Ctrl + V)"
+                  title="Paste copied shapes near mouse cursor (Ctrl + V)"
                 >
                   <Clipboard className="w-3.5 h-3.5 text-orange-600" />
-                  Yapıştır (Ctrl+V)
+                  Paste (Ctrl+V)
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={applyCadEditCopy}
                   className="py-2 bg-slate-50 hover:bg-slate-100 border border-slate-250 rounded text-xs font-bold font-mono text-slate-700 flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  title="Seçili tüm nesneleri hemen yanına çoğaltır (Ctrl + D)"
+                  title="Duplicate selected assets instantly (Ctrl + D)"
                 >
                   <Copy className="w-3.5 h-3.5 text-orange-500 opacity-60" />
-                  Çoğalt (Ctrl+D)
+                  Duplicate (Ctrl+D)
                 </button>
                 <button
                   onClick={applyCadEditDelete}
                   className="py-2 bg-red-50 hover:bg-red-100 border border-red-200 rounded text-xs font-bold font-mono text-red-650 flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  title="Seçili tüm nesneleri temizler (Delete / Backspace)"
+                  title="Delete selected CAD items (Delete / Backspace)"
                 >
                   <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                  Sil (Delete)
+                  Delete (Del)
                 </button>
               </div>
 
@@ -6530,37 +6683,37 @@ export default function App() {
               <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5 shadow-xs">
                 <span className="text-[10px] text-slate-400 font-mono font-bold flex items-center gap-1">
                   <FlipHorizontal className="w-3 h-3 text-orange-500" />
-                  🪞 CAD AYNALAMA (MIRROR)
+                  🪞 CAD MIRROR
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => applyCadEditMirror('Y')}
                     className="py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded font-mono text-[9px] font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer text-center"
-                    title="Yatay eksene göre simetriğini alır"
+                    title="Mirror horizontally"
                   >
-                    ↔ Yatay Aynala
+                    ↔ Mirror Horiz
                   </button>
                   <button
                     onClick={() => applyCadEditMirror('X')}
                     className="py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded font-mono text-[9px] font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer text-center"
-                    title="Düşey eksene göre simetriğini alır"
+                    title="Mirror vertically"
                   >
-                    ↕ Dikey Aynala
+                    ↕ Mirror Vert
                   </button>
                   <button
                     onClick={() => {
                       setAxisMirrorSelectMode(!axisMirrorSelectMode);
                       setMirrorFirstPoint(null);
-                      logCommandResponse(axisMirrorSelectMode ? "Ayna ekseni seçimi iptal edildi." : "Eksen seçerek aynalama aktif. Orijinal çizgilerden birine tıklayarak onu ayna ekseni yapabilir, ya da boşlukta 2 noktaya tıklayarak yeni bir eksen oluşturabilirsiniz.");
+                      logCommandResponse(axisMirrorSelectMode ? "Mirror axis selection canceled." : "Mirror by axis selection active. Click any line segment to use as anchor mirror axis or select two points.");
                     }}
                     className={`col-span-2 py-1.5 border rounded font-mono text-[9px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5 ${
                       axisMirrorSelectMode 
                         ? 'bg-orange-55 border-orange-500 text-orange-700 animate-pulse' 
                         : 'bg-slate-50 border-slate-250 text-slate-600 hover:text-slate-800 hover:bg-slate-100'
                     }`}
-                    title="Çizimden bir referans çizgiyi ayna ekseni olarak seçer veya serbest eksen çizer"
+                    title="Choose drawing segment as mirror axis"
                   >
-                    ✨ {axisMirrorSelectMode ? "Eksen Seçiliyor..." : "🪄 Eksen Seçerek Aynala"}
+                    ✨ {axisMirrorSelectMode ? "Selecting Axis..." : "🪄 Mirror by Axis"}
                   </button>
                 </div>
               </div>
@@ -6570,32 +6723,32 @@ export default function App() {
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] text-slate-400 font-mono font-bold flex items-center gap-1">
                     <RefreshCw className="w-3 h-3 text-orange-600 font-extrabold animate-spin-slow" />
-                    🔄 DÖNDÜRME (ROTATE)
+                    🔄 ROTATE
                   </span>
-                  <span className="text-[9px] text-slate-550 font-mono font-medium">Derece (°)</span>
+                  <span className="text-[9px] text-slate-550 font-mono font-medium">Deg (°)</span>
                 </div>
 
                 {/* Pivot (Rotation Center) controls */}
                 <div className="space-y-1">
-                  <span className="text-[9px] text-slate-500 font-bold font-sans uppercase block text-left">📍 Dönme Merkezi:</span>
+                  <span className="text-[9px] text-slate-500 font-bold font-sans uppercase block text-left">📍 Rotation Center:</span>
                   {rotationCenter ? (
                     <div className="flex items-center justify-between bg-orange-50/70 border border-orange-200 px-2 py-1 rounded text-[10px] font-mono text-orange-700">
                       <span>X: {rotationCenter.x.toFixed(1)} / Y: {rotationCenter.y.toFixed(1)} mm</span>
                       <button
                         onClick={() => {
                           setRotationCenter(null);
-                          logCommandResponse("Döndürme merkez noktası temizlendi (seçim ortasından devam edecek).");
+                          logCommandResponse("Rotation center cleared. Standard bounding box center used.");
                         }}
                         className="text-[9px] text-red-600 hover:text-red-700 px-1 rounded bg-red-50 border border-red-200 cursor-pointer font-bold"
                       >
-                        Temizle
+                        Clear
                       </button>
                     </div>
                   ) : (
                     <button
                       onClick={() => {
                         setRotationCenterSelectMode(true);
-                        logCommandResponse("Döndürme Eksen Noktası Seçin: Lütfen döndürme merkez noktasını belirlemek için 2D ekran üzerinde bir noktaya tıklayın.");
+                        logCommandResponse("Select Rotation Center Point: Click any point on canvas to designate it as your custom pivot.");
                       }}
                       className={`w-full py-1 rounded text-[9px] font-mono font-bold border transition cursor-pointer text-center ${
                         rotationCenterSelectMode
@@ -6603,20 +6756,20 @@ export default function App() {
                           : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:text-slate-900'
                       }`}
                     >
-                      {rotationCenterSelectMode ? '📍 Ekrana Tıkla...' : '📍 Merkez Noktası Belirle'}
+                      {rotationCenterSelectMode ? '📍 Click Canvas...' : '📍 Set Pivot Point'}
                     </button>
                   )}
                 </div>
 
                 {/* Dynamic & Precise Stepper Controls */}
                 <div className="space-y-1.5 pt-1">
-                  <span className="text-[9px] text-slate-500 font-bold font-sans uppercase block text-left">⚡ Hassas Döndürme Adımı:</span>
+                  <span className="text-[9px] text-slate-500 font-bold font-sans uppercase block text-left">⚡ Rotation Step Angle:</span>
                   <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
                     {/* CCW Rotate Arrow Button */}
                     <button
                       onClick={() => applyRelativeRotation(-cadRotateAngle)}
                       className="p-1 px-2 pb-1.5 bg-white border border-slate-250 rounded text-orange-600 hover:text-orange-700 hover:bg-slate-100 font-black text-xs transition cursor-pointer shrink-0"
-                      title={`Saat yönünün tersine -${cadRotateAngle}° döndür`}
+                      title={`Rotate Counter Clockwise -${cadRotateAngle}°`}
                     >
                       ◀
                     </button>
@@ -6641,7 +6794,7 @@ export default function App() {
                     <button
                       onClick={() => applyRelativeRotation(cadRotateAngle)}
                       className="p-1 px-2 pb-1.5 bg-white border border-slate-250 rounded text-orange-600 hover:text-orange-700 hover:bg-slate-100 font-black text-xs transition cursor-pointer shrink-0"
-                      title={`Saat yönünde +${cadRotateAngle}° döndür`}
+                      title={`Rotate Clockwise +${cadRotateAngle}°`}
                     >
                       ▶
                     </button>
@@ -6659,7 +6812,7 @@ export default function App() {
                             : 'bg-white border-slate-200 text-slate-550 hover:text-slate-800 hover:bg-slate-50'
                         }`}
                       >
-                        {step}° Adım
+                        {step}° Step
                       </button>
                     ))}
                   </div>
@@ -6669,9 +6822,9 @@ export default function App() {
                 <button
                   onClick={() => requestRotateAngle(cadRotateAngle)}
                   className="w-full py-1 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded text-[9px] font-bold font-mono text-orange-700 transition cursor-pointer uppercase mt-1"
-                  title="Klasik yöntemle tek seferlik döndürür (ekrandan tıkla-döndür)"
+                  title="Prompt absolute angle input"
                 >
-                  Klasik Açılı Döndür (Tek Sefer)
+                  Absolute Rotate (Once)
                 </button>
               </div>
 
@@ -6680,9 +6833,9 @@ export default function App() {
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] text-slate-400 font-mono font-bold flex items-center gap-1">
                     <Maximize className="w-3 h-3 text-orange-500" />
-                    📐 BOYUTLANDIR & ÖLÇEKLE (SCALE)
+                    📐 SCALE OBJECT
                   </span>
-                  <span className="text-[9px] text-slate-550 font-mono font-medium">Oran (x)</span>
+                  <span className="text-[9px] text-slate-550 font-mono font-medium">Factor (x)</span>
                 </div>
                 {/* Scale Presets */}
                 <div className="grid grid-cols-5 gap-1">
@@ -6713,7 +6866,7 @@ export default function App() {
                     onClick={() => applyCadEditScale(cadScaleFactor)}
                     className="flex-1 py-1 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded text-[10px] font-bold font-mono text-orange-700 transition cursor-pointer"
                   >
-                    Özel Oranda Ölçekle
+                    Custom Scale Factor
                   </button>
                 </div>
               </div>
@@ -6730,13 +6883,13 @@ export default function App() {
               }`}
             >
               <Flame className="w-4 h-4" />
-              <span>Yapay Zeka ile Eğriyi Temizle</span>
+              <span>Auto-Clean Curve (Douglas-Peucker)</span>
             </button>
 
             {/* Backplane reference image config */}
             <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3 shadow-xs">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800">Teknik Çizim Altlığı / Referans Resim</span>
+                <span className="text-xs font-bold text-slate-800">Reference Image Underlay</span>
                 <ImageIcon className="w-4 h-4 text-orange-600" />
               </div>
               <input
@@ -6748,9 +6901,9 @@ export default function App() {
               {bgImage && (
                 <div className="space-y-1.5 pt-1 border-t border-slate-200">
                   <div className="flex justify-between items-center text-[10px] font-mono text-slate-500">
-                    <span>Saydamlık: % {Math.round(bgOpacity * 100)}</span>
+                    <span>Opacity: {Math.round(bgOpacity * 100)}%</span>
                     <button onClick={removeBgImage} className="text-red-500 hover:underline cursor-pointer font-bold">
-                      Kaldır
+                      Remove
                     </button>
                   </div>
                   <input
@@ -6769,7 +6922,7 @@ export default function App() {
             {/* Snapping parameters & Ortho toggles */}
             <div className="space-y-2">
               <div className="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-xs">
-                <span className="text-xs text-slate-700 font-medium">🎯 Akıllı Milimetrik Yakalama (Smart Snaps)</span>
+                <span className="text-xs text-slate-700 font-medium">🎯 Smart Snaps (1/10mm)</span>
                 <input
                   type="checkbox"
                   checked={smartSnap}
@@ -6779,7 +6932,7 @@ export default function App() {
               </div>
 
               <div className="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-xs">
-                <span className="text-xs text-slate-700 font-medium">🧱 Izgara Kilitleme (Grid Snap)</span>
+                <span className="text-xs text-slate-700 font-medium">🧱 Grid Snap</span>
                 <input
                   type="checkbox"
                   checked={gridSnap}
@@ -6789,7 +6942,7 @@ export default function App() {
               </div>
 
               <div className="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-xs">
-                <span className="text-xs text-slate-700 font-medium">🔒 Dik Açı Kilitleme (Ortho Snap - F8)</span>
+                <span className="text-xs text-slate-700 font-medium">🔒 Ortho Snap (F8)</span>
                 <input
                   type="checkbox"
                   checked={orthoSnap}
@@ -6799,7 +6952,7 @@ export default function App() {
               </div>
 
               <div className="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-xs">
-                <span className="text-xs text-slate-700 font-medium">📐 Canlı Uzunluk Ölçülerini Göster</span>
+                <span className="text-xs text-slate-700 font-medium">📐 Show Live Dimension Labels</span>
                 <input
                   type="checkbox"
                   checked={showDims}
@@ -6813,14 +6966,14 @@ export default function App() {
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-slate-800 font-bold uppercase flex items-center gap-1">
                     <Sparkles className="w-3 h-3 text-orange-600 animate-pulse" />
-                    📍 Özel Referans Noktası (Anchor)
+                    📍 Custom Anchor Point
                   </span>
                   {customAnchor && (
                     <button
                       onClick={() => setCustomAnchor(null)}
                       className="text-[9px] text-red-600 hover:text-red-700 font-mono px-1 rounded bg-red-50 border border-red-200 cursor-pointer font-bold"
                     >
-                      Sil
+                      Delete
                     </button>
                   )}
                 </div>
@@ -6832,7 +6985,7 @@ export default function App() {
                   <button
                     onClick={() => {
                       setAnchorSelectMode(true);
-                      logCommandResponse("Herhangi bir boşluğa tıklayarak veya mevcut bir çizgi noktasına tıklayarak özel referans noktası (Anchor) seçin.");
+                      logCommandResponse("Click on screen to define a custom snap reference point (Anchor).");
                     }}
                     className={`w-full py-1 rounded text-[10px] font-mono font-bold border transition cursor-pointer text-center ${
                       anchorSelectMode
@@ -6840,11 +6993,11 @@ export default function App() {
                         : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:text-slate-950'
                     }`}
                   >
-                    {anchorSelectMode ? 'Ekrana Tıkla...' : 'Özel Referans Noktası Belirle'}
+                    {anchorSelectMode ? 'Click Canvas...' : 'Define Custom Anchor'}
                   </button>
                 )}
                 <p className="text-[9px] text-slate-400 leading-normal">
-                  Origin (0,0) her zaman otomatiktir. Yukarıdaki butona tıklayıp ekrandan özel bir referans noktası belirlerseniz, o koordinat da yeşil/mavi CAD sembolüyle yakalanabilir hale gelir.
+                  Origin (0,0) is always automatic. Setting a custom anchor point allows snap verification relative to that coordinate.
                 </p>
               </div>
             </div>
@@ -6914,26 +7067,26 @@ export default function App() {
             <div>
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5 mb-2.5">
                 <CheckCircle className="w-4 h-4 text-orange-600 font-extrabold" />
-                <span>5. 3D Model ve Slicing Kontrol</span>
+                <span>5. 3D Model & Slicing Control</span>
               </h2>
 
               <div className="space-y-3 bg-white p-3 rounded-lg border border-slate-200 shadow-xs">
                 <div>
-                  <label className="block text-[10px] font-sans text-slate-500 font-bold uppercase mb-1">Katılaştırma Biçimi (Process Type):</label>
+                  <label className="block text-[10px] font-sans text-slate-500 font-bold uppercase mb-1">3D Solidification Pattern (Process Type):</label>
                   <select
                     value={opType}
                     onChange={(e) => setOpType(e.target.value as 'extrude' | 'revolve')}
                     className="w-full bg-slate-50 border border-slate-300 text-xs px-2.5 py-1.5 rounded text-slate-800 outline-none focus:border-orange-500 cursor-pointer font-sans"
                   >
-                    <option value="extrude">Katılaştır (Extrude)</option>
-                    <option value="revolve">Döndür (Revolve)</option>
+                    <option value="extrude">Extrude (Height Wall)</option>
+                    <option value="revolve">Revolve (Radial Lathe)</option>
                   </select>
                 </div>
 
                 {opType === 'extrude' && (
                   <div>
                     <div className="flex justify-between items-center text-[10px] font-mono text-slate-500 mb-1">
-                      <span>Kalınlık (Z-Depth):</span>
+                      <span>Z-Depth (Thickness height):</span>
                       <span className="text-orange-600 font-bold">{depth} mm</span>
                     </div>
                     <input
@@ -6950,7 +7103,7 @@ export default function App() {
                 {opType === 'revolve' && (
                   <div>
                     <div className="flex justify-between items-center text-[10px] font-mono text-slate-500 mb-1">
-                      <span>Revolve Axis (Döndürme Ekseni):</span>
+                      <span>Revolve Axis:</span>
                       <span className="text-orange-600 font-bold uppercase">{revolveAxis}</span>
                     </div>
                     <select
@@ -6958,11 +7111,11 @@ export default function App() {
                       onChange={(e) => setRevolveAxis(e.target.value as 'left' | 'center' | 'right' | 'origin-y' | 'origin-x')}
                       className="w-full bg-slate-50 border border-slate-300 text-xs px-2.5 py-1.5 rounded text-slate-800 outline-none focus:border-orange-500 font-sans cursor-pointer"
                     >
-                      <option value="left">Sol Sınır (Left Edge - Min X)</option>
-                      <option value="center">Merkez Aks (Center Axis)</option>
-                      <option value="right">Sağ Sınır (Right Edge - Max X)</option>
-                      <option value="origin-y">Y-Ekseni (Origin X=0 vertical)</option>
-                      <option value="origin-x">X-Ekseni (Origin Y=0 horizontal)</option>
+                      <option value="left">Left Edge (Min X Boundary)</option>
+                      <option value="center">Center Axis</option>
+                      <option value="right">Right Edge (Max X Boundary)</option>
+                      <option value="origin-y">Vertical Axis (Origin X=0)</option>
+                      <option value="origin-x">Horizontal Axis (Origin Y=0)</option>
                     </select>
                   </div>
                 )}
@@ -6972,7 +7125,7 @@ export default function App() {
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-sans text-slate-500 uppercase font-bold flex items-center gap-1">
                       <Sliders className="w-3 h-3 text-orange-600" />
-                      Yazıcı Doluluk Oranı (Infill):
+                      Infill Density (3D Print Infill):
                     </span>
                     <div className="flex items-center gap-1">
                       <input
@@ -6998,10 +7151,10 @@ export default function App() {
                   {/* Preset Fast Selection Tabs */}
                   <div className="grid grid-cols-4 gap-1">
                     {[
-                      { val: 10, label: '%10', title: 'Görsel Mac.' },
-                      { val: 20, label: '%20', title: 'Standart' },
-                      { val: 40, label: '%40', title: 'Fonksiyon.' },
-                      { val: 75, label: '%75', title: 'Güçlü' }
+                      { val: 10, label: '%10', title: 'Visual Fig.' },
+                      { val: 20, label: '%20', title: 'Standard' },
+                      { val: 40, label: '%40', title: 'Functional' },
+                      { val: 75, label: '%75', title: 'Heavy Duty' }
                     ].map((pres, pIdx) => (
                       <button
                         key={pIdx}
@@ -7022,19 +7175,19 @@ export default function App() {
                   <div className="bg-orange-50/60 border border-orange-200/50 rounded-lg p-2 text-[10px] text-slate-700 leading-relaxed font-sans text-left">
                     {infill <= 15 ? (
                       <p>
-                        <strong className="text-orange-700">%0 - %15 Doluluk:</strong> Sadece görsel amaçlı maketler, figürler ve vitrin modelleri için kullanılır. Minimum malzeme tüketir ve en hızlı sürede basılır.
+                        <strong className="text-orange-700">0% - 15% Infill:</strong> Used for visual figurines, display mockups, and cosmetic prototypes. Minimizes filament consumption and prints fast.
                       </p>
                     ) : infill <= 30 ? (
                       <p>
-                        <strong className="text-orange-700">%15 - %30 Doluluk:</strong> Günlük kullanımdaki biblolar, basit kutular, telefon standları gibi parçalar için en çok tercih edilen <strong className="text-orange-700">"ideal standart"</strong> aralıktır.
+                        <strong className="text-orange-700">15% - 30% Infill:</strong> Ideal standard range for general items, holders, mounts, casing and decorative pieces.
                       </p>
                     ) : infill <= 50 ? (
                       <p>
-                        <strong className="text-orange-700">%30 - %50 Doluluk:</strong> Az da olsa yük taşıyacak, mekanik veya fonksiyonel parçalar (örneğin ufak aparatlar ve braketler) için idealdir.
+                        <strong className="text-orange-700">30% - 50% Infill:</strong> Suited for light functional prototypes, brackets, mechanical joints and minor tooling adapters.
                       </p>
                     ) : (
                       <p>
-                        <strong className="text-orange-700">%50 ve Üzeri Doluluk:</strong> Ciddi ağırlık ve basınca maruz kalacak ağır hizmet parçaları için tercih edilir.
+                        <strong className="text-orange-700">50%+ Infill:</strong> Highly robust setting suited for heavy duty components, stress-bearing anchors, and rugged engineering parts.
                       </p>
                     )}
                   </div>
@@ -7043,26 +7196,26 @@ export default function App() {
                 {/* 3D Print Metrics & Estimates Desk */}
                 <div className="border-t border-slate-200 pt-2.5 space-y-1.5 font-sans text-[10px] text-slate-500 text-left">
                   <div className="flex justify-between items-center text-[10px] uppercase tracking-wide text-slate-600 pb-0.5 font-bold">
-                    <span>3D Baskı ve Filament Analizi</span>
-                    <span className="text-[8px] px-1 bg-slate-100 rounded text-slate-450 uppercase font-mono">Hızlı Hesap</span>
+                    <span>3D Slicing & Filament Analytics</span>
+                    <span className="text-[8px] px-1 bg-slate-100 rounded text-slate-450 uppercase font-mono">Stats Calc</span>
                   </div>
                   
                   <div className="flex justify-between bg-slate-50/80 p-1.5 rounded border border-slate-200 items-center">
-                    <span>Toplam Katı Hacmi:</span>
+                    <span>Total Solid Volume:</span>
                     <span className="text-slate-800 font-bold font-mono">
-                      {volumeCm3 > 0 ? `${volumeCm3.toFixed(2)} cm³ (${volumeMm3.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} mm³)` : '0.00 cm³'}
+                      {volumeCm3 > 0 ? `${volumeCm3.toFixed(2)} cm³ (${volumeMm3.toLocaleString('en-US', { maximumFractionDigits: 0 })} mm³)` : '0.00 cm³'}
                     </span>
                   </div>
 
                   <div className="flex justify-between bg-slate-50/80 p-1.5 rounded border border-slate-200 items-center">
-                    <span>Filament Ağırlığı:</span>
+                    <span>Filament Mass Weight:</span>
                     <span className="text-orange-650 font-extrabold font-mono">
-                      {volumeCm3 > 0 ? `${estimatedWeightG.toFixed(1)} gram (PLA)` : '0.0 gram'}
+                      {volumeCm3 > 0 ? `${estimatedWeightG.toFixed(1)} grams (PLA)` : '0.0 grams'}
                     </span>
                   </div>
 
                   <div className="flex justify-between bg-slate-50/80 p-1.5 rounded border border-slate-200 items-center">
-                    <span>Tahmini Baskı Süresi:</span>
+                    <span>Estimated Printing Time:</span>
                     <span className="text-amber-600 font-extrabold flex items-center gap-1 font-mono">
                       <Flame className="w-2.5 h-2.5 animate-pulse text-orange-600" />
                       {formatPrintTime(estimatedMinutes)}
@@ -7077,27 +7230,27 @@ export default function App() {
                 <button
                   onClick={executeStlExport}
                   className="flex items-center justify-center gap-1.5 py-2 px-3 rounded text-xs font-bold bg-orange-600 hover:bg-orange-600/90 text-white transition cursor-pointer shadow-sm shadow-orange-50 border border-orange-500"
-                  title="Üretim kalitesinde 3D STL dosyası indir"
+                  title="Export high fidelity 3D STL mesh file"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>STL Model İndir</span>
+                  <span>Export 3D STL</span>
                 </button>
                 <button
                   onClick={exportToDXF}
                   className="flex items-center justify-center gap-1.5 py-2 px-3 rounded text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-250 transition cursor-pointer"
-                  title="2D CAD DXF Keyline Çizimi indir"
+                  title="Export draft profile lines as 2D DXF format"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>DXF Profil İndir</span>
+                  <span>Export 2D DXF</span>
                 </button>
               </div>
               <button
                 onClick={exportToPDF}
                 className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 rounded text-xs font-black bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white transition cursor-pointer border border-orange-500 shadow-md shadow-orange-100"
-                title="Mavi Kopya Şablon Çizimini PDF olarak kaydet"
+                title="Generate standard workshop drawing layout as blueprint PDF"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Teknik Çizim PDF Blueprint</span>
+                <span>Download Tech PDF Drawing</span>
               </button>
             </div>
           </div>
@@ -7122,14 +7275,14 @@ export default function App() {
               <div className="absolute top-14 left-3 right-3 z-30 bg-zinc-900/95 border-2 border-orange-500/50 backdrop-blur rounded-lg p-3 shadow-xl flex items-center justify-between gap-3 text-left">
                 <div className="flex items-start gap-2.5">
                   <div className="p-1 px-2 rounded font-bold font-mono text-[10px] bg-orange-600/30 text-orange-200 uppercase shrink-0">
-                    {activeSegmentStretch ? "📐 STRETCH AKTİF" : "📦 MOVE AKTİF"}
+                    {activeSegmentStretch ? "📐 STRETCH ACTIVE" : "📦 MOVE ACTIVE"}
                   </div>
                   <div>
                     <span className="text-xs font-bold text-zinc-200 block">
-                      {activeSegmentStretch ? "Kenar Esnetme (Edge Stretch) Konumlandırması" : "Şekil Taşıma (Shape Move) Konumlandırması"}
+                      {activeSegmentStretch ? "Edge Stretch Interactive Placement" : "Shape Move Interactive Placement"}
                     </span>
                     <span className="text-[10px] text-zinc-500 block">
-                      Fareyi oynatarak konumu ayarlayın. Yerleştirmek için ekrana veya Uygula tuşuna tıklayın. İptal için ESC.
+                      Move mouse cursor to coordinate. Click or select Apply to place onto sketch. Escape cancels.
                     </span>
                   </div>
                 </div>
@@ -7140,11 +7293,11 @@ export default function App() {
                       setActiveSegmentMove(null);
                       setSnapPoint(null);
                       setTrackedLines([]);
-                      logCommandResponse("Değişiklik kaydedildi.");
+                      logCommandResponse("Modification applied.");
                     }}
                     className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-[10px] font-mono font-bold text-white rounded transition cursor-pointer uppercase text-center"
                   >
-                    Uygula
+                    Apply
                   </button>
                   <button
                     onClick={() => {
@@ -7169,11 +7322,11 @@ export default function App() {
                       setActiveSegmentMove(null);
                       setSnapPoint(null);
                       setTrackedLines([]);
-                      logCommandResponse("Sürükleme işlemi iptal edildi.");
+                      logCommandResponse("Drag operation canceled.");
                     }}
                     className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-[10px] font-mono font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer uppercase text-center"
                   >
-                    Vazgeç
+                    Cancel
                   </button>
                 </div>
               </div>
@@ -7184,14 +7337,14 @@ export default function App() {
               <div className="absolute top-14 left-3 right-3 z-30 bg-zinc-900/95 border-2 border-amber-500/80 backdrop-blur rounded-lg p-3 shadow-xl flex items-center justify-between gap-3 text-left animate-pulse">
                 <div className="flex items-start gap-2.5">
                   <div className="p-1 px-2 rounded font-bold font-mono text-[10px] bg-amber-600/30 text-amber-200 uppercase shrink-0">
-                    🔄 DÖNDÜRME NOKTASI SEÇİN
+                    🔄 SELECT ROTATION PIVOT POINT
                   </div>
                   <div>
                     <span className="text-xs font-bold text-zinc-200 block">
-                      Döndürme {pendingRotateAngle}° derece olarak uygulanacak.
+                      Rotation will be applied at {pendingRotateAngle}°.
                     </span>
                     <span className="text-[10px] text-zinc-400 block">
-                      Döndürme merkez noktasını belirlemek için lütfen ekran üzerinde bir yere veya bir düğüm noktasına tıklayın. İptal için 'İptal'e tıklayın.
+                      Please click anywhere on the canvas or a node point to define the rotation center. Click 'Cancel' to abort.
                     </span>
                   </div>
                 </div>
@@ -7199,11 +7352,11 @@ export default function App() {
                   <button
                     onClick={() => {
                       setPendingRotateAngle(null);
-                      logCommandResponse("Döndürme işlemi iptal edildi.");
+                      logCommandResponse("Rotation operation canceled.");
                     }}
                     className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-[10px] font-mono font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer uppercase text-center"
                   >
-                    İptal (ESC)
+                    Cancel (ESC)
                   </button>
                 </div>
               </div>
@@ -7214,14 +7367,14 @@ export default function App() {
               <div className="absolute top-14 left-3 right-3 z-30 bg-zinc-900/95 border-2 border-amber-500/80 backdrop-blur rounded-lg p-3 shadow-xl flex items-center justify-between gap-3 text-left animate-pulse">
                 <div className="flex items-start gap-2.5">
                   <div className="p-1 px-2 rounded font-bold font-mono text-[10px] bg-amber-600/30 text-amber-200 uppercase shrink-0">
-                    🔄 DÖNDÜRME MERKEZİ SEÇİN
+                    🔄 SELECT ROTATION CENTER
                   </div>
                   <div>
                     <span className="text-xs font-bold text-zinc-200 block">
-                      Döndürme Merkez Noktası Belirleme
+                      Determine custom rotation center (Pivot Point)
                     </span>
                     <span className="text-[10px] text-zinc-400 block">
-                      Döndürme merkezi (pivot) yapmak istediğiniz bir noktaya tıklayın. Bu nokta etrafındaki döndürme adımlarıyla çizimi hassaslaştırabilirsiniz.
+                      Click any point to set as pivot rotation center. Rotation steps will rotate selected assets around this point.
                     </span>
                   </div>
                 </div>
@@ -7229,11 +7382,11 @@ export default function App() {
                   <button
                     onClick={() => {
                       setRotationCenterSelectMode(false);
-                      logCommandResponse("Döndürme merkezi seçimi iptal edildi.");
+                      logCommandResponse("Rotation center selection canceled.");
                     }}
                     className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-[10px] font-mono font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer uppercase text-center"
                   >
-                    İptal (ESC)
+                    Cancel (ESC)
                   </button>
                 </div>
               </div>
@@ -7242,10 +7395,10 @@ export default function App() {
             {/* Interactive parametric segment dimension editor popup */}
             {editingSegmentIdx !== null && editingPathIdx !== null && (
               <div className="absolute top-14 left-3 bg-zinc-900/95 border-2 border-amber-500 rounded-lg p-3 text-xs w-[250px] shadow-2xl z-40 space-y-2 backdrop-blur animate-fade-in">
-                <div className="flex justify-between items-center pb-1.5 border-b border-zinc-805">
+                <div className="flex justify-between items-center pb-1.5 border-b border-zinc-850">
                   <span className="font-bold text-amber-400 font-mono flex items-center gap-1.5 uppercase tracking-wide text-[10px]">
                     <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                    Ölçülendirme Düzenle
+                    Edit Dimension
                   </span>
                   <button 
                     onClick={() => {
@@ -7259,7 +7412,7 @@ export default function App() {
                 </div>
                 <div>
                   <div className="text-[10px] text-zinc-400 mb-1.5 font-mono">
-                    Küme segmenti: <span className="text-zinc-200 font-bold font-mono">K-{editingSegmentIdx + 1}</span> ({editingPathIdx === -1 ? "Aktif Çizim" : "Katman Şekli #" + editingPathIdx})
+                    Segment link: <span className="text-zinc-200 font-bold font-mono">L-{editingSegmentIdx + 1}</span> ({editingPathIdx === -1 ? "Active Drawing" : "Layer Shape #" + editingPathIdx})
                   </div>
                   <div className="flex gap-1 items-center">
                     <input
@@ -7275,7 +7428,7 @@ export default function App() {
                         }
                       }}
                       className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 text-xs font-mono outline-none focus:border-amber-500"
-                      placeholder="Örn: 120"
+                      placeholder="e.g. 120"
                       autoFocus
                     />
                     <span className="text-zinc-400 font-mono">mm</span>
@@ -7291,7 +7444,7 @@ export default function App() {
                     }}
                     className="flex-1 py-1 bg-amber-600 hover:bg-amber-500 text-zinc-950 rounded font-bold transition text-center cursor-pointer text-[11px] font-mono"
                   >
-                    Uygula (Apply)
+                    Apply
                   </button>
                   <button
                     onClick={() => {
@@ -7300,7 +7453,7 @@ export default function App() {
                     }}
                     className="px-2 py-1 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded transition text-[11px] font-mono"
                   >
-                    İptal
+                    Cancel
                   </button>
                 </div>
               </div>
@@ -7312,7 +7465,7 @@ export default function App() {
                 <div className="flex justify-between items-center pb-1.5 border-b border-zinc-850">
                   <span className="font-bold text-pink-400 font-mono flex items-center gap-1.5 uppercase tracking-wide text-[10px]">
                     <span className="inline-block w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
-                    {isSelectedDimAnEdge ? "📐 Kenar Ölçüsü ve Boyutlandırma" : "📐 Akıllı Konumlandırma"}
+                    {isSelectedDimAnEdge ? "📐 Edge Length & Resizing" : "📐 Smart Positioning"}
                   </span>
                   <button 
                     onClick={() => {
@@ -7324,15 +7477,15 @@ export default function App() {
                   </button>
                 </div>
                 <div>
-                  <p className="text-[10px] text-zinc-400 mb-2 font-mono leading-relaxed">
+                  <p className="text-[10px] text-zinc-400 mb-2 font-mono leading-relaxed select-none">
                     {isSelectedDimAnEdge 
-                      ? "Seçili kenarın boyutunu girerek şekli orantılı veya orantısız şekilde boyutlandırın." 
-                      : "Noktalar arası mesafeyi ayarlayarak şekli veya düğüm noktasını konumlandırın."}
+                      ? "Enter target edge length to resize the shape proportionally or non-proportionally." 
+                      : "Adjust distance between snap points to reposition nodes dynamically."}
                   </p>
                   
                   {/* Target Distance Input */}
                   <label className="block text-[10px] text-zinc-400 font-mono mb-1">
-                    {isSelectedDimAnEdge ? "Yeni Kenar Uzunluğu:" : "Hedef Mesafe:"}
+                    {isSelectedDimAnEdge ? "New Edge Length:" : "Target Distance:"}
                   </label>
                   <div className="flex gap-1.5 items-center">
                     <input
@@ -7349,7 +7502,7 @@ export default function App() {
                         }
                       }}
                       className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-zinc-100 text-xs font-mono outline-none focus:border-pink-500 font-bold"
-                      placeholder="Örn: 150"
+                      placeholder="e.g. 150"
                       autoFocus
                     />
                     <span className="text-zinc-400 font-mono font-bold">mm</span>
@@ -7359,7 +7512,7 @@ export default function App() {
                 {/* Positioning Options Toggles */}
                 {!isSelectedDimAnEdge && (
                   <div className="p-2 bg-zinc-950 border border-zinc-850 rounded space-y-2">
-                    <span className="text-[9px] uppercase font-mono text-zinc-500 block">Konumlandırma Modu:</span>
+                    <span className="text-[9px] uppercase font-mono text-zinc-500 block">Positioning Method:</span>
                     <div className="flex flex-col gap-1.5">
                       <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
                         <input
@@ -7369,7 +7522,7 @@ export default function App() {
                           onChange={() => setMoveEntireShapeOnDimChange(true)}
                           className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
                         />
-                        <span>Tüm Şekli Kaydır (Önerilen)</span>
+                        <span>Shift Entire Shape (Recommended)</span>
                       </label>
                       <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
                         <input
@@ -7379,7 +7532,7 @@ export default function App() {
                           onChange={() => setMoveEntireShapeOnDimChange(false)}
                           className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
                         />
-                        <span>Sadece Bu Noktayı Taşı</span>
+                        <span>Move Target Node Only</span>
                       </label>
                     </div>
                   </div>
@@ -7396,14 +7549,14 @@ export default function App() {
                     }}
                     className="flex-1 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded font-bold transition text-center cursor-pointer text-[11px] font-mono"
                   >
-                    {isSelectedDimAnEdge ? "Boyutlandır (Apply)" : "Konumlandır (Apply)"}
+                    {isSelectedDimAnEdge ? "Resize (Apply)" : "Reposition (Apply)"}
                   </button>
                   <button
                     onClick={() => handleDeleteDimension(selectedDimensionId)}
                     className="px-2 py-1.5 bg-red-950 hover:bg-red-900 border border-red-900 text-red-100 rounded transition text-[11px] font-mono"
-                    title="Ölçülendirmeyi çizimden siler"
+                    title="Delete this dimension label from canvas"
                   >
-                    Sil
+                    Delete
                   </button>
                   <button
                     onClick={() => {
@@ -7411,7 +7564,7 @@ export default function App() {
                     }}
                     className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded transition text-[11px] font-mono"
                   >
-                    Vazgeç
+                    Cancel
                   </button>
                 </div>
               </div>
@@ -7425,15 +7578,15 @@ export default function App() {
               </div>
               <div className="flex flex-col gap-0.5 text-zinc-300 font-bold text-[11px]">
                 <div className="flex justify-between gap-4">
-                  <span>X (Hizalama):</span>
+                  <span>X (Horizontal):</span>
                   <span className="text-rose-400">{hoverCoords ? hoverCoords.x.toFixed(1) : "0.0"} mm</span>
                 </div>
                 <div className="flex justify-between gap-4">
-                  <span>Y (Düşey):</span>
+                  <span>Y (Vertical):</span>
                   <span className="text-emerald-400">{hoverCoords ? hoverCoords.y.toFixed(1) : "0.0"} mm</span>
                 </div>
                 <div className="flex justify-between gap-4 text-zinc-500 text-[9px] pt-1.5 border-t border-zinc-850/50">
-                  <span>Ölçek (Zoom):</span>
+                  <span>Scale (Zoom):</span>
                   <span className="text-zinc-400">{Math.round(viewZoom * 100)}%</span>
                 </div>
               </div>
@@ -7442,22 +7595,22 @@ export default function App() {
             {/* Legend guide right-top */}
             <div className="absolute top-3 right-3 bg-zinc-900/85 border border-zinc-850 backdrop-blur p-2.5 rounded text-[10px] font-mono text-zinc-400 pointer-events-none z-10 space-y-1">
               <div className="flex items-center gap-1.5 font-bold text-zinc-300">
-                <span>🖱️ CAD Kontrolleri</span>
+                <span>🖱️ CAD Viewport Guides</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 bg-blue-500 inline-block rounded-sm" />
-                Sağ Tık + Sürükle: Seçim Kutusu
+                Right Click + Drag: Box Selection
               </div>
               <div className="flex items-center gap-1.5 text-zinc-300">
                 <span className="w-2.5 h-2.5 bg-amber-500 inline-block rounded-sm" />
-                Sol Tık + Sürükle: Çoklu Taşıma
+                Left Click + Drag: Multi-Move
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 border border-rose-600 bg-rose-600/30 inline-block" />
-                Endpoint Yakalama
+                Endpoint Node Snapping
               </div>
               <div className="text-zinc-500 text-[9px] pt-1 border-t border-zinc-800">
-                Wheel: Sahnede Yakınlaşma • Orta Tuş: Pan
+                Wheel: Orbit Zoom • Middle Mouse: Pan
               </div>
             </div>
 
@@ -7486,7 +7639,7 @@ export default function App() {
           <div 
             onMouseDown={() => { isDraggingSplitRef.current = true; }}
             className="hidden md:flex flex-col items-center justify-center w-1 hover:w-2 bg-zinc-900 border-l border-r border-zinc-850 hover:border-amber-500/80 hover:bg-amber-500/20 cursor-col-resize transition-all shrink-0 self-stretch group z-20"
-            title="Sürükleyerek 2D/3D ekran oranını değiştirin"
+            title="Drag to adjust 2D/3D viewport splitter ratio"
           >
             <div className="w-0.5 h-10 bg-zinc-700 rounded-full group-hover:bg-amber-400 group-hover:h-14 transition-all" />
           </div>
@@ -7526,7 +7679,7 @@ export default function App() {
           <input
             type="text"
             className="flex-1 bg-transparent px-2 py-1 outline-none text-zinc-100 font-bold placeholder-zinc-600"
-            placeholder="Şu komutları girin: L (Line), R (Rect), C (Circle), POL (Polygon), F (Fillet), CLEAR (Sıfırla)"
+            placeholder="Available CAD CLI: L (Line), R (Rect), C (Circle), POL (Polygon), F (Fillet), CHAMFER, CLEAR (Reset)"
             value={cmdText}
             onChange={(e) => setCmdText(e.target.value)}
           />
@@ -7541,10 +7694,10 @@ export default function App() {
               <span className="p-1 rounded bg-blue-500/20 text-blue-400">
                 <Maximize className="w-4 h-4 rotate-45" />
               </span>
-              Çokgen Çizim Ayarları
+              Polygon Sketch Options
             </h3>
             <p className="text-xs text-zinc-400 mb-4 font-mono leading-relaxed text-left">
-              Çizmek istediğiniz düzgün çokgenin kenar sayısını girin veya hızlı şablonlardan birini seçin:
+              Enter the number of segments for your regular polygon or select a template preset below:
             </p>
             
             {/* Quick Presets */}
@@ -7559,8 +7712,8 @@ export default function App() {
                   className="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-500 text-zinc-300 font-mono text-[11px] py-1.5 rounded transition font-bold"
                 >
                   {s}
-                  <div className="text-[7px] text-zinc-500 font-sans tracking-tight leading-none pt-0.5 font-normal">
-                    {s === 3 ? 'Üçgen' : s === 4 ? 'Kare' : s === 5 ? 'Beşgen' : s === 6 ? 'Altıgen' : 'Sekizgen'}
+                  <div className="text-[7px] text-zinc-500 font-sans tracking-tight leading-none pt-0.5 font-normal animate-fade-in">
+                    {s === 3 ? 'Triangle' : s === 4 ? 'Square' : s === 5 ? 'Pentagon' : s === 6 ? 'Hexagon' : 'Octagon'}
                   </div>
                 </button>
               ))}
@@ -7568,7 +7721,7 @@ export default function App() {
 
             {/* Polygon Construction Type Selector */}
             <div className="space-y-1.5 mb-4 text-left">
-              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-mono font-bold">Çizim Yöntemi:</label>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-mono font-bold">Construction Type:</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -7579,9 +7732,9 @@ export default function App() {
                       : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-300'
                   }`}
                 >
-                  Köşegenden
+                  Inscribed (Corner)
                   <div className="text-[8px] opacity-70 font-sans tracking-tight leading-none mt-0.5 font-normal">
-                    Dış Teğet Çember
+                    Circumscribed Circle
                   </div>
                 </button>
                 <button
@@ -7593,9 +7746,9 @@ export default function App() {
                       : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-300'
                   }`}
                 >
-                  İç Teğetten
+                  Circumscribed (Flat)
                   <div className="text-[8px] opacity-70 font-sans tracking-tight leading-none mt-0.5 font-normal">
-                    İç Teğet Çember
+                    Inscribed Circle
                   </div>
                 </button>
               </div>
@@ -7603,7 +7756,7 @@ export default function App() {
 
             {/* Custom Input */}
             <div className="space-y-1.5 mb-5 text-left">
-              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-mono font-bold">Özel Kenar Sayısı (3 - 32):</label>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-mono font-bold">Custom Polygon Sides (3 - 32):</label>
               <div className="flex gap-2">
                 <input
                   type="number"
@@ -7637,7 +7790,7 @@ export default function App() {
                 }}
                 className="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition cursor-pointer"
               >
-                Vazgeç
+                Cancel
               </button>
               <button
                 type="button"
@@ -7649,7 +7802,7 @@ export default function App() {
                 }}
                 className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold transition shadow cursor-pointer"
               >
-                Uygula ve Çiz
+                Build and Draw
               </button>
             </div>
           </div>
