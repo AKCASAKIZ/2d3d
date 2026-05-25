@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { jsPDF } from 'jspdf';
 import {
   PenTool,
   Square,
@@ -4771,11 +4772,289 @@ export default function App() {
     const blob = new Blob([dxf], { type: 'application/dxf' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `ZekiCAD_${activeLayer.name || 'Sketch'}.dxf`;
+    link.download = `CADERIM_${activeLayer.name || 'Sketch'}.dxf`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     logCommandResponse('2D Profil başarıyla DXF olarak kaydedildi.');
+  };
+
+  // TECHNICAL BLUEPRINT EXPORT IN PDF FORMAT USING VECTOR RENDERING
+  const exportToPDF = () => {
+    try {
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const visibleLayers = layers.filter(l => l.visible);
+
+      // Collect all drawing points to compute optimal scaling bounds
+      const allPts: Point[] = [];
+      visibleLayers.forEach(l => {
+        if (l.finalPoints) allPts.push(...l.finalPoints);
+        if (l.paths) {
+          l.paths.forEach(p => allPts.push(...p));
+        }
+        if (l.dimensions) {
+          l.dimensions.forEach(d => {
+            allPts.push(d.p1);
+            allPts.push(d.p2);
+          });
+        }
+      });
+
+      let minX = -100, maxX = 100, minY = -100, maxY = 100;
+      if (allPts.length > 0) {
+        minX = Math.min(...allPts.map(p => p.x));
+        maxX = Math.max(...allPts.map(p => p.x));
+        minY = Math.min(...allPts.map(p => p.y));
+        maxY = Math.max(...allPts.map(p => p.y));
+      }
+
+      // Safe outer safety margins of bounds
+      const spanX = maxX - minX;
+      const spanY = maxY - minY;
+      const safetyPadding = Math.max(15, Math.max(spanX, spanY) * 0.15);
+      
+      minX -= safetyPadding;
+      maxX += safetyPadding;
+      minY -= safetyPadding;
+      maxY += safetyPadding;
+
+      const wGeom = maxX - minX;
+      const hGeom = maxY - minY;
+
+      // Landscape A4 Page dimension: 297mm x 210mm
+      // Area limits avoiding overlaps
+      const marginX0 = 15;
+      const marginY0 = 15;
+      const pWidth = 267; // 297 - 30 margin
+      const pHeight = 145; // 210 - 65 margin grid
+
+      // Perfect scale fit calculation
+      const scale = Math.min(pWidth / wGeom, pHeight / hGeom);
+
+      // Map CAD Coordinates (center of shape on center of area)
+      const cGeomX = (minX + maxX) / 2;
+      const cGeomY = (minY + maxY) / 2;
+      const cPdfX = marginX0 + pWidth / 2;
+      const cPdfY = marginY0 + pHeight / 2;
+
+      const toPdfCoords = (pt: Point) => {
+        const rx = cPdfX + (pt.x - cGeomX) * scale;
+        const ry = cPdfY - (pt.y - cGeomY) * scale; // Y is inverted in PDF drawing
+        return { x: rx, y: ry };
+      };
+
+      // 1. Draw Professional Grid Paper block matching CAD origin
+      let gridInterval = 10;
+      if (wGeom > 300) gridInterval = 50;
+      else if (wGeom > 800) gridInterval = 100;
+      else if (wGeom < 40) gridInterval = 5;
+
+      doc.setLineWidth(0.06);
+      doc.setDrawColor(210, 222, 235); // Engineering graph blue gray
+      doc.setTextColor(148, 163, 184);
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(6.5);
+
+      const startXDiv = Math.floor(minX / gridInterval) * gridInterval;
+      const endXDiv = Math.ceil(maxX / gridInterval) * gridInterval;
+      const startYDiv = Math.floor(minY / gridInterval) * gridInterval;
+      const endYDiv = Math.ceil(maxY / gridInterval) * gridInterval;
+
+      // Draw Grid Verticals
+      for (let gx = startXDiv; gx <= endXDiv; gx += gridInterval) {
+        const pTop = toPdfCoords({ x: gx, y: minY });
+        if (pTop.x >= 12 && pTop.x <= 285) {
+          doc.line(pTop.x, 12, pTop.x, 198);
+          doc.text(`${gx}mm`, pTop.x + 0.5, 15);
+        }
+      }
+
+      // Draw Grid Horizontals
+      for (let gy = startYDiv; gy <= endYDiv; gy += gridInterval) {
+        const pLeft = toPdfCoords({ x: minX, y: gy });
+        if (pLeft.y >= 12 && pLeft.y <= 198) {
+          doc.line(12, pLeft.y, 285, pLeft.y);
+          doc.text(`${gy}mm`, 13, pLeft.y - 0.5);
+        }
+      }
+
+      // 2. Draw outer border borders around sheet
+      doc.setLineWidth(0.6);
+      doc.setDrawColor(15, 23, 42); // slate 900
+      doc.rect(10, 10, 277, 190); // Landscape card borders
+
+      // Second elegant double line border
+      doc.setLineWidth(0.18);
+      doc.rect(11.5, 11.5, 274, 187);
+
+      // 3. Render Technical Title Sheet Block in standard lower-right corner
+      const tbX = 177;
+      const tbY = 163;
+      const tbW = 110;
+      const tbH = 35;
+
+      // Fill background of Title Block beautifully
+      doc.setLineWidth(0.4);
+      doc.setDrawColor(15, 23, 42);
+      doc.setFillColor(248, 250, 252); // extremely clean white-slate fill
+      doc.rect(tbX, tbY, tbW, tbH, "FD");
+
+      // Internal divisions of Title panel
+      doc.setLineWidth(0.18);
+      doc.line(tbX, tbY + 11, tbX + tbW, tbY + 11);
+      doc.line(tbX, tbY + 23, tbX + tbW, tbY + 23);
+      doc.line(tbX + 55, tbY, tbX + 55, tbY + 23);
+      doc.line(tbX + 80, tbY + 23, tbX + 80, tbY + 35);
+
+      // Row 1 elements
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139); // Slate-500
+      doc.text("LİSANS SAHİBİ & PROJE ADI", tbX + 3, tbY + 3.5);
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(15, 23, 42);
+      doc.text("CADERİM BİLİŞİM", tbX + 3, tbY + 8.5);
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("KATMAN / COMPONENT", tbX + 58, tbY + 3.5);
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(activeLayer.name || "Base Profile", tbX + 58, tbY + 8.5);
+
+      // Row 2 elements
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("TASARIMCI / E-POSTA", tbX + 3, tbY + 15);
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(51, 65, 85);
+      doc.text("peopleonthearth@gmail.com", tbX + 3, tbY + 20);
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("YAZILIM / VERSİYON", tbX + 58, tbY + 15);
+      doc.setFont("Helvetica", "italic");
+      doc.setFontSize(7.5);
+      doc.setTextColor(217, 119, 6); // CADERİM amber color
+      doc.text("CADERİM v14.0 Sketcher", tbX + 58, tbY + 20);
+
+      // Row 3 elements
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("TANZİM TARİHİ", tbX + 3, tbY + 26.5);
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(15, 23, 42);
+      doc.text(new Date().toLocaleDateString('tr-TR'), tbX + 3, tbY + 31.5);
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("KARTELA ÖLÇEĞİ", tbX + 58, tbY + 26.5);
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`1:${(1 / scale).toFixed(1)}`, tbX + 58, tbY + 31.5);
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("MÜHENDİSLİK BİRİMİ", tbX + 83, tbY + 26.5);
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(15, 23, 42);
+      doc.text("mm", tbX + 83, tbY + 31.5);
+
+      // 4. Render CAD Elements visibly layered
+      visibleLayers.forEach(l => {
+        const isAct = l.id === activeLayerId;
+        doc.setLineWidth(isAct ? 0.45 : 0.22);
+        
+        // Match Layer RGB colors perfectly from hex
+        const colorHex = l.color || "#475569";
+        const rColor = parseInt(colorHex.slice(1, 3), 16) || 0;
+        const gColor = parseInt(colorHex.slice(3, 5), 16) || 0;
+        const bColor = parseInt(colorHex.slice(5, 7), 16) || 0;
+        doc.setDrawColor(rColor, gColor, bColor);
+
+        // Path geometries
+        const pathsToDraw: { pts: Point[], closed: boolean }[] = [];
+        if (l.finalPoints && l.finalPoints.length > 0) {
+          pathsToDraw.push({ pts: l.finalPoints, closed: !!l.isClosed });
+        }
+        if (l.paths) {
+          l.paths.forEach(p => {
+            if (p.length > 0) {
+              const checkClosed = p.length > 2 && Math.hypot(p[p.length - 1].x - p[0].x, p[p.length - 1].y - p[0].y) < 0.05;
+              pathsToDraw.push({ pts: p, closed: checkClosed });
+            }
+          });
+        }
+
+        pathsToDraw.forEach(({ pts, closed }) => {
+          for (let i = 0; i < pts.length; i++) {
+            const currentPt = pts[i];
+            const currentPdfCoords = toPdfCoords(currentPt);
+
+            // Vector Circles
+            if (currentPt.circleData) {
+              const cc = toPdfCoords(currentPt.circleData.center);
+              const cr = currentPt.circleData.radius * scale;
+              doc.circle(cc.x, cc.y, cr, "S");
+            }
+
+            // Draw connecting lines
+            if (i < pts.length - 1) {
+              const nextPdfCoords = toPdfCoords(pts[i + 1]);
+              doc.line(currentPdfCoords.x, currentPdfCoords.y, nextPdfCoords.x, nextPdfCoords.y);
+            } else if (closed && pts.length > 2) {
+              const firstPdfCoords = toPdfCoords(pts[0]);
+              doc.line(currentPdfCoords.x, currentPdfCoords.y, firstPdfCoords.x, firstPdfCoords.y);
+            }
+          }
+        });
+
+        // 5. Draw Dimension Lines overlaid professionally in beautiful gold/grey tint lines
+        if (l.dimensions && l.dimensions.length > 0) {
+          l.dimensions.forEach(d => {
+            const p1Pdf = toPdfCoords(d.p1);
+            const p2Pdf = toPdfCoords(d.p2);
+
+            doc.setLineWidth(0.12);
+            doc.setDrawColor(220, 110, 50); // Light orange drafting dimension lines
+            doc.line(p1Pdf.x, p1Pdf.y, p2Pdf.x, p2Pdf.y);
+
+            // Bounds ticks indicators
+            doc.line(p1Pdf.x - 1, p1Pdf.y, p1Pdf.x + 1, p1Pdf.y);
+            doc.line(p1Pdf.x, p1Pdf.y - 1, p1Pdf.x, p1Pdf.y + 1);
+            doc.line(p2Pdf.x - 1, p2Pdf.y, p2Pdf.x + 1, p2Pdf.y);
+            doc.line(p2Pdf.x, p2Pdf.y - 1, p2Pdf.x, p2Pdf.y + 1);
+
+            // Centered dimension numerical string value label
+            doc.setFont("Helvetica", "bold");
+            doc.setFontSize(6.5);
+            doc.setTextColor(190, 80, 20); // Darker amber metric color
+            
+            const textX = (p1Pdf.x + p2Pdf.x) / 2;
+            const textY = (p1Pdf.y + p2Pdf.y) / 2 - 1.2;
+            doc.text(`${Number(d.value).toFixed(1)} mm`, textX, textY, { align: "center" });
+          });
+        }
+      });
+
+      // Save PDF down
+      doc.save(`CADERIM_Teknik_Resim_Blueprint_${activeLayer.name || 'Sketch'}.pdf`);
+      logCommandResponse('✨ Mükemmel! 2D Teknik Resim Şeması PDF Blueprint olarak başarıyla dışa aktarıldı.');
+    } catch (err: any) {
+      logCommandResponse(`PDF oluşturma hatası: ${err.message || err}`);
+    }
   };
 
   // Save entire sketch session as JSON
@@ -6588,6 +6867,14 @@ export default function App() {
                 <span>DXF Profile</span>
               </button>
             </div>
+            <button
+              onClick={exportToPDF}
+              className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded text-xs font-black bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-zinc-950 transition cursor-pointer border border-amber-500/50 shadow-lg shadow-amber-950/20"
+              title="Mavi Kopya Şablon Çizimini PDF olarak kaydet"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Teknik Resim PDF Blueprint</span>
+            </button>
           </div>
         </aside>
 
