@@ -565,6 +565,7 @@ export default function App() {
   const [selectedDimensionId, setSelectedDimensionId] = useState<string | null>(null);
   const [editingDimensionValueInput, setEditingDimensionValueInput] = useState<string>("");
   const [moveEntireShapeOnDimChange, setMoveEntireShapeOnDimChange] = useState<boolean>(true);
+  const [moveEntireShapeOnCoordChange, setMoveEntireShapeOnCoordChange] = useState<boolean>(true);
 
   // BG Image reference
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
@@ -1127,7 +1128,15 @@ export default function App() {
       movePoint = 'p2';
     } else if (isP1NearShape && isP2NearShape) {
       // Both are near shape nodes. Default to moving the second point (p2) relative to first (p1).
-      movePoint = 'p2';
+      // BUT if one is on the main sketch boundaries (finalPoints) and the other is on an inner path detail (paths),
+      // we must NEVER move/shift the main body! We must move the inner path detail instead.
+      if (closestP1.type === 'finalPoints' && closestP2.type === 'paths') {
+        movePoint = 'p2'; // Keep finalPoints (main body) fixed, move inner path!
+      } else if (closestP1.type === 'paths' && closestP2.type === 'finalPoints') {
+        movePoint = 'p1'; // Keep finalPoints (main body) fixed, move inner path!
+      } else {
+        movePoint = 'p2';
+      }
     } else {
       // Neither is close to any drawing node. Move whichever is relatively closer, or default to p2.
       movePoint = minD1 < minD2 ? 'p1' : 'p2';
@@ -2594,6 +2603,54 @@ export default function App() {
   // Update X and Y of selected vertex
   const updateVertexCoords = (newX: number, newY: number) => {
     saveState();
+    
+    // Get the selected vertex and understand coordinates translation
+    const currentPtList = getActivePointsList();
+    if (selectedVertexIdx === null || currentPtList.length === 0 || selectedVertexIdx >= currentPtList.length) return;
+    const currentPoint = currentPtList[selectedVertexIdx];
+    const dx = newX - currentPoint.x;
+    const dy = newY - currentPoint.y;
+
+    if (moveEntireShapeOnCoordChange) {
+      if (selectedPathIdx === -1) {
+        setFinalPoints(prev => prev.map(pt => {
+          const u = { ...pt, x: pt.x + dx, y: pt.y + dy };
+          if (pt.circleData) {
+            u.circleData = {
+              center: { x: pt.circleData.center.x + dx, y: pt.circleData.center.y + dy },
+              radius: pt.circleData.radius
+            };
+          }
+          return u;
+        }));
+        logCommandResponse(`Hassas Konumlandırma: Ana çizim bütünüyle dX:${dx.toFixed(2)}, dY:${dy.toFixed(2)} mm kaydırıldı.`);
+      } else {
+        setLayers(prev => prev.map(l => {
+          if (l.id === activeLayerId && l.paths) {
+            const updatedPaths = l.paths.map((path, idx) => {
+              if (idx === selectedPathIdx) {
+                return path.map(pt => {
+                  const u = { ...pt, x: pt.x + dx, y: pt.y + dy };
+                  if (pt.circleData) {
+                    u.circleData = {
+                      center: { x: pt.circleData.center.x + dx, y: pt.circleData.center.y + dy },
+                      radius: pt.circleData.radius
+                    };
+                  }
+                  return u;
+                });
+              }
+              return path;
+            });
+            return { ...l, paths: updatedPaths };
+          }
+          return l;
+        }));
+        logCommandResponse(`Hassas Konumlandırma: Şekil #${selectedPathIdx + 1} bütünüyle dX:${dx.toFixed(2)}, dY:${dy.toFixed(2)} mm kaydırıldı. Diğer sketç parçaları korunarak konumlandırıldı.`);
+      }
+      return;
+    }
+
     if (selectedPathIdx === -1) {
       setFinalPoints(prev => {
         const updated = [...prev];
@@ -2747,6 +2804,72 @@ export default function App() {
     }));
 
     logCommandResponse(`Hassas Konumlandırma: Seçilen referans noktası X:${targetX.toFixed(2)}, Y:${targetY.toFixed(2)} koordinatına hizalandı (Tüm geometriler ${dx.toFixed(2)}mm , ${dy.toFixed(2)}mm ötelendi).`);
+  };
+
+  // Align/Position ONLY the selected sub-shape containing the chosen node, keeping other designs perfectly locked in place
+  const alignSelectedShapeBySelectedVertex = (targetX: number, targetY: number) => {
+    const data = getSelectedVertexAndNeighbors();
+    if (!data) return;
+    const { current } = data;
+    const dx = targetX - current.x;
+    const dy = targetY - current.y;
+
+    if (dx === 0 && dy === 0) return;
+
+    saveState();
+
+    if (selectedPathIdx === -1) {
+      // Shift only finalPoints (the master boundary loop)
+      setFinalPoints(prev => prev.map(p => {
+        const updatedPt: Point = {
+          ...p,
+          x: p.x + dx,
+          y: p.y + dy
+        };
+        if (p.circleData) {
+          updatedPt.circleData = {
+            center: {
+              x: p.circleData.center.x + dx,
+              y: p.circleData.center.y + dy
+            },
+            radius: p.circleData.radius
+          };
+        }
+        return updatedPt;
+      }));
+      logCommandResponse(`İç Konumlandırma: Ana çeper bütünüyle X:${targetX.toFixed(2)}, Y:${targetY.toFixed(2)} hizasına yerleştirildi. Diğer iç şekiller sabit kaldı.`);
+    } else {
+      // Shift only the specified internal sub-shape from activeLayer.paths
+      setLayers(prev => prev.map(l => {
+        if (l.id === activeLayerId && l.paths) {
+          const updatedPaths = l.paths.map((path, idx) => {
+            if (idx === selectedPathIdx) {
+              return path.map(p => {
+                const updatedPt: Point = {
+                  ...p,
+                  x: p.x + dx,
+                  y: p.y + dy
+                };
+                if (p.circleData) {
+                  updatedPt.circleData = {
+                    center: {
+                      x: p.circleData.center.x + dx,
+                      y: p.circleData.center.y + dy
+                    },
+                    radius: p.circleData.radius
+                  };
+                }
+                return updatedPt;
+              });
+            }
+            return path;
+          });
+          return { ...l, paths: updatedPaths };
+        }
+        return l;
+      }));
+      logCommandResponse(`İç Konumlandırma: Şekil #${selectedPathIdx + 1} seçilen noktası referansıyla X:${targetX.toFixed(2)}, Y:${targetY.toFixed(2)} koordinatına taşındı. Sketçin genel bütünü ve diğer parçalar korunarak konumlandırıldı.`);
+    }
   };
 
   // Parametric updates for line distances
@@ -6877,6 +7000,23 @@ export default function App() {
                         </div>
                       </div>
 
+                      <label className="flex items-start gap-1.5 cursor-pointer select-none text-left py-1.5 px-2 bg-slate-50 hover:bg-slate-100 rounded border border-slate-200 transition mt-1 shadow-xxs">
+                        <input
+                          type="checkbox"
+                          checked={moveEntireShapeOnCoordChange}
+                          onChange={(e) => setMoveEntireShapeOnCoordChange(e.target.checked)}
+                          className="w-3.5 h-3.5 mt-0.5 text-orange-600 focus:ring-orange-500 rounded border-slate-300 bg-white"
+                        />
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-sans font-bold text-slate-700 leading-tight">
+                            Şekli Bir Bütün Olarak Taşı (İç Konumlandırma)
+                          </span>
+                          <span className="text-[8.5px] font-sans text-slate-400 leading-normal mt-0.5">
+                            Seçili noktayı ötelere taşırken geometrinin orijinal bütünü korunur, diğer çizimler sabit kalır.
+                          </span>
+                        </div>
+                      </label>
+
                       <div className="text-[10px] font-bold tracking-wider text-slate-700 uppercase font-sans text-left pt-1.5 border-t border-slate-200">
                         📐 Connected Segment Lengths
                       </div>
@@ -6971,7 +7111,7 @@ export default function App() {
                       CAD Ref Positioning
                     </div>
                     <p className="text-[9px] text-slate-400 leading-normal text-left">
-                      Place the entire sketch onto coordinate space using this point as reference:
+                      Place the shapes onto absolute coordinate space using this selected node as reference handle:
                     </p>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
@@ -7001,21 +7141,30 @@ export default function App() {
                         />
                       </div>
                     </div>
-                    <div className="flex gap-1.5 pt-1">
+                    <div className="flex flex-col gap-1.5 pt-1.5">
                       <button
-                        onClick={() => alignEntireSketchBySelectedVertex(0, 0)}
-                        className="flex-1 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-250 text-[9px] text-slate-600 hover:text-slate-900 rounded font-mono font-bold transition cursor-pointer text-center"
-                        title="Move entire sketch so this node lines up at absolute 0,0"
+                        onClick={() => alignSelectedShapeBySelectedVertex(alignTargetX, alignTargetY)}
+                        className="w-full py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded font-sans font-bold text-[10px] transition cursor-pointer text-center shadow-xs flex items-center justify-center gap-1"
+                        title="İç Konumlandırma: Diğer çizimlere kesinlikle dokunmadan sadece bu seçili şekli/deliği hassas olarak bu koordinata taşır"
                       >
-                        Reset to Origin (0,0)
+                        📍 Yalnızca Bu Şekli Konumlandır
                       </button>
-                      <button
-                        onClick={() => alignEntireSketchBySelectedVertex(alignTargetX, alignTargetY)}
-                        className="flex-1 py-1.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[9px] text-orange-700 hover:text-orange-950 rounded font-mono font-bold transition cursor-pointer text-center"
-                        title="Align the complete drawing group relative to the selected target"
-                      >
-                        Align & Move
-                      </button>
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={() => alignEntireSketchBySelectedVertex(0, 0)}
+                          className="flex-1 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-250 text-[9px] text-slate-600 hover:text-slate-900 rounded font-mono font-bold transition cursor-pointer text-center"
+                          title="Tüm skeçi orijine sıfırlar"
+                        >
+                          Uzaklığı Sıfırla (0,0)
+                        </button>
+                        <button
+                          onClick={() => alignEntireSketchBySelectedVertex(alignTargetX, alignTargetY)}
+                          className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-250 text-[9px] text-slate-700 hover:text-slate-950 rounded font-mono font-bold transition cursor-pointer text-center"
+                          title="Tüm çizimi bütünüyle bu noktaya göre kaydırır"
+                        >
+                          Tüm Skeçi Ötele
+                        </button>
+                      </div>
                     </div>
                   </div>
 
