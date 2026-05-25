@@ -1,5 +1,5 @@
 {
-  "name": "Zeki CAD EXEL",
+  "name": "CADERIM",
   "description": "Smart Track & Midpoint Snap parametric 2D CAD sketcher and 3D extruder tool.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
