@@ -307,6 +307,25 @@ const syncAllLayersDimensions = (layersList: CADLayer[]): CADLayer[] => {
   });
 };
 
+const isColorDark = (color: string): boolean => {
+  if (!color) return true;
+  if (color.startsWith('#')) {
+    const hex = color.substring(1);
+    if (hex.length === 3) {
+      const r = parseInt(hex[0] + hex[0], 16);
+      const g = parseInt(hex[1] + hex[1], 16);
+      const b = parseInt(hex[2] + hex[2], 16);
+      return (r * 0.299 + g * 0.587 + b * 0.114) < 128;
+    } else if (hex.length === 6) {
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      return (r * 0.299 + g * 0.587 + b * 0.114) < 128;
+    }
+  }
+  return true;
+};
+
 export default function App() {
   // Layer state
   const [layers, setLayersRaw] = useState<CADLayer[]>([
@@ -519,6 +538,11 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [infill, setInfill] = useState<number>(20);
   const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [gridSize, setGridSize] = useState<number>(50);
+  const [canvasBgColor, setCanvasBgColor] = useState<string>('#09090b');
+  const [movePointSelectMode, setMovePointSelectMode] = useState<'base_point' | 'target_point' | null>(null);
+  const [copyPointSelectMode, setCopyPointSelectMode] = useState<'base_point' | 'target_point' | null>(null);
+  const [baseSelectionPoint, setBaseSelectionPoint] = useState<Point | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'sketch' | 'layers' | 'dimensions' | '3d'>('sketch');
 
   // Active Layer Dimensions accessor helper (fully automated undo-redo integrated!)
@@ -3002,8 +3026,9 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Clear Screen
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Paint dynamic background color
+    ctx.fillStyle = canvasBgColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
     // Pan & Zoom matrices
@@ -3017,22 +3042,23 @@ export default function App() {
       ctx.globalAlpha = 1.0;
     }
 
-    // 2. Draw Grid Pattern
-    const gridSize = 50;
-    const startX = Math.floor(-panX / viewZoom / gridSize) * gridSize;
+    // 2. Draw Grid Pattern (Adjustable Grid Size)
+    const currentGridSize = gridSize;
+    const startX = Math.floor(-panX / viewZoom / currentGridSize) * currentGridSize;
     const endX = (canvas.width - panX) / viewZoom;
-    const startY = Math.floor(-panY / viewZoom / gridSize) * gridSize;
+    const startY = Math.floor(-panY / viewZoom / currentGridSize) * currentGridSize;
     const endY = (canvas.height - panY) / viewZoom;
 
     if (showGrid) {
-      ctx.strokeStyle = '#cbd5e1'; // Soft slate-300 color for high-visibility light grid
+      const isDark = isColorDark(canvasBgColor);
+      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(15, 23, 42, 0.15)'; // High-contrast dynamic grid lines
       ctx.lineWidth = 0.5 / viewZoom;
       ctx.beginPath();
-      for (let x = startX; x < endX; x += gridSize) {
+      for (let x = startX; x < endX; x += currentGridSize) {
         ctx.moveTo(x, startY);
         ctx.lineTo(x, endY);
       }
-      for (let y = startY; y < endY; y += gridSize) {
+      for (let y = startY; y < endY; y += currentGridSize) {
         ctx.moveTo(startX, y);
         ctx.lineTo(endX, y);
       }
@@ -3757,6 +3783,70 @@ export default function App() {
       ctx.restore();
     }
 
+    // Draw Point Selective Move / Copy Live Preview
+    if ((movePointSelectMode === 'target_point' || copyPointSelectMode === 'target_point') && baseSelectionPoint && hoverCoords) {
+      const dx = hoverCoords.x - baseSelectionPoint.x;
+      const dy = hoverCoords.y - baseSelectionPoint.y;
+
+      // Draw vector dashed line in orange with a helper circle at base point
+      ctx.save();
+      ctx.strokeStyle = '#f97316'; // Orange-500
+      ctx.lineWidth = 1.5 / viewZoom;
+      ctx.setLineDash([5 / viewZoom, 5 / viewZoom]);
+      
+      // Draw a crosshair or small circle at base point
+      ctx.beginPath();
+      ctx.arc(baseSelectionPoint.x, baseSelectionPoint.y, 6 / viewZoom, 0, 2 * Math.PI);
+      ctx.stroke();
+
+      // Draw dashed line from base to hoverCoords
+      ctx.beginPath();
+      ctx.moveTo(baseSelectionPoint.x, baseSelectionPoint.y);
+      ctx.lineTo(hoverCoords.x, hoverCoords.y);
+      ctx.stroke();
+      
+      // Draw a target dot at mouse/hover
+      ctx.fillStyle = '#f97316';
+      ctx.beginPath();
+      ctx.arc(hoverCoords.x, hoverCoords.y, 4 / viewZoom, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Draw text label of the translation vector delta in mm
+      ctx.fillStyle = '#f97316';
+      ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+      const dist = Math.hypot(dx, dy);
+      ctx.fillText(`dX: ${dx.toFixed(1)} dY: ${dy.toFixed(1)} Dist: ${dist.toFixed(1)} mm`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
+
+      // Render ghost shapes shifted by dx, dy
+      ctx.strokeStyle = 'rgba(249, 115, 22, 0.6)'; // Ghost orange
+      ctx.lineWidth = 2.0 / viewZoom;
+      ctx.setLineDash([4 / viewZoom, 4 / viewZoom]);
+
+      const drawGhostPath = (pts: Point[]) => {
+        if (pts.length === 0) return;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x + dx, pts[0].y + dy);
+        for (let i = 1; i < pts.length; i++) {
+          ctx.lineTo(pts[i].x + dx, pts[i].y + dy);
+        }
+        ctx.stroke();
+      };
+
+      if (isFinalPointsSelected && finalPoints.length > 0) {
+        drawGhostPath(finalPoints);
+      }
+      if (selectedPathIndices.length > 0 && activeLayer.paths) {
+        selectedPathIndices.forEach(idx => {
+          const path = activeLayer.paths?.[idx];
+          if (path) {
+            drawGhostPath(path);
+          }
+        });
+      }
+
+      ctx.restore();
+    }
+
     ctx.restore();
   };
 
@@ -3801,6 +3891,146 @@ export default function App() {
     }
 
     let { x, y } = tempPoint ? tempPoint : getVirtualCoords(e.clientX, e.clientY);
+
+    // Intercept Point Selective Move
+    if (movePointSelectMode === 'base_point') {
+      const p = snapPoint ? { x: snapPoint.x, y: snapPoint.y } : { x, y };
+      setBaseSelectionPoint(p);
+      setMovePointSelectMode('target_point');
+      logCommandResponse(`Taşıma: Başlangıç noktası seçildi (${p.x.toFixed(1)}, ${p.y.toFixed(1)}). Şimdi hedef / bitiş noktasını tıklayın.`);
+      return;
+    }
+    if (movePointSelectMode === 'target_point' && baseSelectionPoint) {
+      const p = snapPoint ? { x: snapPoint.x, y: snapPoint.y } : { x, y };
+      const dx = p.x - baseSelectionPoint.x;
+      const dy = p.y - baseSelectionPoint.y;
+      
+      saveState();
+      
+      // Perform translation on selected entities
+      if (isFinalPointsSelected && finalPoints.length > 0) {
+        setFinalPoints(prev => prev.map(pt => {
+          const u = { ...pt, x: pt.x + dx, y: pt.y + dy };
+          if (pt.circleData) {
+            u.circleData = {
+              center: { x: pt.circleData.center.x + dx, y: pt.circleData.center.y + dy },
+              radius: pt.circleData.radius
+            };
+          }
+          if (pt.polygonData) {
+            u.polygonData = {
+              ...pt.polygonData,
+              center: { x: pt.polygonData.center.x + dx, y: pt.polygonData.center.y + dy }
+            };
+          }
+          return u;
+        }));
+      }
+      
+      if (selectedPathIndices.length > 0 && activeLayer.paths) {
+        setPaths(prev => prev.map((path, idx) => {
+          if (selectedPathIndices.includes(idx)) {
+            return path.map(pt => {
+              const u = { ...pt, x: pt.x + dx, y: pt.y + dy };
+              if (pt.circleData) {
+                u.circleData = {
+                  center: { x: pt.circleData.center.x + dx, y: pt.circleData.center.y + dy },
+                  radius: pt.circleData.radius
+                };
+              }
+              if (pt.polygonData) {
+                u.polygonData = {
+                  ...pt.polygonData,
+                  center: { x: pt.polygonData.center.x + dx, y: pt.polygonData.center.y + dy }
+                };
+              }
+              return u;
+            });
+          }
+          return path;
+        }));
+      }
+
+      setMovePointSelectMode(null);
+      setBaseSelectionPoint(null);
+      logCommandResponse(`Taşıma işlemi tamamlandı. Obje(ler) dX: ${dx.toFixed(1)} mm, dY: ${dy.toFixed(1)} mm kaydırıldı.`);
+      return;
+    }
+
+    // Intercept Point Selective Copy
+    if (copyPointSelectMode === 'base_point') {
+      const p = snapPoint ? { x: snapPoint.x, y: snapPoint.y } : { x, y };
+      setBaseSelectionPoint(p);
+      setCopyPointSelectMode('target_point');
+      logCommandResponse(`Kopyalama: Başlangıç noktası seçildi (${p.x.toFixed(1)}, ${p.y.toFixed(1)}). Şimdi hedef / bitiş noktasını tıklayın.`);
+      return;
+    }
+    if (copyPointSelectMode === 'target_point' && baseSelectionPoint) {
+      const p = snapPoint ? { x: snapPoint.x, y: snapPoint.y } : { x, y };
+      const dx = p.x - baseSelectionPoint.x;
+      const dy = p.y - baseSelectionPoint.y;
+
+      saveState();
+
+      let newlyCreatedIndices: number[] = [];
+      const newPaths = activeLayer.paths ? [...activeLayer.paths] : [];
+
+      if (isFinalPointsSelected && finalPoints.length > 0) {
+        const duplicated = finalPoints.map(pt => {
+          const u = { ...pt, x: pt.x + dx, y: pt.y + dy };
+          if (pt.circleData) {
+            u.circleData = {
+              center: { x: pt.circleData.center.x + dx, y: pt.circleData.center.y + dy },
+              radius: pt.circleData.radius
+            };
+          }
+          if (pt.polygonData) {
+            u.polygonData = {
+              ...pt.polygonData,
+              center: { x: pt.polygonData.center.x + dx, y: pt.polygonData.center.y + dy }
+            };
+          }
+          return u;
+        });
+        newPaths.push(duplicated);
+        newlyCreatedIndices.push(newPaths.length - 1);
+      }
+
+      if (selectedPathIndices.length > 0 && activeLayer.paths) {
+        selectedPathIndices.forEach(idx => {
+          const path = activeLayer.paths?.[idx];
+          if (path) {
+            const duplicated = path.map(pt => {
+              const u = { ...pt, x: pt.x + dx, y: pt.y + dy };
+              if (pt.circleData) {
+                u.circleData = {
+                  center: { x: pt.circleData.center.x + dx, y: pt.circleData.center.y + dy },
+                  radius: pt.circleData.radius
+                };
+              }
+              if (pt.polygonData) {
+                u.polygonData = {
+                  ...pt.polygonData,
+                  center: { x: pt.polygonData.center.x + dx, y: pt.polygonData.center.y + dy }
+                };
+              }
+              return u;
+            });
+            newPaths.push(duplicated);
+            newlyCreatedIndices.push(newPaths.length - 1);
+          }
+        });
+      }
+
+      setPaths(newPaths);
+      setSelectedPathIndices(newlyCreatedIndices);
+      setIsFinalPointsSelected(false);
+
+      setCopyPointSelectMode(null);
+      setBaseSelectionPoint(null);
+      logCommandResponse(`Kopyalama işlemi tamamlandı. ${newlyCreatedIndices.length} adet yeni obje dX: ${dx.toFixed(1)} mm, dY: ${dy.toFixed(1)} mm konumuna kopyalandı.`);
+      return;
+    }
 
     if (pendingRotateAngle !== null) {
       applyCadEditRotate(pendingRotateAngle, { x, y });
@@ -4464,7 +4694,7 @@ export default function App() {
 
     if (currentCommand !== '') {
       // Snap evaluation index exclusions
-      const snapData = calculateSnaps(x, y, finalPoints, isClosed, -1, smartSnap, 10 / viewZoom, activeLayer.paths, gridSnap, 50, customAnchor, snapToggles);
+      const snapData = calculateSnaps(x, y, finalPoints, isClosed, -1, smartSnap, 10 / viewZoom, activeLayer.paths, gridSnap, gridSize, customAnchor, snapToggles);
       x = snapData.x;
       y = snapData.y;
 
@@ -4487,7 +4717,7 @@ export default function App() {
 
         if (pathIdx === -1) {
           // Compute snapping while dragging vertices
-          const snapData = calculateSnaps(x, y, finalPoints, isClosed, dragIndexRef.current, smartSnap, 10 / viewZoom, activeLayer.paths, gridSnap, 50, customAnchor, snapToggles);
+          const snapData = calculateSnaps(x, y, finalPoints, isClosed, dragIndexRef.current, smartSnap, 10 / viewZoom, activeLayer.paths, gridSnap, gridSize, customAnchor, snapToggles);
           x = snapData.x;
           y = snapData.y;
           setSnapPoint(snapData.snapPoint);
@@ -4548,7 +4778,7 @@ export default function App() {
           const targetPath = activeLayer.paths ? activeLayer.paths[pathIdx] : [];
           const otherPaths = activeLayer.paths ? activeLayer.paths.filter((_, idx) => idx !== pathIdx) : [];
 
-          const snapData = calculateSnaps(x, y, targetPath, true, dragIndexRef.current, smartSnap, 10 / viewZoom, [finalPoints, ...otherPaths], gridSnap, 50, customAnchor, snapToggles);
+          const snapData = calculateSnaps(x, y, targetPath, true, dragIndexRef.current, smartSnap, 10 / viewZoom, [finalPoints, ...otherPaths], gridSnap, gridSize, customAnchor, snapToggles);
           x = snapData.x;
           y = snapData.y;
           setSnapPoint(snapData.snapPoint);
@@ -4619,7 +4849,7 @@ export default function App() {
         }
       } else if (drawMode === 'drag') {
         // Hover visual snapping
-        const snapData = calculateSnaps(x, y, finalPoints, isClosed, -1, smartSnap, 10 / viewZoom, activeLayer.paths, gridSnap, 50, customAnchor, snapToggles);
+        const snapData = calculateSnaps(x, y, finalPoints, isClosed, -1, smartSnap, 10 / viewZoom, activeLayer.paths, gridSnap, gridSize, customAnchor, snapToggles);
         setSnapPoint(snapData.snapPoint);
         setTrackedLines(snapData.trackedLines);
       }
@@ -6781,6 +7011,61 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Point-Selective Transform Controls */}
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200 mt-2 space-y-1.5 shadow-xs">
+                <span className="text-[10px] text-slate-400 font-mono font-bold flex items-center gap-1">
+                  <Sliders className="w-3 h-3 text-orange-500" />
+                  📍 POINT-SELECTIVE TRANSFORMS
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      if (!isFinalPointsSelected && selectedPathIndices.length === 0) {
+                        logCommandResponse("Lütfen önce taşımak istediğiniz objeyi/objeleri seçin (Tıklayarak veya kutuyla seçerek).");
+                        return;
+                      }
+                      setMovePointSelectMode(movePointSelectMode ? null : 'base_point');
+                      setCopyPointSelectMode(null);
+                      setBaseSelectionPoint(null);
+                      logCommandResponse(movePointSelectMode ? "Selective Move mode canceled." : "Selective Move: Click a reference BASE point on the canvas (Or snap to a corner/midpoint).");
+                    }}
+                    className={`py-1.5 border rounded font-mono text-[9px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1 ${
+                      movePointSelectMode 
+                        ? 'bg-orange-55 border-orange-500 text-orange-700 animate-pulse font-extrabold' 
+                        : 'bg-slate-50 border-slate-250 text-slate-600 hover:text-slate-800 hover:bg-slate-100 font-medium'
+                    }`}
+                    title="Move selected shapes from a source point to a destination point"
+                  >
+                    🚀 {movePointSelectMode ? "Base Point..." : "Move by Points"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!isFinalPointsSelected && selectedPathIndices.length === 0) {
+                        logCommandResponse("Lütfen önce kopyalamak istediğiniz objeyi/objeleri seçin (Tıklayarak veya kutuyla seçerek).");
+                        return;
+                      }
+                      setCopyPointSelectMode(copyPointSelectMode ? null : 'base_point');
+                      setMovePointSelectMode(null);
+                      setBaseSelectionPoint(null);
+                      logCommandResponse(copyPointSelectMode ? "Selective Copy mode canceled." : "Selective Copy: Click a reference BASE point on the canvas (Or snap to a corner/midpoint).");
+                    }}
+                    className={`py-1.5 border rounded font-mono text-[9px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1 ${
+                      copyPointSelectMode 
+                        ? 'bg-orange-55 border-orange-500 text-orange-700 animate-pulse font-extrabold' 
+                        : 'bg-slate-50 border-slate-250 text-slate-600 hover:text-slate-800 hover:bg-slate-100 font-medium'
+                    }`}
+                    title="Copy selected shapes from a source point to a destination point"
+                  >
+                    ✨ {copyPointSelectMode ? "Base Point..." : "Copy by Points"}
+                  </button>
+                </div>
+                {baseSelectionPoint && (
+                  <div className="text-[9px] text-orange-600 font-mono text-center leading-normal animate-fade-in p-1 bg-orange-50 border border-orange-100 rounded">
+                    Base: ({baseSelectionPoint.x.toFixed(1)}, {baseSelectionPoint.y.toFixed(1)}) → Select target point!
+                  </div>
+                )}
+              </div>
+
               {/* Row 2: Mirror / Aynala (Horiz & Vert) */}
               <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5 shadow-xs">
                 <span className="text-[10px] text-slate-400 font-mono font-bold flex items-center gap-1">
@@ -7061,6 +7346,99 @@ export default function App() {
                   onChange={(e) => setShowDims(e.target.checked)}
                   className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
                 />
+              </div>
+
+              {/* Grid Density & Background Dynamic Color */}
+              <div className="bg-white p-3 rounded border border-slate-200 space-y-3 shadow-xs text-left">
+                {/* Grid spacing (Grid Aralığı) control */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-[10px] uppercase font-mono tracking-wider font-extrabold text-slate-500">
+                    <span>📏 Grid Gap (Grid Aralığı)</span>
+                    <span className="text-orange-650 font-bold">{gridSize} mm</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="5"
+                      max="1000"
+                      value={gridSize}
+                      onChange={(e) => setGridSize(Math.max(5, parseInt(e.target.value) || 5))}
+                      className="w-16 bg-white border border-slate-300 text-[11px] px-1.5 py-0.5 rounded text-slate-800 outline-none focus:border-orange-500 font-mono text-center"
+                    />
+                    <input
+                      type="range"
+                      min="10"
+                      max="200"
+                      step="5"
+                      value={gridSize}
+                      onChange={(e) => setGridSize(parseInt(e.target.value) || 50)}
+                      className="flex-1 h-1 bg-slate-200 rounded appearance-none cursor-pointer accent-orange-600"
+                    />
+                  </div>
+                </div>
+
+                {/* Canvas Background Color Selection */}
+                <div className="space-y-1.5 pt-1.5 border-t border-slate-100">
+                  <span className="text-[10px] uppercase font-mono tracking-wider font-extrabold text-slate-500 block">
+                    🎨 Canvas Background (Çizim Alanı Rengi)
+                  </span>
+                  <div className="grid grid-cols-4 gap-1">
+                    <button
+                      onClick={() => setCanvasBgColor('#09090b')}
+                      className={`py-1 rounded text-[9px] font-mono border transition ${
+                        canvasBgColor === '#09090b' 
+                          ? 'bg-zinc-950 border-orange-500 text-white font-extrabold shadow-sm' 
+                          : 'bg-zinc-900/10 border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                      }`}
+                      title="Classic CAD Charcoal"
+                    >
+                      Dark
+                    </button>
+                    <button
+                      onClick={() => setCanvasBgColor('#0c192e')}
+                      className={`py-1 rounded text-[9px] font-mono border transition ${
+                        canvasBgColor === '#0c192e' 
+                          ? 'bg-[#0c192e] border-orange-500 text-white font-extrabold shadow-sm' 
+                          : 'bg-[#0c192e]/10 border-slate-200 text-slate-650 hover:text-slate-900 hover:bg-slate-50'
+                      }`}
+                      title="Blueprint Navy Blue"
+                    >
+                      Navy
+                    </button>
+                    <button
+                      onClick={() => setCanvasBgColor('#f1f5f9')}
+                      className={`py-1 rounded text-[9px] font-mono border transition ${
+                        canvasBgColor === '#f1f5f9' 
+                          ? 'bg-slate-100 border-orange-500 text-slate-900 font-extrabold shadow-sm' 
+                          : 'bg-slate-50 border-slate-200 text-slate-550 hover:text-slate-900 hover:bg-slate-100/50'
+                      }`}
+                      title="Soft Slate Light"
+                    >
+                      Slate
+                    </button>
+                    <button
+                      onClick={() => setCanvasBgColor('#ffffff')}
+                      className={`py-1 rounded text-[9px] font-mono border transition ${
+                        canvasBgColor === '#ffffff' 
+                          ? 'bg-white border-orange-500 text-black font-extrabold shadow-sm' 
+                          : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-100/50'
+                      }`}
+                      title="Pure White background"
+                    >
+                      White
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <input
+                      type="color"
+                      value={canvasBgColor}
+                      onChange={(e) => setCanvasBgColor(e.target.value)}
+                      className="w-4 h-4 rounded border border-slate-300 cursor-pointer pointer-events-auto shrink-0"
+                      title="Custom Color Picker"
+                    />
+                    <span className="text-[9px] text-slate-450 font-mono">Custom Picker / Özel Renk</span>
+                  </div>
+                </div>
               </div>
 
               {/* Advanced Anchor Selector */}
