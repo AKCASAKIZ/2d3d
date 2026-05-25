@@ -833,31 +833,24 @@ export default function App() {
       }
     };
 
-    setLayers(prev => prev.map(l => {
-      if (l.id === activeLayerId) {
-        // Clone layer
-        const cloned = JSON.parse(JSON.stringify(l)) as CADLayer;
-        
-        let separatedCount = 0;
-        if (isFinalPointsSelected) {
-          makeIndependent(-1, cloned);
-          separatedCount++;
-        }
-        
-        selectedPathIndices.forEach(idx => {
-          makeIndependent(idx, cloned);
-          separatedCount++;
-        });
+    const cloned = JSON.parse(JSON.stringify(activeLayer)) as CADLayer;
+    let separatedCount = 0;
+    if (isFinalPointsSelected) {
+      makeIndependent(-1, cloned);
+      separatedCount++;
+    }
+    
+    selectedPathIndices.forEach(idx => {
+      makeIndependent(idx, cloned);
+      separatedCount++;
+    });
 
-        if (separatedCount === 0 && selectedPathIdx !== -1) {
-          makeIndependent(selectedPathIdx, cloned);
-          separatedCount++;
-        }
+    if (separatedCount === 0 && selectedPathIdx !== -1) {
+      makeIndependent(selectedPathIdx, cloned);
+      separatedCount++;
+    }
 
-        return cloned;
-      }
-      return l;
-    }));
+    setLayers(prev => prev.map(l => l.id === activeLayerId ? cloned : l));
 
     // Reset selection to just the targeted index so the user doesn't drag other things anymore (since they are now separated!)
     if (selectedPathIdx !== -1) {
@@ -908,33 +901,27 @@ export default function App() {
       }
     };
 
-    setLayers(prev => prev.map(l => {
-      if (l.id === activeLayerId) {
-        const cloned = JSON.parse(JSON.stringify(l)) as CADLayer;
-        
-        let joinedCount = 0;
-        if (isFinalPointsSelected) {
-          makeJoined(-1, cloned);
-          joinedCount++;
-        }
-        
-        selectedPathIndices.forEach(idx => {
-          makeJoined(idx, cloned);
-          joinedCount++;
-        });
+    const cloned = JSON.parse(JSON.stringify(activeLayer)) as CADLayer;
+    let joinedCount = 0;
+    if (isFinalPointsSelected) {
+      makeJoined(-1, cloned);
+      joinedCount++;
+    }
+    
+    selectedPathIndices.forEach(idx => {
+      makeJoined(idx, cloned);
+      joinedCount++;
+    });
 
-        if (joinedCount === 0 && selectedPathIdx !== -1) {
-          makeJoined(selectedPathIdx, cloned);
-          joinedCount++;
-        }
+    if (joinedCount === 0 && selectedPathIdx !== -1) {
+      makeJoined(selectedPathIdx, cloned);
+      joinedCount++;
+    }
 
-        return cloned;
-      }
-      return l;
-    }));
+    setLayers(prev => prev.map(l => l.id === activeLayerId ? cloned : l));
 
-    // Trigger full group selection
-    const resolvedGroup = getJoinedIndices(selectedPathIdx !== -1 ? selectedPathIdx : -1);
+    // Trigger full group selection synchronously using the updated cloned layer
+    const resolvedGroup = getJoinedIndices(selectedPathIdx !== -1 ? selectedPathIdx : -1, cloned);
     setIsFinalPointsSelected(resolvedGroup.selectFinalPoints);
     setSelectedPathIndices(resolvedGroup.selectPathIndices);
 
@@ -1073,73 +1060,111 @@ export default function App() {
       return;
     }
 
-    // Identify which point is closest to an active shape node, so we can move that shape and keep the other point fixed
+    // Resolve anchors or find closest
     let closestP1: { type: 'finalPoints' | 'paths'; pathIdx: number; ptIdx: number; dist: number } | null = null;
     let closestP2: { type: 'finalPoints' | 'paths'; pathIdx: number; ptIdx: number; dist: number } | null = null;
 
-    let minD1 = Infinity;
-    let minD2 = Infinity;
+    let p1Anchor = (dim as any).p1Anchor;
+    let p2Anchor = (dim as any).p2Anchor;
 
-    // Check finalPoints
-    finalPoints.forEach((pt, ptIdx) => {
-      const d1 = Math.hypot(pt.x - p1.x, pt.y - p1.y);
-      if (d1 < minD1) {
-        minD1 = d1;
-        closestP1 = { type: 'finalPoints', pathIdx: -1, ptIdx, dist: d1 };
-      }
-      const d2 = Math.hypot(pt.x - p2.x, pt.y - p2.y);
-      if (d2 < minD2) {
-        minD2 = d2;
-        closestP2 = { type: 'finalPoints', pathIdx: -1, ptIdx, dist: d2 };
-      }
-    });
-
-    // Check paths
-    if (activeLayer.paths) {
-      activeLayer.paths.forEach((path, pathIdx) => {
-        path.forEach((pt, ptIdx) => {
-          const d1 = Math.hypot(pt.x - p1.x, pt.y - p1.y);
-          if (d1 < minD1) {
-            minD1 = d1;
-            closestP1 = { type: 'paths', pathIdx, ptIdx, dist: d1 };
-          }
-          const d2 = Math.hypot(pt.x - p2.x, pt.y - p2.y);
-          if (d2 < minD2) {
-            minD2 = d2;
-            closestP2 = { type: 'paths', pathIdx, ptIdx, dist: d2 };
-          }
-        });
+    if (p1Anchor) {
+      closestP1 = {
+        type: p1Anchor.type === 'finalPoints' ? 'finalPoints' : 'paths',
+        pathIdx: p1Anchor.type === 'finalPoints' ? -1 : (p1Anchor.pathIdx ?? -1),
+        ptIdx: p1Anchor.vertexIdx,
+        dist: 0
+      };
+    } else {
+      let minD1 = Infinity;
+      finalPoints.forEach((pt, ptIdx) => {
+        const d = Math.hypot(pt.x - p1.x, pt.y - p1.y);
+        if (d < minD1) {
+          minD1 = d;
+          closestP1 = { type: 'finalPoints', pathIdx: -1, ptIdx, dist: d };
+        }
       });
+      if (activeLayer.paths) {
+        activeLayer.paths.forEach((path, pathIdx) => {
+          path.forEach((pt, ptIdx) => {
+            const d = Math.hypot(pt.x - p1.x, pt.y - p1.y);
+            if (d < minD1) {
+              minD1 = d;
+              closestP1 = { type: 'paths', pathIdx, ptIdx, dist: d };
+            }
+          });
+        });
+      }
+    }
+
+    if (p2Anchor) {
+      closestP2 = {
+        type: p2Anchor.type === 'finalPoints' ? 'finalPoints' : 'paths',
+        pathIdx: p2Anchor.type === 'finalPoints' ? -1 : (p2Anchor.pathIdx ?? -1),
+        ptIdx: p2Anchor.vertexIdx,
+        dist: 0
+      };
+    } else {
+      let minD2 = Infinity;
+      finalPoints.forEach((pt, ptIdx) => {
+        const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
+        if (d < minD2) {
+          minD2 = d;
+          closestP2 = { type: 'finalPoints', pathIdx: -1, ptIdx, dist: d };
+        }
+      });
+      if (activeLayer.paths) {
+        activeLayer.paths.forEach((path, pathIdx) => {
+          path.forEach((pt, ptIdx) => {
+            const d = Math.hypot(pt.x - p2.x, pt.y - p2.y);
+            if (d < minD2) {
+              minD2 = d;
+              closestP2 = { type: 'paths', pathIdx, ptIdx, dist: d };
+            }
+          });
+        });
+      }
     }
 
     // Decide which point of the dimension to move (movePoint: 'p1' or 'p2')
-    // A point is near a shape node if its distance is within a generous limit (e.g., 25.0 mm).
+    // A point is near a shape node if its distance is within a generous limit or has a saved anchor.
     const snapMatchThreshold = 25.0; 
     let movePoint: 'p1' | 'p2' = 'p2';
 
-    const isP1NearShape = closestP1 && closestP1.dist < snapMatchThreshold;
-    const isP2NearShape = closestP2 && closestP2.dist < snapMatchThreshold;
+    const isP1NearShape = closestP1 && (p1Anchor || closestP1.dist < snapMatchThreshold);
+    const isP2NearShape = closestP2 && (p2Anchor || closestP2.dist < snapMatchThreshold);
 
-    if (isP1NearShape && !isP2NearShape) {
-      // p1 is on a shape, p2 is a reference coordinate (like an axis or origin snap). Move p1 relative to fixed anchor p2.
-      movePoint = 'p1';
-    } else if (!isP1NearShape && isP2NearShape) {
-      // p2 is on a shape, p1 is a coordinate. Keep p1 fixed, move p2.
-      movePoint = 'p2';
-    } else if (isP1NearShape && isP2NearShape) {
-      // Both are near shape nodes. Default to moving the second point (p2) relative to first (p1).
-      // BUT if one is on the main sketch boundaries (finalPoints) and the other is on an inner path detail (paths),
-      // we must NEVER move/shift the main body! We must move the inner path detail instead.
-      if (closestP1.type === 'finalPoints' && closestP2.type === 'paths') {
-        movePoint = 'p2'; // Keep finalPoints (main body) fixed, move inner path!
-      } else if (closestP1.type === 'paths' && closestP2.type === 'finalPoints') {
-        movePoint = 'p1'; // Keep finalPoints (main body) fixed, move inner path!
+    if (isP1NearShape && isP2NearShape) {
+      // Both are near shape nodes
+      if (closestP1!.type === 'finalPoints' && closestP2!.type === 'paths') {
+        movePoint = 'p2'; // Keep finalPoints (main body outline) fixed, move inner cutout!
+      } else if (closestP1!.type === 'paths' && closestP2!.type === 'finalPoints') {
+        movePoint = 'p1'; // Keep finalPoints (main body outline) fixed, move inner cutout!
       } else {
+        // If both on different inner paths or same paths/finalPoints, default to p2
         movePoint = 'p2';
       }
+    } else if (isP1NearShape && !isP2NearShape) {
+      // p1 is near shape, p2 is a reference coordinate (like origin / axis snap)
+      if (closestP1!.type === 'finalPoints') {
+        // If p1 is on the main perimeter (finalPoints) and p2 is coordinate target,
+        // we must be very careful not to shift the whole drawing if not requested!
+        // But if it's explicitly horizontal/vertical alignment relative to origin, users move p1.
+        movePoint = 'p1';
+      } else {
+        movePoint = 'p1'; // Move inner cutout node
+      }
+    } else if (!isP1NearShape && isP2NearShape) {
+      // p2 is near shape, p1 is a coordinate reference
+      if (closestP2!.type === 'finalPoints') {
+        movePoint = 'p2';
+      } else {
+        movePoint = 'p2'; // Move inner cutout node
+      }
     } else {
-      // Neither is close to any drawing node. Move whichever is relatively closer, or default to p2.
-      movePoint = minD1 < minD2 ? 'p1' : 'p2';
+      // Neither is close geographically. Move whichever has closer distance.
+      const d1 = closestP1 ? closestP1.dist : Infinity;
+      const d2 = closestP2 ? closestP2.dist : Infinity;
+      movePoint = d1 < d2 ? 'p1' : 'p2';
     }
 
     const targetPt = movePoint === 'p2' ? p2 : p1;
@@ -2398,15 +2423,16 @@ export default function App() {
     }
   };
 
-  const getJoinedIndices = (clickedIdx: number): { selectFinalPoints: boolean; selectPathIndices: number[] } => {
-    const defaultGrp = 'main_group_' + activeLayerId;
+  const getJoinedIndices = (clickedIdx: number, layerOverride?: CADLayer): { selectFinalPoints: boolean; selectPathIndices: number[] } => {
+    const targetLayer = layerOverride || activeLayer;
+    const defaultGrp = 'main_group_' + targetLayer.id;
     
     // Get the effective groupId for the clicked object
     let clickedGroupId = '';
     if (clickedIdx === -1) {
-      clickedGroupId = activeLayer.finalPointsSettings?.groupId || defaultGrp;
+      clickedGroupId = targetLayer.finalPointsSettings?.groupId || defaultGrp;
     } else {
-      clickedGroupId = activeLayer.pathSettings?.[clickedIdx]?.groupId || defaultGrp;
+      clickedGroupId = targetLayer.pathSettings?.[clickedIdx]?.groupId || defaultGrp;
     }
 
     // If the clicked group is explicitly independent, stand alone!
@@ -2418,11 +2444,11 @@ export default function App() {
     }
 
     // Otherwise, find all other shapes in this layer sharing the same groupId
-    const selectFinalPoints = (activeLayer.finalPointsSettings?.groupId || defaultGrp) === clickedGroupId;
+    const selectFinalPoints = (targetLayer.finalPointsSettings?.groupId || defaultGrp) === clickedGroupId;
     const selectPathIndices: number[] = [];
-    if (activeLayer.paths) {
-      activeLayer.paths.forEach((_, idx) => {
-        const pGrp = activeLayer.pathSettings?.[idx]?.groupId || defaultGrp;
+    if (targetLayer.paths) {
+      targetLayer.paths.forEach((_, idx) => {
+        const pGrp = targetLayer.pathSettings?.[idx]?.groupId || defaultGrp;
         if (pGrp === clickedGroupId) {
           selectPathIndices.push(idx);
         }
