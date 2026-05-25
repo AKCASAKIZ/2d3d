@@ -738,7 +738,7 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
       <div className="absolute bottom-3 left-3 z-10 bg-zinc-900/90 border border-zinc-800/85 backdrop-blur-md p-2 rounded-lg flex flex-col gap-1.5 shadow-xl min-w-[150px]">
         <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 flex items-center gap-1 font-mono">
           <Eye className="w-3.5 h-3.5 text-blue-500" />
-          <span>Kamera Bakış Açısı</span>
+          <span>Camera View Angle</span>
         </div>
         <div className="grid grid-cols-2 gap-1 pt-1.5 border-t border-zinc-800/60 font-mono">
           <button
@@ -751,9 +751,9 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
                 ? 'bg-blue-600/25 border-blue-500 text-blue-400 font-bold'
                 : 'bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-300 hover:text-white'
             }`}
-            title="Üstten Görünüş (2D Sketch Düzlemi)"
+            title="Top View (2D Sketch Plane)"
           >
-            <span>ÜST (Top)</span>
+            <span>TOP</span>
           </button>
           
           <button
@@ -766,9 +766,9 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
                 ? 'bg-blue-600/25 border-blue-500 text-blue-400 font-bold'
                 : 'bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-300 hover:text-white'
             }`}
-            title="Karşıdan Görünüş"
+            title="Front View"
           >
-            <span>ÖN (Front)</span>
+            <span>FRONT</span>
           </button>
 
           <button
@@ -781,9 +781,9 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
                 ? 'bg-blue-600/25 border-blue-500 text-blue-400 font-bold'
                 : 'bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-300 hover:text-white'
             }`}
-            title="Soldan Görünüş"
+            title="Left View"
           >
-            <span>SOL (Left)</span>
+            <span>LEFT</span>
           </button>
 
           <button
@@ -796,9 +796,9 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
                 ? 'bg-blue-600/25 border-blue-500 text-blue-400 font-bold'
                 : 'bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-300 hover:text-white'
             }`}
-            title="Sağdan Görünüş"
+            title="Right View"
           >
-            <span>SAĞ (Right)</span>
+            <span>RIGHT</span>
           </button>
         </div>
         
@@ -812,10 +812,10 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
               ? 'bg-emerald-600/25 border-emerald-500 text-emerald-400 font-bold'
               : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-200'
           }`}
-          title="Isometric Perspektif 3D Bakış"
+          title="Isometric Perspective 3D View"
         >
           <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
-          <span>İZO (ISO Isometric)</span>
+          <span>ISO (Isometric)</span>
         </button>
       </div>
     </div>
