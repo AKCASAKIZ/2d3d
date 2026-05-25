@@ -529,11 +529,17 @@ export default function App() {
   const [filletRadius, setFilletRadius] = useState<number>(24);
   const [chamferDistance, setChamferDistance] = useState<number>(20);
   const [offsetDistance, setOffsetDistance] = useState<number>(15);
-  const [cadRotateAngle, setCadRotateAngle] = useState<number>(45);
+  const [cadRotateAngle, setCadRotateAngle] = useState<string>("45");
   const [pendingRotateAngle, setPendingRotateAngle] = useState<number | null>(null);
   const [rotationCenter, setRotationCenter] = useState<Point | null>(null);
   const [rotationCenterSelectMode, setRotationCenterSelectMode] = useState<boolean>(false);
-  const [cadScaleFactor, setCadScaleFactor] = useState<number>(1.2);
+  const [cadScaleFactor, setCadScaleFactor] = useState<string>("1.2");
+  const [arrayXCount, setArrayXCount] = useState<string>("3");
+  const [arrayYCount, setArrayYCount] = useState<string>("1");
+  const [arrayXSpacing, setArrayXSpacing] = useState<string>("50");
+  const [arrayYSpacing, setArrayYSpacing] = useState<string>("50");
+  const [polarCount, setPolarCount] = useState<string>("6");
+  const [polarAngle, setPolarAngle] = useState<string>("360");
   const [aiRefinePrompt, setAiRefinePrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [infill, setInfill] = useState<number>(20);
@@ -7590,7 +7596,7 @@ export default function App() {
                     <button
                       onClick={() => {
                         setRotationCenterSelectMode(true);
-                        logCommandResponse("Select Rotation Center Point: Click any point on canvas to designate it as your custom pivot.");
+                        logCommandResponse("Döndürme Eksen Noktası Seçin: Dönme eksenini seçmek için ekranda bir noktaya tıklayın.");
                       }}
                       className={`w-full py-1 rounded text-[9px] font-mono font-bold border transition cursor-pointer text-center ${
                         rotationCenterSelectMode
@@ -7609,9 +7615,12 @@ export default function App() {
                   <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
                     {/* CCW Rotate Arrow Button */}
                     <button
-                      onClick={() => applyRelativeRotation(-cadRotateAngle)}
+                      onClick={() => {
+                        const parsed = parseFloat(cadRotateAngle);
+                        if (!isNaN(parsed)) applyRelativeRotation(-parsed);
+                      }}
                       className="p-1 px-2 pb-1.5 bg-white border border-slate-250 rounded text-orange-600 hover:text-orange-700 hover:bg-slate-100 font-black text-xs transition cursor-pointer shrink-0"
-                      title={`Rotate Counter Clockwise -${cadRotateAngle}°`}
+                      title={`Rotate Counter Clockwise -${cadRotateAngle || '0'}°`}
                     >
                       ◀
                     </button>
@@ -7619,12 +7628,9 @@ export default function App() {
                     {/* Editable custom step in degrees */}
                     <div className="flex-1 flex items-center justify-center gap-1 bg-white border border-slate-300 px-2 rounded">
                       <input
-                        type="number"
+                        type="text"
                         value={cadRotateAngle}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          setCadRotateAngle(isNaN(val) ? 0 : val);
-                        }}
+                        onChange={(e) => setCadRotateAngle(e.target.value)}
                         placeholder="5"
                         className="w-full bg-transparent text-center text-xs text-slate-800 font-mono outline-none border-none py-1"
                         title="Döndürme adım açısını girin"
@@ -7634,9 +7640,12 @@ export default function App() {
 
                     {/* CW Rotate Arrow Button */}
                     <button
-                      onClick={() => applyRelativeRotation(cadRotateAngle)}
+                      onClick={() => {
+                        const parsed = parseFloat(cadRotateAngle);
+                        if (!isNaN(parsed)) applyRelativeRotation(parsed);
+                      }}
                       className="p-1 px-2 pb-1.5 bg-white border border-slate-250 rounded text-orange-600 hover:text-orange-700 hover:bg-slate-100 font-black text-xs transition cursor-pointer shrink-0"
-                      title={`Rotate Clockwise +${cadRotateAngle}°`}
+                      title={`Rotate Clockwise +${cadRotateAngle || '0'}°`}
                     >
                       ▶
                     </button>
@@ -7647,9 +7656,9 @@ export default function App() {
                     {[1, 5, 15, 45].map((step) => (
                       <button
                         key={step}
-                        onClick={() => setCadRotateAngle(step)}
+                        onClick={() => setCadRotateAngle(step.toString())}
                         className={`py-1 rounded text-[8px] font-mono transition cursor-pointer text-center border ${
-                          cadRotateAngle === step
+                          parseFloat(cadRotateAngle) === step
                             ? 'bg-orange-50 border-orange-300 text-orange-700 font-bold shadow-xs'
                             : 'bg-white border-slate-200 text-slate-550 hover:text-slate-800 hover:bg-slate-50'
                         }`}
@@ -7662,7 +7671,10 @@ export default function App() {
 
                 {/* Legacy absolute rotate prompt as alternative fallback */}
                 <button
-                  onClick={() => requestRotateAngle(cadRotateAngle)}
+                  onClick={() => {
+                    const parsed = parseFloat(cadRotateAngle);
+                    if (!isNaN(parsed)) requestRotateAngle(parsed);
+                  }}
                   className="w-full py-1 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded text-[9px] font-bold font-mono text-orange-700 transition cursor-pointer uppercase mt-1"
                   title="Prompt absolute angle input"
                 >
@@ -7685,7 +7697,7 @@ export default function App() {
                     <button
                       key={fac}
                       onClick={() => applyCadEditScale(fac)}
-                      className="py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-[9px] font-bold font-mono text-slate-600 hover:text-slate-900 transition cursor-pointer"
+                      className="py-1 bg-slate-50 hover:bg-slate-100 border border-slate-250 rounded text-[9px] font-bold font-mono text-slate-600 hover:text-slate-900 transition cursor-pointer"
                     >
                       {fac}x
                     </button>
@@ -7694,18 +7706,21 @@ export default function App() {
                 {/* Custom Scale Input */}
                 <div className="flex gap-2">
                   <input
-                    type="number"
-                    step="0.05"
+                    type="text"
                     value={cadScaleFactor}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      setCadScaleFactor(isNaN(val) ? 1.0 : val);
-                    }}
+                    onChange={(e) => setCadScaleFactor(e.target.value)}
                     placeholder="1.2"
                     className="w-16 bg-white border border-slate-300 rounded text-center text-xs text-slate-800 font-mono outline-none focus:border-orange-500"
                   />
                   <button
-                    onClick={() => applyCadEditScale(cadScaleFactor)}
+                    onClick={() => {
+                      const parsed = parseFloat(cadScaleFactor);
+                      if (!isNaN(parsed) && parsed > 0) {
+                        applyCadEditScale(parsed);
+                      } else {
+                        logCommandResponse("Hata: Lütfen geçerli bir ölçek katsayısı girin.");
+                      }
+                    }}
                     className="flex-1 py-1 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded text-[10px] font-bold font-mono text-orange-700 transition cursor-pointer"
                   >
                     Custom Scale Factor
