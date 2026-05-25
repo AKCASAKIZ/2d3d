@@ -50,6 +50,7 @@ export interface PathSettings {
   depth: number;
   revolveAxis?: 'left' | 'center' | 'right' | 'origin-y' | 'origin-x';
   booleanType?: 'union' | 'cut';
+  groupId?: string;
 }
 
 export interface CADLayer {
