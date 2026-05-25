@@ -1,6 +1,6 @@
 {
   "name": "CADERIM",
-  "description": "Smart Track & Midpoint Snap parametric 2D CAD sketcher and 3D extruder tool.",
+  "description": "Parametric 2D/3D CAD with smart snapping, fillet/chamfer geometry, dimension editing, section analysis, and 3D extrusion/revolution with STL export.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
