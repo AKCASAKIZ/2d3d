@@ -518,6 +518,8 @@ export default function App() {
   const [aiRefinePrompt, setAiRefinePrompt] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [infill, setInfill] = useState<number>(20);
+  const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [sidebarTab, setSidebarTab] = useState<'sketch' | 'layers' | 'dimensions' | '3d'>('sketch');
 
   // Active Layer Dimensions accessor helper (fully automated undo-redo integrated!)
   const dimensions = activeLayer.dimensions || [];
@@ -2886,18 +2888,20 @@ export default function App() {
     const startY = Math.floor(-panY / viewZoom / gridSize) * gridSize;
     const endY = (canvas.height - panY) / viewZoom;
 
-    ctx.strokeStyle = '#27272a'; // Zinc-800
-    ctx.lineWidth = 0.5 / viewZoom;
-    ctx.beginPath();
-    for (let x = startX; x < endX; x += gridSize) {
-      ctx.moveTo(x, startY);
-      ctx.lineTo(x, endY);
+    if (showGrid) {
+      ctx.strokeStyle = '#cbd5e1'; // Soft slate-300 color for high-visibility light grid
+      ctx.lineWidth = 0.5 / viewZoom;
+      ctx.beginPath();
+      for (let x = startX; x < endX; x += gridSize) {
+        ctx.moveTo(x, startY);
+        ctx.lineTo(x, endY);
+      }
+      for (let y = startY; y < endY; y += gridSize) {
+        ctx.moveTo(startX, y);
+        ctx.lineTo(endX, y);
+      }
+      ctx.stroke();
     }
-    for (let y = startY; y < endY; y += gridSize) {
-      ctx.moveTo(startX, y);
-      ctx.lineTo(endX, y);
-    }
-    ctx.stroke();
 
     // 2.5 Draw Absolute Coordinate Origin Axes (X=0 & Y=0) with labels
     ctx.lineWidth = 1.5 / viewZoom;
@@ -5537,47 +5541,47 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100 select-none">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 font-sans text-slate-800 select-none">
       
       {/* 1. Upper Ribbon Bar (Actions & Quick Toolings) */}
-      <header className="flex items-center gap-4 px-3 py-1.5 bg-zinc-900 border-b border-zinc-805 overflow-x-auto shrink-0">
-        <div className="flex items-center gap-1.5 pr-3 border-r border-zinc-800 shrink-0">
-          <Workflow className="w-4 h-4 text-blue-500" />
-          <span className="text-xs font-bold tracking-wider uppercase text-zinc-200">
-            CADE<span className="text-amber-500">RİM</span>
+      <header className="flex items-center gap-4 px-3 py-1.5 bg-white border-b border-slate-200 overflow-x-auto shrink-0 shadow-sm">
+        <div className="flex items-center gap-1.5 pr-3 border-r border-slate-200 shrink-0">
+          <Workflow className="w-4 h-4 text-orange-500" />
+          <span className="text-xs font-black tracking-wider uppercase text-slate-900">
+            CADE<span className="text-orange-500">RİM</span>
           </span>
-          <span className="text-[9px] font-mono bg-zinc-800 border border-zinc-700 px-1 py-0.2 rounded text-zinc-400">
-            v14.0
+          <span className="text-[9px] font-mono bg-slate-100 border border-slate-200 px-1 py-0.2 rounded text-slate-500">
+            v14.1
           </span>
         </div>
 
         {/* Sidebar Toggler */}
-        <div className="flex items-center border-r border-zinc-800 pr-3 shrink-0">
+        <div className="flex items-center border-r border-slate-200 pr-3 shrink-0">
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-300 transition cursor-pointer font-bold font-mono"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 transition cursor-pointer font-bold font-mono"
             title={sidebarCollapsed ? "Sayısal Değerleri Göster (Show Sidebar)" : "Sayısal Değerleri Gizle (Hide Sidebar)"}
           >
-            {sidebarCollapsed ? <ChevronRight className="w-3 h-3 text-amber-400" /> : <ChevronLeft className="w-3 h-3 text-amber-400" />}
+            {sidebarCollapsed ? <ChevronRight className="w-3 h-3 text-orange-500" /> : <ChevronLeft className="w-3 h-3 text-orange-500" />}
             <span>Panel</span>
           </button>
         </div>
 
         {/* Project Files Save & Load */}
-        <div className="flex items-center gap-1 border-r border-zinc-800 pr-3 shrink-0">
+        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
           <button
             onClick={saveSketchJSON}
-            className="flex items-center gap-1 px-1.5 py-0.5 bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border border-zinc-750 hover:border-zinc-700 rounded text-[11px] transition cursor-pointer font-bold font-mono"
+            className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 hover:border-slate-300 rounded text-[11px] transition cursor-pointer font-bold font-mono"
             title="Sketch dosyasını bilgisayarına kaydet (.json)"
           >
-            <Save className="w-3 h-3 text-blue-400" />
+            <Save className="w-3 h-3 text-orange-500" />
             <span>Kaydet</span>
           </button>
           <label
-            className="flex items-center gap-1 px-1.5 py-0.5 bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border border-zinc-750 hover:border-zinc-700 rounded text-[11px] transition cursor-pointer font-bold font-mono"
+            className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 hover:border-slate-300 rounded text-[11px] transition cursor-pointer font-bold font-mono"
             title="Daha önce kaydettiğin sketch dosyasını yükle"
           >
-            <Upload className="w-3 h-3 text-emerald-400" />
+            <Upload className="w-3 h-3 text-emerald-600" />
             <span>Yükle</span>
             <input
               type="file"
@@ -5589,9 +5593,9 @@ export default function App() {
         </div>
 
         {/* CENTERED SPECIAL AI REDEFINE GEOMETRY BOX */}
-        <div className="flex items-center gap-1.5 px-3 py-1 bg-zinc-950 border border-amber-500/40 rounded-full font-sans shadow-lg shadow-amber-950/20 shrink-0 select-none">
-          <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-          <span className="text-[10px] uppercase font-mono text-amber-400 font-extrabold pb-0.5">AI Redefine:</span>
+        <div className="flex items-center gap-1.5 px-3 py-1 bg-orange-50 border border-orange-200 rounded-full font-sans shadow-md shadow-orange-500/5 shrink-0 select-none">
+          <Sparkles className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
+          <span className="text-[10px] uppercase font-mono text-orange-600 font-extrabold pb-0.5">AI Redefine:</span>
           <input
             type="text"
             value={aiRefinePrompt}
@@ -5600,7 +5604,7 @@ export default function App() {
               if (e.key === 'Enter') handleAIRedefineSketch();
             }}
             placeholder="E.g., 'Make a 40mm circle at center' or 'round the corners'"
-            className="w-80 bg-zinc-900 border border-zinc-800 placeholder-zinc-500 text-xs px-3 py-1 text-zinc-100 rounded-full focus:outline-none focus:border-amber-500/80 transition font-mono"
+            className="w-80 bg-white border border-slate-200 placeholder-slate-400 text-xs px-3 py-1 text-slate-800 rounded-full focus:outline-none focus:border-orange-500/80 transition font-mono"
             disabled={aiLoading}
           />
           <button
@@ -5608,12 +5612,12 @@ export default function App() {
             disabled={aiLoading || !aiRefinePrompt.trim()}
             className={`px-3 py-1 font-mono font-bold text-[10px] rounded-full transition cursor-pointer flex items-center gap-1 ${
               aiLoading || !aiRefinePrompt.trim()
-                ? 'bg-zinc-800 border border-zinc-700 text-zinc-500 cursor-not-allowed'
-                : 'bg-gradient-to-r from-amber-500 to-yellow-600 text-zinc-950 hover:from-amber-400 hover:to-yellow-500 font-extrabold border border-amber-400'
+                ? 'bg-slate-200 border border-slate-300 text-slate-400 cursor-not-allowed'
+                : 'bg-gradient-to-r from-orange-500 to-amber-600 text-white hover:from-orange-600 hover:to-amber-700 font-extrabold border border-orange-600'
             }`}
           >
             {aiLoading ? (
-              <span className="w-2.5 h-2.5 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin" />
+              <span className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
             ) : (
               <Flame className="w-2.5 h-2.5" />
             )}
@@ -5622,12 +5626,12 @@ export default function App() {
         </div>
 
         {/* Draw Tools */}
-        <div className="flex items-center gap-1 border-r border-zinc-800 pr-3 shrink-0">
-          <span className="text-[10px] uppercase font-mono text-zinc-500 mr-1">Draw:</span>
+        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
+          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Çizim:</span>
           <button
             onClick={() => setCommand('line')}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'line' ? 'bg-blue-600/30 border-blue-500 text-blue-400 font-bold' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              currentCommand === 'line' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Line (L)"
           >
@@ -5637,7 +5641,7 @@ export default function App() {
           <button
             onClick={() => setCommand('rect')}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'rect' ? 'bg-blue-600/30 border-blue-500 text-blue-400 font-bold' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              currentCommand === 'rect' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Rectangle (R)"
           >
@@ -5647,7 +5651,7 @@ export default function App() {
           <button
             onClick={() => setCommand('circle')}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'circle' ? 'bg-blue-600/30 border-blue-500 text-blue-400 font-bold' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              currentCommand === 'circle' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Circle (C)"
           >
@@ -5657,7 +5661,7 @@ export default function App() {
           <button
             onClick={() => setCommand('polygon')}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'polygon' ? 'bg-blue-600/30 border-blue-500 text-blue-400 font-bold' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              currentCommand === 'polygon' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Polygon (POL)"
           >
@@ -5673,11 +5677,11 @@ export default function App() {
               logCommandResponse("Akıllı Ölçülendirme ve Konumlandırma aktif. Ölçülendirmek istediğiniz ilk noktayı seçin.");
             }}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'dimension' ? 'bg-pink-600/30 border-pink-500 text-pink-400 font-bold' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              currentCommand === 'dimension' ? 'bg-orange-600 border-orange-700 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Akıllı Ölçülendirme ve Konumlandırma (DIM) - Çizim noktalarını seçip konumlandırın"
           >
-            <Ruler className="w-3 h-3 text-pink-400" />
+            <Ruler className="w-3 h-3 text-white" />
             <span>Ölçülendir</span>
           </button>
 
@@ -5707,29 +5711,29 @@ export default function App() {
                 setTempPoint(null);
                 logCommandResponse("Drafting shape completed and saved to layer paths.");
               }}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-emerald-600/25 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-600 hover:text-white transition font-mono font-bold animate-pulse cursor-pointer"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100 transition font-mono font-bold animate-pulse cursor-pointer"
               title="Save active path to layer paths database"
             >
-              <CheckCircle className="w-3 h-3 text-emerald-400" />
+              <CheckCircle className="w-3 h-3" />
               <span>Finish Shape</span>
             </button>
           )}
         </div>
 
         {/* Dynamic Draw Mode / Operations Switcher */}
-        <div className="flex items-center gap-1 border-r border-zinc-800 pr-3 shrink-0 font-sans">
-          <span className="text-[10px] uppercase font-mono text-zinc-500 mr-1">Mode:</span>
+        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0 font-sans">
+          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Mod:</span>
           <button
             onClick={() => {
               clearCommand();
               setDrawMode('freehand');
             }}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              drawMode === 'freehand' ? 'bg-orange-600/25 border-orange-500 text-orange-400 font-bold' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              drawMode === 'freehand' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Freehand Mode"
           >
-            <span>✏️ Freehand</span>
+            <span>✏️ Serbest Çizim</span>
           </button>
           <button
             onClick={() => {
@@ -5737,11 +5741,11 @@ export default function App() {
               setDrawMode('point');
             }}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              drawMode === 'point' ? 'bg-orange-600/25 border-orange-500 text-orange-400 font-bold' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              drawMode === 'point' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Point Entry"
           >
-            <span>📐 Point</span>
+            <span>📐 Nokta Girişi</span>
           </button>
           <button
             onClick={() => {
@@ -5749,31 +5753,31 @@ export default function App() {
               setDrawMode('drag');
             }}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              drawMode === 'drag' ? 'bg-orange-600/25 border-orange-500 text-orange-400 font-bold' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              drawMode === 'drag' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Vertex Edit & Drag"
           >
-            <span>👆 Edit Vertex</span>
+            <span>👆 Nokta Taşı</span>
           </button>
         </div>
 
         {/* Modifiers */}
-        <div className="flex items-center gap-1 border-r border-zinc-800 pr-3 shrink-0">
-          <span className="text-[10px] uppercase font-mono text-zinc-500 mr-1">Modify:</span>
+        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
+          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Düzenle:</span>
           <button
             onClick={() => applyFillet()}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 hover:text-white transition font-mono font-bold"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-slate-900 transition font-mono font-bold"
             title="Apply Fillet Rounding (F)"
           >
-            <RefreshCw className="w-3 h-3" />
+            <RefreshCw className="w-3 h-3 text-orange-500" />
             <span>Fillet</span>
           </button>
           <button
             onClick={() => applyChamfer()}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 hover:text-white transition font-mono font-bold"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-slate-900 transition font-mono font-bold"
             title="Apply Chamfer (CH)"
           >
-            <ListFilter className="w-3 h-3 text-red-400" />
+            <ListFilter className="w-3 h-3 text-orange-500" />
             <span>Chamfer</span>
           </button>
           <button
@@ -5783,12 +5787,12 @@ export default function App() {
               logCommandResponse("TRIM mode activated. Click on any segment to trim it between intersections.");
             }}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'trim' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              currentCommand === 'trim' ? 'bg-orange-500 border-orange-600 text-white font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Trim segment (Makas Budama)"
           >
-            <Trash2 className="w-3 h-3 text-red-400" />
-            <span>Trim</span>
+            <Trash2 className="w-3 h-3 text-red-500" />
+            <span>Budama</span>
           </button>
           <button
             onClick={() => {
@@ -5797,30 +5801,30 @@ export default function App() {
               logCommandResponse("EXTEND mode activated. Click near an open endpoint to extend it to the next intersection.");
             }}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'extend' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700'
+              currentCommand === 'extend' ? 'bg-orange-500 border-orange-600 text-white font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
             }`}
             title="Extend segment (Uzatma)"
           >
-            <Maximize className="w-3 h-3 text-cyan-400" />
-            <span>Extend</span>
+            <Maximize className="w-3 h-3 text-cyan-600" />
+            <span>Uzatma</span>
           </button>
           <button
             onClick={handleUndo}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-amber-600/15 border border-amber-850 hover:bg-amber-600/25 text-amber-400 transition font-mono"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-105 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-orange-500 transition font-mono font-bold"
             title="Undo (Ctrl+Z)"
           >
-            <Undo2 className="w-3 h-3" />
-            <span>Undo</span>
+            <Undo2 className="w-3 h-3 text-orange-500" />
+            <span>Geri Al</span>
           </button>
         </div>
 
         {/* Snap Select Toggles */}
-        <div className="flex items-center gap-1 border-r border-zinc-800 pr-3 shrink-0 font-mono text-[10px]">
-          <span className="text-[10px] uppercase text-zinc-500 mr-1.5">Snaps:</span>
+        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0 font-mono text-[10px]">
+          <span className="text-[10px] uppercase text-slate-400 mr-1.5 font-bold">Snaps:</span>
           <button
             onClick={() => setSnapToggles(prev => ({ ...prev, origin: !prev.origin }))}
             className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.origin ? 'bg-emerald-600/25 border-emerald-500 text-emerald-300' : 'bg-zinc-850 border-zinc-750 text-zinc-400 hover:bg-zinc-800'
+              snapToggles.origin ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
             }`}
             title="Origin Snap (Orijine Kenetlen)"
           >
@@ -5829,7 +5833,7 @@ export default function App() {
           <button
             onClick={() => setSnapToggles(prev => ({ ...prev, end: !prev.end }))}
             className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.end ? 'bg-emerald-600/25 border-emerald-500 text-emerald-300' : 'bg-zinc-850 border-zinc-750 text-zinc-400 hover:bg-zinc-800'
+              snapToggles.end ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
             }`}
             title="Endpoint Snap (Uç Noktası)"
           >
@@ -5838,7 +5842,7 @@ export default function App() {
           <button
             onClick={() => setSnapToggles(prev => ({ ...prev, mid: !prev.mid }))}
             className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.mid ? 'bg-emerald-600/25 border-emerald-500 text-emerald-300' : 'bg-zinc-850 border-zinc-750 text-zinc-400 hover:bg-zinc-800'
+              snapToggles.mid ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
             }`}
             title="Midpoint Snap (Orta Nokta)"
           >
@@ -5847,7 +5851,7 @@ export default function App() {
           <button
             onClick={() => setSnapToggles(prev => ({ ...prev, int: !prev.int }))}
             className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.int ? 'bg-emerald-600/25 border-emerald-500 text-emerald-300' : 'bg-zinc-850 border-zinc-750 text-zinc-400 hover:bg-zinc-800'
+              snapToggles.int ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
             }`}
             title="Intersection Snap (Kesişim)"
           >
@@ -5856,7 +5860,7 @@ export default function App() {
           <button
             onClick={() => setSnapToggles(prev => ({ ...prev, tan: !prev.tan }))}
             className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.tan ? 'bg-emerald-600/25 border-emerald-500 text-emerald-300' : 'bg-zinc-850 border-zinc-750 text-zinc-400 hover:bg-zinc-800'
+              snapToggles.tan ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
             }`}
             title="Tangent Snap (Daire Teğetleri)"
           >
@@ -5865,7 +5869,7 @@ export default function App() {
           <button
             onClick={() => setSnapToggles(prev => ({ ...prev, quad: !prev.quad }))}
             className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.quad ? 'bg-emerald-600/25 border-emerald-500 text-emerald-300' : 'bg-zinc-850 border-zinc-750 text-zinc-400 hover:bg-zinc-800'
+              snapToggles.quad ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
             }`}
             title="Quadrant Snap (Çeyrek Daire)"
           >
@@ -5881,19 +5885,19 @@ export default function App() {
               setPanX(0);
               setPanY(0);
             }}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-300 transition font-mono"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 transition font-mono font-bold"
             title="Reset Zoom & Pan View"
           >
-            <Maximize className="w-3 h-3 text-emerald-400" />
-            <span>Fit</span>
+            <Maximize className="w-3 h-3 text-orange-500" />
+            <span>Sığdır</span>
           </button>
           <button
             onClick={handleClearAll}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-rose-600/20 border border-rose-900 text-rose-300 hover:bg-rose-600/30 transition font-mono"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-red-50 border border-red-200 text-red-650 hover:bg-red-100 transition font-mono font-bold"
             title="Wipe canvas clean"
           >
-            <Trash2 className="w-3 h-3" />
-            <span>Wipe</span>
+            <Trash2 className="w-3 h-3 text-red-500" />
+            <span>Temizle</span>
           </button>
         </div>
       </header>
@@ -5902,169 +5906,213 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
         
         {/* 2. Side Panel Controllers */}
-        <aside className={`bg-zinc-900 border-r border-zinc-800 flex flex-col overflow-y-auto shrink-0 transition-all duration-200 overflow-hidden ${sidebarCollapsed ? 'w-0 border-r-0 pb-0' : 'w-[260px]'}`}>
+        <aside className={`bg-slate-50 border-r border-slate-200 flex flex-col overflow-y-auto shrink-0 transition-all duration-200 overflow-hidden ${sidebarCollapsed ? 'w-0 border-r-0 pb-0' : 'w-[290px]'}`}>
           
-          {/* Section A: Active Sketch Sandbox */}
-          <div className="p-4 border-b border-zinc-800">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5 mb-3">
-              <Activity className="w-4 h-4 text-emerald-400" />
-              1. Sketch Toolbox
-            </h2>
-
-            <div className="bg-zinc-950 p-2.5 rounded-lg border border-zinc-800 space-y-2">
-              <label className="flex items-center gap-2 cursor-pointer text-xs p-1.5 rounded hover:bg-zinc-900 transition font-mono">
-                <input
-                  type="radio"
-                  name="editMode"
-                  checked={drawMode === 'freehand'}
-                  onChange={() => {
-                    clearCommand();
-                    setDrawMode('freehand');
-                  }}
-                  className="rounded text-blue-500 focus:ring-0"
-                />
-                <span className="text-zinc-300">✏️ Freehand Draw</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer text-xs p-1.5 rounded hover:bg-zinc-900 transition font-mono">
-                <input
-                  type="radio"
-                  name="editMode"
-                  checked={drawMode === 'point'}
-                  onChange={() => {
-                    clearCommand();
-                    setDrawMode('point');
-                  }}
-                  className="rounded text-blue-500 focus:ring-0"
-                />
-                <span className="text-zinc-300">📐 Point Entry</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer text-xs p-1.5 rounded hover:bg-zinc-900 transition font-mono">
-                <input
-                  type="radio"
-                  name="editMode"
-                  checked={drawMode === 'drag'}
-                  onChange={() => {
-                    clearCommand();
-                    setDrawMode('drag');
-                  }}
-                  className="rounded text-blue-500 focus:ring-0"
-                />
-                <span className="text-zinc-300">👆 Vertex Edit & Drag</span>
-              </label>
-            </div>
-
-            {/* Fillet & Chamfer Controls */}
-            <div className="mt-3 bg-zinc-950 p-2.5 rounded-lg border border-zinc-800 space-y-2.5">
-              <span className="text-[10px] font-bold tracking-wider text-zinc-500 uppercase font-mono block">Modifier Parameters</span>
+          {/* Elegant Sidebar Tab Bar Toggle */}
+          <div className="flex border-b border-slate-200 bg-slate-100/80 p-1 shrink-0 gap-1">
+            <button
+              onClick={() => setSidebarTab('sketch')}
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === 'sketch' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              }`}
+            >
+              🛠 Araçlar
+            </button>
+            <button
+              onClick={() => setSidebarTab('layers')}
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === 'layers' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              }`}
+            >
+              🔍 Katman
+            </button>
+            <button
+              onClick={() => setSidebarTab('dimensions')}
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === 'dimensions' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              }`}
+            >
+              📐 Ölçü
+            </button>
+            <button
+              onClick={() => setSidebarTab('3d')}
+              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === '3d' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              }`}
+            >
+              📦 3D / Çıktı
+            </button>
+          </div>
+          
+          {/* TAB CONTENT: SKETCH SETTINGS */}
+          {sidebarTab === 'sketch' && (
+            <div className="flex-1 flex flex-col overflow-y-auto divide-y divide-slate-200">
               
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
-                  <span>Fillet Radius (r):</span>
-                  <span className="text-emerald-400 font-bold">{filletRadius} mm</span>
-                </div>
-                <div className="flex gap-1.5">
-                  <input
-                    type="number"
-                    value={filletRadius}
-                    onChange={(e) => setFilletRadius(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
-                    min="1"
-                    max="500"
-                  />
-                  <button
-                    onClick={() => applyFillet(filletRadius)}
-                    className="px-2.5 py-1 bg-emerald-600/20 border border-emerald-500/40 hover:bg-emerald-600 hover:text-white rounded text-xs transition cursor-pointer text-emerald-400 font-bold font-mono"
-                    title="Apply Fillet to corners with custom radius"
-                  >
-                    Fillet
-                  </button>
-                </div>
-              </div>
+              {/* Section A: Active Sketch Sandbox */}
+              <div className="p-4">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5 mb-3">
+                  <Activity className="w-4 h-4 text-orange-600" />
+                  <span>1. Çizim Araç Kutusu</span>
+                </h2>
 
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
-                  <span>Chamfer Distance (d):</span>
-                  <span className="text-red-400 font-bold">{chamferDistance} mm</span>
-                </div>
-                <div className="flex gap-1.5">
-                  <input
-                    type="number"
-                    value={chamferDistance}
-                    onChange={(e) => setChamferDistance(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
-                    min="1"
-                    max="500"
-                  />
-                  <button
-                    onClick={() => applyChamfer(chamferDistance)}
-                    className="px-2.5 py-1 bg-rose-600/20 border border-rose-500/40 hover:bg-rose-600 hover:text-white rounded text-xs transition cursor-pointer text-red-400 font-bold font-mono"
-                    title="Apply Chamfer (Pah) with custom distance"
-                  >
-                    Chamfer
-                  </button>
-                </div>
-              </div>
+                <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-2 shadow-xs">
+                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono block">Aktif Çizim Modu:</span>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs p-1.5 rounded hover:bg-slate-50 transition font-sans font-medium text-slate-700">
+                    <input
+                      type="radio"
+                      name="editMode"
+                      checked={drawMode === 'freehand'}
+                      onChange={() => {
+                        clearCommand();
+                        setDrawMode('freehand');
+                      }}
+                      className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
+                    />
+                    <span>✏️ Serbest Çizim Modu</span>
+                  </label>
 
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400">
-                  <span>Offset Distance (offset):</span>
-                  <span className="text-indigo-400 font-bold">{offsetDistance} mm</span>
+                  <label className="flex items-center gap-2 cursor-pointer text-xs p-1.5 rounded hover:bg-slate-50 transition font-sans font-medium text-slate-700">
+                    <input
+                      type="radio"
+                      name="editMode"
+                      checked={drawMode === 'point'}
+                      onChange={() => {
+                        clearCommand();
+                        setDrawMode('point');
+                      }}
+                      className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
+                    />
+                    <span>📐 Milimetrik Nokta Girişi</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-xs p-1.5 rounded hover:bg-slate-50 transition font-sans font-medium text-slate-700">
+                    <input
+                      type="radio"
+                      name="editMode"
+                      checked={drawMode === 'drag'}
+                      onChange={() => {
+                        clearCommand();
+                        setDrawMode('drag');
+                      }}
+                      className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
+                    />
+                    <span>👆 Köşe Noktası Düzenle / Sürükle</span>
+                  </label>
                 </div>
-                <div className="flex gap-1.5">
-                  <input
-                    type="number"
-                    value={offsetDistance}
-                    onChange={(e) => setOffsetDistance(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
-                    min="1"
-                    max="500"
-                  />
-                  <div className="flex gap-1 shrink-0">
-                    <button
-                      onClick={() => applyOffset(-offsetDistance)}
-                      className="px-2.5 py-1 bg-indigo-600/20 border border-indigo-500/40 hover:bg-indigo-600 hover:text-white rounded text-xs transition cursor-pointer text-indigo-400 font-bold font-mono"
-                      title="Offset Inward"
-                    >
-                      In
-                    </button>
-                    <button
-                      onClick={() => applyOffset(offsetDistance)}
-                      className="px-2.5 py-1 bg-indigo-600/20 border border-indigo-500/40 hover:bg-indigo-600 hover:text-white rounded text-xs transition cursor-pointer text-indigo-400 font-bold font-mono"
-                      title="Offset Outward"
-                    >
-                      Out
-                    </button>
+
+                {/* Fillet & Chamfer Controls */}
+                <div className="mt-3 bg-white p-2.5 rounded-lg border border-slate-200 space-y-2.5 shadow-xs">
+                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono block">Geometri Düzenleyiciler</span>
+                  
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                      <span>Fillet Yarıçapı (Radius r):</span>
+                      <span className="text-orange-600 font-bold">{filletRadius} mm</span>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="number"
+                        value={filletRadius}
+                        onChange={(e) => setFilletRadius(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
+                        min="1"
+                        max="500"
+                      />
+                      <button
+                        onClick={() => applyFillet(filletRadius)}
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
+                        title="Seçili köşelere yumuşatma yarıçapı uygula"
+                      >
+                        Fillet
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                      <span>Chamfer Pah Uzunluğu (d):</span>
+                      <span className="text-orange-600 font-bold">{chamferDistance} mm</span>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="number"
+                        value={chamferDistance}
+                        onChange={(e) => setChamferDistance(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
+                        min="1"
+                        max="500"
+                      />
+                      <button
+                        onClick={() => applyChamfer(chamferDistance)}
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
+                        title="Seçili köşelere pah kırma mesafesi uygula"
+                      >
+                        Chamfer
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                      <span>Genişletme / Offset Uzaklığı:</span>
+                      <span className="text-orange-600 font-bold">{offsetDistance} mm</span>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="number"
+                        value={offsetDistance}
+                        onChange={(e) => setOffsetDistance(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
+                        min="1"
+                        max="500"
+                      />
+                      <div className="flex gap-1 shrink-0">
+                        <button
+                          onClick={() => applyOffset(-offsetDistance)}
+                          className="px-2.5 py-1 bg-slate-105 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
+                          title="İçe Doğru Offset Çıkar"
+                        >
+                          İçe
+                        </button>
+                        <button
+                          onClick={() => applyOffset(offsetDistance)}
+                          className="px-2.5 py-1 bg-slate-105 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
+                          title="Dışa Doğru Offset Çıkar"
+                        >
+                          Dışa
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
+
+                <div className="mt-3 bg-white p-3 rounded-lg border border-slate-200 text-[10px] space-y-1.5 font-mono text-slate-500 shadow-xs">
+                  <p className="text-orange-600 font-bold">KULLANIŞLI İPUÇLARI:</p>
+                  <p>• Çizgilere <span className="text-slate-700 font-bold">Çift Tıklayarak</span> yeni köşe noktası (vertex) ekleyebilirsiniz.</p>
+                  <p>• <span className="text-slate-700 font-bold">Sağ Tık</span> ile aktif çizimi kapatıp kaydedebilirsiniz.</p>
+                  <p>• Köşe noktalarını sürükleyerek milimetrik ölçüleri canlı olarak güncelleyebilirsiniz.</p>
+                </div>
               </div>
             </div>
-
-            <div className="mt-3 bg-zinc-950/50 p-3 rounded-lg border border-zinc-800/80 text-[10px] space-y-1.5 font-mono text-zinc-500">
-              <p className="text-yellow-600/90 font-bold">PRO-TIPS & SHORTS:</p>
-              <p>• <span className="text-zinc-400">Double-Click</span> segment to insert new vertex node (midpoint snap included).</p>
-              <p>• <span className="text-zinc-400">Right-Click</span> context closes geometric loop automatically.</p>
-              <p>• Drag vertices to update live distances and check matching angles.</p>
-            </div>
-          </div>
+          )}
 
           {/* Section B: Parametric Dimension Constraints & Location (Ölçülendirme ve Konumlandırma) */}
-          <div className="p-4 border-b border-zinc-800 flex flex-col shrink-0">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5 mb-2.5">
-              <Ruler className="w-4 h-4 text-rose-400" />
-              2. Dimensions & Coordinates
-            </h2>
+          {sidebarTab === 'dimensions' && (
+            <div className="p-4 border-b border-slate-200 flex flex-col shrink-0">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-850 flex items-center gap-1.5 mb-2.5">
+                <Ruler className="w-4 h-4 text-orange-600 font-extrabold" />
+                <span>2. Boyutlar ve Koordinatlar</span>
+              </h2>
 
-            {selectedVertexIdx === null ? (
-              <div className="space-y-3">
-                <div className="bg-zinc-950/40 border border-zinc-850 p-3 rounded-lg text-[10px] text-zinc-500 font-sans leading-relaxed">
-                  <p className="font-semibold text-zinc-400 mb-1">💡 Parametrik Konumlandırma & 3D Boolean:</p>
-                  Vertex Düzenleme modunda (Vertex Edit & Drag) bir noktanın üzerine tıklayarak koordinatlarını veya bağlı çizgilerin uzunluklarını buradaki kutulardan milimetrik ve hassas olarak değiştirebilirsiniz. Dairelerin yarıçap ve merkezlerini de buradan ayarlayabilirsiniz.
+              {selectedVertexIdx === null ? (
+                <div className="space-y-3">
+                  <div className="bg-white border border-slate-200 p-3 rounded-lg text-[10.5px] text-slate-500 font-sans leading-relaxed shadow-xs">
+                    <p className="font-semibold text-slate-800 mb-1">💡 Parametrik Konumlandırma & 3D Boolean:</p>
+                    Vertex Düzenleme modunda (Nokta Taşı) bir noktanın üzerine tıklayarak koordinatlarını veya bağlı çizgilerin uzunluklarını buradaki kutulardan milimetrik ve hassas olarak değiştirebilirsiniz. Dairelerin yarıçap ve merkezlerini de buradan ayarlayabilirsiniz.
+                  </div>
+                  {renderShapeSolidSettings()}
                 </div>
-                {renderShapeSolidSettings()}
-              </div>
-            ) : (() => {
+              ) : (() => {
               const data = getSelectedVertexAndNeighbors();
               if (!data) return null;
               
@@ -6073,23 +6121,23 @@ export default function App() {
               const d2 = nextPt ? Math.hypot(current.x - nextPt.x, current.y - nextPt.y) : null;
 
               return (
-                <div className="bg-zinc-950 p-3 rounded-lg border border-zinc-850/80 space-y-3 font-sans">
+                <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3 font-sans shadow-xs">
                   {/* Selected label */}
-                  <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 border-b border-zinc-850 pb-2 mb-1">
-                    <span>Selected Vector Pt:</span>
-                    <span className="text-blue-400 font-bold">Node #{selectedVertexIdx}</span>
+                  <div className="flex items-center justify-between text-[10px] font-mono text-slate-450 border-b border-slate-200 pb-2 mb-1">
+                    <span>Seçili Vektör Noktası:</span>
+                    <span className="text-orange-600 font-bold bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200 font-mono">Nokta #{selectedVertexIdx}</span>
                   </div>
 
                   {isCircle && circleData ? (
                     /* Circle specific dimension inputs */
                     <div className="space-y-3">
-                      <div className="text-[10px] font-bold tracking-wider text-rose-400 uppercase font-mono">
-                        Daire Parametreleri (Circle)
+                      <div className="text-[10px] font-bold tracking-wider text-slate-700 uppercase font-sans text-left pb-1 border-b border-slate-100">
+                        🔵 Daire Parametreleri (Circle)
                       </div>
                       
                       {/* Radius */}
                       <div className="space-y-1">
-                        <span className="text-[10px] text-zinc-400 block font-mono">Yarıçap (R):</span>
+                        <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Yarıçap (R):</span>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -6099,15 +6147,15 @@ export default function App() {
                               const v = parseFloat(e.target.value);
                               if (!isNaN(v) && v > 0) handleUpdateCircleRadius(v);
                             }}
-                            className="flex-1 min-w-0 bg-zinc-900 border border-zinc-805 text-xs px-2 py-1.5 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
+                            className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1.5 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
                           />
-                          <span className="text-[10px] font-mono self-center text-zinc-500 font-bold">mm</span>
+                          <span className="text-[10px] font-mono self-center text-slate-400 font-bold">mm</span>
                         </div>
                       </div>
 
                       {/* Center X */}
                       <div className="space-y-1">
-                        <span className="text-[10px] text-zinc-400 block font-mono">Merkez X (Cx):</span>
+                        <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Merkez X (Cx):</span>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -6117,15 +6165,15 @@ export default function App() {
                               const v = parseFloat(e.target.value);
                               if (!isNaN(v)) handleUpdateCircleCenter(v, circleData.center.y);
                             }}
-                            className="flex-1 min-w-0 bg-zinc-900 border border-zinc-805 text-xs px-2 py-1.5 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
+                            className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1.5 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
                           />
-                          <span className="text-[10px] font-mono self-center text-zinc-500 font-bold">mm</span>
+                          <span className="text-[10px] font-mono self-center text-slate-400 font-bold">mm</span>
                         </div>
                       </div>
 
                       {/* Center Y */}
                       <div className="space-y-1">
-                        <span className="text-[10px] text-zinc-400 block font-mono">Merkez Y (Cy):</span>
+                        <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Merkez Y (Cy):</span>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -6135,23 +6183,23 @@ export default function App() {
                               const v = parseFloat(e.target.value);
                               if (!isNaN(v)) handleUpdateCircleCenter(circleData.center.x, v);
                             }}
-                            className="flex-1 min-w-0 bg-zinc-900 border border-zinc-805 text-xs px-2 py-1.5 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
+                            className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1.5 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
                           />
-                          <span className="text-[10px] font-mono self-center text-zinc-500 font-bold">mm</span>
+                          <span className="text-[10px] font-mono self-center text-slate-400 font-bold">mm</span>
                         </div>
                       </div>
                     </div>
                   ) : (
                     /* General segment path inputs */
                     <div className="space-y-3">
-                      <div className="text-[10px] font-bold tracking-wider text-rose-400 uppercase font-mono">
-                        Nokta Koordinatları (Vertex)
+                      <div className="text-[10px] font-bold tracking-wider text-slate-700 uppercase font-sans text-left pb-1 border-b border-slate-100">
+                        📍 Nokta Koordinatları (Vertex)
                       </div>
 
                       {/* Direct Absolute Coordinates */}
                       <div className="grid grid-cols-2 gap-2">
                         <div className="space-y-1">
-                          <span className="text-[10px] text-zinc-500 block font-mono">Pozisyon X:</span>
+                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Pozisyon X:</span>
                           <input
                             type="number"
                             step="any"
@@ -6160,11 +6208,11 @@ export default function App() {
                               const v = parseFloat(e.target.value);
                               if (!isNaN(v)) updateVertexCoords(v, current.y);
                             }}
-                            className="w-full bg-zinc-900 border border-zinc-805 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
+                            className="w-full bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-805 outline-none focus:border-orange-500 font-mono"
                           />
                         </div>
                         <div className="space-y-1">
-                          <span className="text-[10px] text-zinc-500 block font-mono">Pozisyon Y:</span>
+                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Pozisyon Y:</span>
                           <input
                             type="number"
                             step="any"
@@ -6173,19 +6221,19 @@ export default function App() {
                               const v = parseFloat(e.target.value);
                               if (!isNaN(v)) updateVertexCoords(current.x, v);
                             }}
-                            className="w-full bg-zinc-900 border border-zinc-805 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
+                            className="w-full bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-805 outline-none focus:border-orange-500 font-mono"
                           />
                         </div>
                       </div>
 
-                      <div className="text-[10px] font-bold tracking-wider text-teal-400 uppercase font-mono pt-1.5 border-t border-zinc-900">
-                        Bağlı Çizgi Uzunlukları
+                      <div className="text-[10px] font-bold tracking-wider text-slate-700 uppercase font-sans text-left pt-1.5 border-t border-slate-200">
+                        📐 Bağlı Çizgi Uzunlukları
                       </div>
 
                       {/* L1 Length (to previous) */}
                       {d1 !== null && (
                         <div className="space-y-1">
-                          <span className="text-[10px] text-zinc-400 block font-mono">Önceki Çizgi Boyu (L1):</span>
+                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Önceki Çizgi Boyu (L1):</span>
                           <div className="flex gap-2">
                             <input
                               type="number"
@@ -6195,9 +6243,9 @@ export default function App() {
                                 const v = parseFloat(e.target.value);
                                 if (!isNaN(v) && v > 0) updateSegmentLength('prev', v);
                               }}
-                              className="flex-1 min-w-0 bg-zinc-900 border border-zinc-805 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
+                              className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-805 outline-none focus:border-orange-500 font-mono"
                             />
-                            <span className="text-[10px] font-mono self-center text-zinc-500 font-bold">mm</span>
+                            <span className="text-[10px] font-mono self-center text-slate-400 font-bold">mm</span>
                           </div>
                         </div>
                       )}
@@ -6205,7 +6253,7 @@ export default function App() {
                       {/* L2 Length (to next) */}
                       {d2 !== null && (
                         <div className="space-y-1">
-                          <span className="text-[10px] text-zinc-400 block font-mono">Sonraki Çizgi Boyu (L2):</span>
+                          <span className="text-[10px] text-slate-500 block font-sans text-left font-semibold">Sonraki Çizgi Boyu (L2):</span>
                           <div className="flex gap-2">
                             <input
                               type="number"
@@ -6215,9 +6263,9 @@ export default function App() {
                                 const v = parseFloat(e.target.value);
                                 if (!isNaN(v) && v > 0) updateSegmentLength('next', v);
                               }}
-                              className="flex-1 min-w-0 bg-zinc-900 border border-zinc-805 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
+                              className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-805 outline-none focus:border-orange-500 font-mono"
                             />
-                            <span className="text-[10px] font-mono self-center text-zinc-500 font-bold">mm</span>
+                            <span className="text-[10px] font-mono self-center text-slate-400 font-bold">mm</span>
                           </div>
                         </div>
                       )}
@@ -6225,17 +6273,17 @@ export default function App() {
                   )}
 
                    {/* Coordinate Reference Placement panel */}
-                  <div className="pt-2.5 border-t border-zinc-850 space-y-2">
-                    <div className="text-[10px] font-bold tracking-wider text-rose-500 uppercase font-mono flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                  <div className="pt-2.5 border-t border-slate-200 space-y-2">
+                    <div className="text-[10px] font-bold tracking-wider text-orange-650 uppercase font-sans text-left flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />
                       CAD Referans Konumlandırma
                     </div>
-                    <p className="text-[9px] text-zinc-500 leading-normal">
+                    <p className="text-[9px] text-slate-400 leading-normal text-left">
                       Seçili noktayı referans alarak bütün sketch'i X/Y koordinat sistemine yerleştirin:
                     </p>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <span className="text-[9px] text-zinc-400 block font-mono">Hedef X (Mod):</span>
+                        <span className="text-[9px] text-slate-500 block font-sans text-left">Hedef X (Yatay):</span>
                         <input
                           type="number"
                           step="any"
@@ -6244,11 +6292,11 @@ export default function App() {
                             const val = parseFloat(e.target.value);
                             setAlignTargetX(isNaN(val) ? 0 : val);
                           }}
-                          className="w-full bg-zinc-900 border border-zinc-805 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-red-500 font-mono"
+                          className="w-full bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-850 outline-none focus:border-orange-500 font-mono"
                         />
                       </div>
                       <div className="space-y-1">
-                        <span className="text-[9px] text-zinc-400 block font-mono">Hedef Y (Düşey):</span>
+                        <span className="text-[9px] text-slate-500 block font-sans text-left">Hedef Y (Düşey):</span>
                         <input
                           type="number"
                           step="any"
@@ -6257,21 +6305,21 @@ export default function App() {
                             const val = parseFloat(e.target.value);
                             setAlignTargetY(isNaN(val) ? 0 : val);
                           }}
-                          className="w-full bg-zinc-900 border border-zinc-805 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-emerald-500 font-mono"
+                          className="w-full bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-850 outline-none focus:border-orange-500 font-mono"
                         />
                       </div>
                     </div>
                     <div className="flex gap-1.5 pt-1">
                       <button
                         onClick={() => alignEntireSketchBySelectedVertex(0, 0)}
-                        className="flex-1 py-1.5 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-[9px] text-zinc-300 hover:text-white rounded font-mono font-bold transition cursor-pointer text-center"
+                        className="flex-1 py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-250 text-[9px] text-slate-600 hover:text-slate-900 rounded font-mono font-bold transition cursor-pointer text-center"
                         title="Seçili noktayı doğrudan mutlak (0,0) orijinal merkezine taşır"
                       >
                         Orijine Sıfırla (0,0)
                       </button>
                       <button
                         onClick={() => alignEntireSketchBySelectedVertex(alignTargetX, alignTargetY)}
-                        className="flex-1 py-1.5 bg-blue-600/30 hover:bg-blue-600 border border-blue-500/55 text-[9px] text-blue-200 hover:text-white rounded font-mono font-bold transition cursor-pointer text-center"
+                        className="flex-1 py-1.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[9px] text-orange-700 hover:text-orange-950 rounded font-mono font-bold transition cursor-pointer text-center"
                         title="Tüm skeçi seçili nokta o koordinatlara gelecek şekilde öteler"
                       >
                         Hizala & Taşı
@@ -6286,7 +6334,7 @@ export default function App() {
                       setSelectedVertexIdx(null);
                       setSelectedPathIdx(-1);
                     }}
-                    className="w-full mt-2 py-1.5 bg-zinc-850 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-[10px] text-zinc-300 rounded font-mono font-bold transition cursor-pointer"
+                    className="w-full mt-2 py-1.5 bg-slate-100 hover:bg-slate-200/85 border border-slate-200 text-[10px] text-slate-700 rounded font-sans font-bold transition cursor-pointer"
                   >
                     Seçimi Kaldır
                   </button>
@@ -6294,23 +6342,25 @@ export default function App() {
               );
             })()}
           </div>
+          )}
 
           {/* Section B: Layer Manager */}
-          <div className="p-4 border-b border-zinc-800 flex flex-col shrink-0">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center justify-between mb-3">
-              <span className="flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-cyan-400" />
-                2. Layer Manager
-              </span>
-              <button
-                onClick={addNewLayer}
-                className="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-600/30 border border-blue-500/50 text-blue-350 hover:bg-blue-600 transition flex items-center gap-1 cursor-pointer"
-                title="Create a new draft CAD Layer"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Add Layer</span>
-              </button>
-            </h2>
+          {sidebarTab === 'layers' && (
+            <div className="p-4 border-b border-slate-200 flex flex-col shrink-0">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-850 flex items-center justify-between mb-3">
+                <span className="flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-orange-600 font-extrabold" />
+                  <span>2. Katman Yöneticisi (Layers)</span>
+                </span>
+                <button
+                  onClick={addNewLayer}
+                  className="px-2 py-0.5 rounded text-[10px] font-mono bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 font-bold transition flex items-center gap-1 cursor-pointer"
+                  title="Yeni bir CAD taslak katmanı oluştur"
+                >
+                  <Plus className="w-3 h-3 text-orange-600" />
+                  <span>Katman Ekle</span>
+                </button>
+              </h2>
 
             <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
               {layers.map((layer) => {
@@ -6320,8 +6370,8 @@ export default function App() {
                     key={layer.id}
                     className={`flex items-center justify-between gap-1.5 p-2 rounded-lg border transition ${
                       isActive
-                        ? 'bg-zinc-850/80 border-blue-500/70 shadow-[0_0_8px_rgba(59,130,246,0.06)]'
-                        : 'bg-zinc-950/40 border-zinc-850/60 hover:bg-zinc-900/50'
+                        ? 'bg-orange-50 border-orange-300 shadow-sm'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
                     }`}
                   >
                     {/* Layer Selector Left Section */}
@@ -6332,14 +6382,14 @@ export default function App() {
                         name="activeLayerChoice"
                         checked={isActive}
                         onChange={() => setActiveLayerId(layer.id)}
-                        className="rounded-full w-3 h-3 text-blue-500 bg-zinc-900 border-zinc-700 cursor-pointer focus:ring-0 shrink-0 accent-blue-500"
+                        className="rounded-full w-3 h-3 text-orange-500 bg-white border-slate-300 cursor-pointer focus:ring-0 shrink-0 accent-orange-500"
                       />
                       <input
                         type="text"
                         value={layer.name}
                         onChange={(e) => updateLayerProps(layer.id, { name: e.target.value })}
                         className={`text-xs bg-transparent border-0 outline-none font-semibold font-mono p-0 min-w-0 max-w-[120px] flex-1 truncate ${
-                          isActive ? 'text-blue-400' : 'text-zinc-300 hover:bg-zinc-900/50 focus:bg-zinc-900/90 focus:px-1 rounded'
+                          isActive ? 'text-orange-600' : 'text-slate-600 hover:bg-slate-100 focus:bg-white focus:px-1 rounded'
                         }`}
                         title="Click to rename this layer"
                       />
@@ -6348,7 +6398,7 @@ export default function App() {
                     {/* Layer Action Controls Right Section */}
                     <div className="flex items-center gap-1 shrink-0">
                       {/* Color Palette Input Wrapper */}
-                      <div className="relative w-4 h-4 rounded cursor-pointer shrink-0 border border-zinc-700/50" style={{ backgroundColor: layer.color }} title="Change layer custom color">
+                      <div className="relative w-4 h-4 rounded cursor-pointer shrink-0 border border-slate-300" style={{ backgroundColor: layer.color }} title="Katman rengini değiştir">
                         <input
                           type="color"
                           value={layer.color}
@@ -6361,10 +6411,10 @@ export default function App() {
                       {/* Visible/Hidden Toggles */}
                       <button
                         onClick={() => toggleLayerVisibility(layer.id)}
-                        className={`p-1 rounded hover:bg-zinc-800 transition shrink-0 ${
-                          layer.visible ? 'text-zinc-400 hover:text-zinc-200' : 'text-zinc-700 hover:text-zinc-500'
+                        className={`p-1 rounded hover:bg-slate-100 transition shrink-0 ${
+                          layer.visible ? 'text-slate-500 hover:text-slate-700' : 'text-slate-300 hover:text-slate-400'
                         }`}
-                        title={layer.visible ? 'Hide Layer' : 'Show Layer'}
+                        title={layer.visible ? 'Katmanı Gizle' : 'Katmanı Göster'}
                       >
                         {layer.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
                       </button>
@@ -6372,10 +6422,10 @@ export default function App() {
                       {/* Locked/Unlocked Toggles */}
                       <button
                         onClick={() => toggleLayerLock(layer.id)}
-                        className={`p-1 rounded hover:bg-zinc-800 transition shrink-0 ${
-                          layer.locked ? 'text-amber-500 hover:text-amber-400' : 'text-zinc-600 hover:text-zinc-400'
+                        className={`p-1 rounded hover:bg-slate-100 transition shrink-0 ${
+                          layer.locked ? 'text-orange-500 hover:text-orange-600' : 'text-slate-300 hover:text-slate-500'
                         }`}
-                        title={layer.locked ? 'Unlock Layer' : 'Lock Layer'}
+                        title={layer.locked ? 'Katman Kilidini Aç' : 'Katmanı Kilitle'}
                       >
                         {layer.locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
                       </button>
@@ -6384,8 +6434,8 @@ export default function App() {
                       {layers.length > 1 && (
                         <button
                           onClick={() => deleteLayer(layer.id)}
-                          className="p-1 rounded text-zinc-600 hover:text-rose-450 hover:bg-rose-500/10 transition shrink-0"
-                          title="Delete CAD Layer"
+                          className="p-1 rounded text-slate-400 hover:text-red-650 hover:bg-red-500/10 transition shrink-0"
+                          title="Katmanı Sil"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -6396,30 +6446,32 @@ export default function App() {
               })}
             </div>
             {/* Info label */}
-            <div className="mt-1.5 text-[9px] font-mono text-zinc-500/80 leading-tight text-center">
-              * Hidden layers are bypassed from the 3D generation *
+            <div className="mt-1.5 text-[9px] font-mono text-slate-400 leading-tight text-center">
+              * Gizlenen katmanlar 3D katı model üretimine dahil edilmez *
             </div>
           </div>
+          )}
 
           {/* Section B-2: CAD Core Edit Actions (CAD Düzenleme Menüsü) */}
-          <div className="p-4 border-b border-zinc-800 space-y-3 shrink-0">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-orange-400">
-                <Scissors className="w-4 h-4 text-orange-450 animate-pulse" />
-                <span>3. CAD Edit & Modify</span>
-              </span>
-              <span className="text-[10px] font-mono text-zinc-500 bg-zinc-905 px-1.5 py-0.5 rounded border border-zinc-850">
-                PRO TOOLKIT
-              </span>
-            </h2>
+          {sidebarTab === 'sketch' && (
+            <div className="p-4 border-b border-slate-200 space-y-3 shrink-0">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Scissors className="w-4 h-4 text-orange-600" />
+                  <span>2. Blok Düzenleme & Transform</span>
+                </span>
+                <span className="text-[10px] font-mono text-orange-650 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200 font-bold">
+                  PRO ARAÇLAR
+                </span>
+              </h2>
 
             {/* Current Selection Status Banner */}
-            <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-850 text-left space-y-1">
-              <div className="text-[9px] font-mono font-bold uppercase text-zinc-500">
+            <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-left space-y-1 shadow-xs">
+              <div className="text-[9px] font-mono font-bold uppercase text-slate-400">
                 SEÇİM DURUMU (SELECTION)
               </div>
               {isFinalPointsSelected || selectedPathIndices.length > 0 ? (
-                <div className="text-xs font-semibold text-orange-400 flex items-center gap-1">
+                <div className="text-xs font-bold text-orange-600 flex items-center gap-1">
                   <span className="inline-block w-2.5 h-2.5 rounded-full bg-orange-500 animate-pulse" />
                   <span>
                     {isFinalPointsSelected ? "Aktif Poligon" : ""}
@@ -6428,7 +6480,7 @@ export default function App() {
                   </span>
                 </div>
               ) : (
-                <div className="text-xs text-zinc-500 italic leading-snug">
+                <div className="text-xs text-slate-500 italic leading-snug font-medium">
                   Seçili nesne yok. Nesneyi seçip kopyalamak, silmek, döndürmek veya ölçeklemek için üzerine tıklayın ya da sağ tıklayıp kutu içine alın. (Del tuşu siler)
                 </div>
               )}
@@ -6440,57 +6492,57 @@ export default function App() {
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={handleCopy}
-                  className="py-2 bg-indigo-650 hover:bg-indigo-550 border border-indigo-600 rounded text-xs font-bold font-mono text-indigo-100 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  className="py-2 bg-slate-50 hover:bg-slate-100 border border-slate-250 rounded text-xs font-bold font-mono text-slate-700 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   title="Seçili tüm nesneleri panoya kopyalar (Ctrl + C)"
                 >
-                  <Copy className="w-3.5 h-3.5" />
+                  <Copy className="w-3.5 h-3.5 text-orange-500" />
                   Kopyala (Ctrl+C)
                 </button>
                 <button
                   onClick={handlePaste}
-                  className="py-2 bg-emerald-700 hover:bg-emerald-650 border border-emerald-600 rounded text-xs font-bold font-mono text-emerald-100 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  className="py-2 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded text-xs font-bold font-mono text-orange-700 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   title="Kopyalanmış nesneleri mouse imlecinin olduğu yere yapıştırır (Ctrl + V)"
                 >
-                  <Clipboard className="w-3.5 h-3.5 text-emerald-300" />
+                  <Clipboard className="w-3.5 h-3.5 text-orange-600" />
                   Yapıştır (Ctrl+V)
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={applyCadEditCopy}
-                  className="py-2 bg-cyan-750 hover:bg-cyan-650 border border-cyan-700 rounded text-xs font-bold font-mono text-cyan-100 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  className="py-2 bg-slate-50 hover:bg-slate-100 border border-slate-250 rounded text-xs font-bold font-mono text-slate-700 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   title="Seçili tüm nesneleri hemen yanına çoğaltır (Ctrl + D)"
                 >
-                  <Copy className="w-3.5 h-3.5 opacity-60" />
+                  <Copy className="w-3.5 h-3.5 text-orange-500 opacity-60" />
                   Çoğalt (Ctrl+D)
                 </button>
                 <button
                   onClick={applyCadEditDelete}
-                  className="py-2 bg-rose-950/45 hover:bg-rose-900/80 border border-rose-900 rounded text-xs font-bold font-mono text-rose-200 flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  className="py-2 bg-red-50 hover:bg-red-100 border border-red-200 rounded text-xs font-bold font-mono text-red-650 flex items-center justify-center gap-1.5 transition cursor-pointer"
                   title="Seçili tüm nesneleri temizler (Delete / Backspace)"
                 >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
                   Sil (Delete)
                 </button>
               </div>
 
               {/* Row 2: Mirror / Aynala (Horiz & Vert) */}
-              <div className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-850 space-y-1.5">
-                <span className="text-[10px] text-zinc-400 font-mono font-bold flex items-center gap-1">
-                  <FlipHorizontal className="w-3 h-3 text-cyan-400" />
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5 shadow-xs">
+                <span className="text-[10px] text-slate-400 font-mono font-bold flex items-center gap-1">
+                  <FlipHorizontal className="w-3 h-3 text-orange-500" />
                   🪞 CAD AYNALAMA (MIRROR)
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => applyCadEditMirror('Y')}
-                    className="py-1.5 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 rounded font-mono text-[9px] font-bold text-zinc-200 hover:text-white transition cursor-pointer text-center"
+                    className="py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded font-mono text-[9px] font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer text-center"
                     title="Yatay eksene göre simetriğini alır"
                   >
                     ↔ Yatay Aynala
                   </button>
                   <button
                     onClick={() => applyCadEditMirror('X')}
-                    className="py-1.5 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 rounded font-mono text-[9px] font-bold text-zinc-200 hover:text-white transition cursor-pointer text-center"
+                    className="py-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded font-mono text-[9px] font-bold text-slate-600 hover:text-slate-900 transition cursor-pointer text-center"
                     title="Düşey eksene göre simetriğini alır"
                   >
                     ↕ Dikey Aynala
@@ -6503,8 +6555,8 @@ export default function App() {
                     }}
                     className={`col-span-2 py-1.5 border rounded font-mono text-[9px] font-bold text-center transition cursor-pointer flex items-center justify-center gap-1.5 ${
                       axisMirrorSelectMode 
-                        ? 'bg-amber-600/30 border-amber-500 text-amber-200 animate-pulse' 
-                        : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white hover:bg-zinc-850'
+                        ? 'bg-orange-55 border-orange-500 text-orange-700 animate-pulse' 
+                        : 'bg-slate-50 border-slate-250 text-slate-600 hover:text-slate-800 hover:bg-slate-100'
                     }`}
                     title="Çizimden bir referans çizgiyi ayna ekseni olarak seçer veya serbest eksen çizer"
                   >
@@ -6514,27 +6566,27 @@ export default function App() {
               </div>
 
               {/* Row 3: Rotation Engine */}
-              <div className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-850 space-y-2">
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-2 shadow-xs">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] text-zinc-400 font-mono font-bold flex items-center gap-1">
-                    <RefreshCw className="w-3 h-3 text-amber-500 animate-spin-slow" />
+                  <span className="text-[10px] text-slate-400 font-mono font-bold flex items-center gap-1">
+                    <RefreshCw className="w-3 h-3 text-orange-600 font-extrabold animate-spin-slow" />
                     🔄 DÖNDÜRME (ROTATE)
                   </span>
-                  <span className="text-[9px] text-zinc-500 font-mono">Derece (°)</span>
+                  <span className="text-[9px] text-slate-550 font-mono font-medium">Derece (°)</span>
                 </div>
 
                 {/* Pivot (Rotation Center) controls */}
                 <div className="space-y-1">
-                  <span className="text-[9px] text-zinc-400 font-bold font-mono uppercase block text-left">📍 Dönme Merkezi</span>
+                  <span className="text-[9px] text-slate-500 font-bold font-sans uppercase block text-left">📍 Dönme Merkezi:</span>
                   {rotationCenter ? (
-                    <div className="flex items-center justify-between bg-amber-950/20 border border-amber-500/30 px-2 py-1 rounded text-[10px] font-mono text-amber-300">
+                    <div className="flex items-center justify-between bg-orange-50/70 border border-orange-200 px-2 py-1 rounded text-[10px] font-mono text-orange-700">
                       <span>X: {rotationCenter.x.toFixed(1)} / Y: {rotationCenter.y.toFixed(1)} mm</span>
                       <button
                         onClick={() => {
                           setRotationCenter(null);
                           logCommandResponse("Döndürme merkez noktası temizlendi (seçim ortasından devam edecek).");
                         }}
-                        className="text-[9px] text-rose-400 hover:text-rose-300 px-1 rounded bg-rose-950/45 border border-rose-900/40 cursor-pointer"
+                        className="text-[9px] text-red-600 hover:text-red-700 px-1 rounded bg-red-50 border border-red-200 cursor-pointer font-bold"
                       >
                         Temizle
                       </button>
@@ -6547,8 +6599,8 @@ export default function App() {
                       }}
                       className={`w-full py-1 rounded text-[9px] font-mono font-bold border transition cursor-pointer text-center ${
                         rotationCenterSelectMode
-                          ? 'bg-amber-600/30 border-amber-500 text-amber-200 animate-pulse'
-                          : 'bg-zinc-900 hover:bg-zinc-850 border-zinc-800 text-zinc-400 hover:text-white'
+                          ? 'bg-orange-600/30 border-orange-500 text-orange-700 animate-pulse'
+                          : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:text-slate-900'
                       }`}
                     >
                       {rotationCenterSelectMode ? '📍 Ekrana Tıkla...' : '📍 Merkez Noktası Belirle'}
@@ -6558,19 +6610,19 @@ export default function App() {
 
                 {/* Dynamic & Precise Stepper Controls */}
                 <div className="space-y-1.5 pt-1">
-                  <span className="text-[9px] text-zinc-400 font-bold font-mono uppercase block text-left">⚡ Hassas Döndürme Adımı</span>
-                  <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+                  <span className="text-[9px] text-slate-500 font-bold font-sans uppercase block text-left">⚡ Hassas Döndürme Adımı:</span>
+                  <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-lg border border-slate-200">
                     {/* CCW Rotate Arrow Button */}
                     <button
                       onClick={() => applyRelativeRotation(-cadRotateAngle)}
-                      className="p-1 px-2 pb-1.5 bg-zinc-900 border border-zinc-850 rounded text-amber-500 hover:text-amber-400 hover:bg-zinc-800 font-black text-xs transition cursor-pointer shrink-0"
+                      className="p-1 px-2 pb-1.5 bg-white border border-slate-250 rounded text-orange-600 hover:text-orange-700 hover:bg-slate-100 font-black text-xs transition cursor-pointer shrink-0"
                       title={`Saat yönünün tersine -${cadRotateAngle}° döndür`}
                     >
                       ◀
                     </button>
                     
                     {/* Editable custom step in degrees */}
-                    <div className="flex-1 flex items-center justify-center gap-1 bg-zinc-900 border border-zinc-855 px-2 rounded">
+                    <div className="flex-1 flex items-center justify-center gap-1 bg-white border border-slate-300 px-2 rounded">
                       <input
                         type="number"
                         value={cadRotateAngle}
@@ -6579,16 +6631,16 @@ export default function App() {
                           setCadRotateAngle(isNaN(val) ? 0 : val);
                         }}
                         placeholder="5"
-                        className="w-full bg-transparent text-center text-xs text-zinc-100 font-mono outline-none border-none py-1"
+                        className="w-full bg-transparent text-center text-xs text-slate-800 font-mono outline-none border-none py-1"
                         title="Döndürme adım açısını girin"
                       />
-                      <span className="text-[10px] text-zinc-500 font-mono leading-none">°</span>
+                      <span className="text-[10px] text-slate-400 font-mono leading-none">°</span>
                     </div>
 
                     {/* CW Rotate Arrow Button */}
                     <button
                       onClick={() => applyRelativeRotation(cadRotateAngle)}
-                      className="p-1 px-2 pb-1.5 bg-zinc-900 border border-zinc-850 rounded text-amber-500 hover:text-amber-400 hover:bg-zinc-800 font-black text-xs transition cursor-pointer shrink-0"
+                      className="p-1 px-2 pb-1.5 bg-white border border-slate-250 rounded text-orange-600 hover:text-orange-700 hover:bg-slate-100 font-black text-xs transition cursor-pointer shrink-0"
                       title={`Saat yönünde +${cadRotateAngle}° döndür`}
                     >
                       ▶
@@ -6603,8 +6655,8 @@ export default function App() {
                         onClick={() => setCadRotateAngle(step)}
                         className={`py-1 rounded text-[8px] font-mono transition cursor-pointer text-center border ${
                           cadRotateAngle === step
-                            ? 'bg-amber-600/20 border-amber-500 text-amber-300 font-bold'
-                            : 'bg-zinc-900/40 border-zinc-850 text-zinc-500 hover:text-zinc-300'
+                            ? 'bg-orange-50 border-orange-300 text-orange-700 font-bold shadow-xs'
+                            : 'bg-white border-slate-200 text-slate-550 hover:text-slate-800 hover:bg-slate-50'
                         }`}
                       >
                         {step}° Adım
@@ -6616,7 +6668,7 @@ export default function App() {
                 {/* Legacy absolute rotate prompt as alternative fallback */}
                 <button
                   onClick={() => requestRotateAngle(cadRotateAngle)}
-                  className="w-full py-1 bg-amber-600/10 hover:bg-amber-600 border border-amber-500/40 rounded text-[9px] font-bold font-mono text-amber-400 hover:text-white transition cursor-pointer uppercase mt-1"
+                  className="w-full py-1 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded text-[9px] font-bold font-mono text-orange-700 transition cursor-pointer uppercase mt-1"
                   title="Klasik yöntemle tek seferlik döndürür (ekrandan tıkla-döndür)"
                 >
                   Klasik Açılı Döndür (Tek Sefer)
@@ -6624,13 +6676,13 @@ export default function App() {
               </div>
 
               {/* Row 4: Scaling Engine */}
-              <div className="bg-zinc-950/60 p-2.5 rounded-lg border border-zinc-850 space-y-2">
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-2 shadow-xs">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] text-zinc-400 font-mono font-bold flex items-center gap-1">
-                    <Maximize className="w-3 h-3 text-emerald-500" />
+                  <span className="text-[10px] text-slate-400 font-mono font-bold flex items-center gap-1">
+                    <Maximize className="w-3 h-3 text-orange-500" />
                     📐 BOYUTLANDIR & ÖLÇEKLE (SCALE)
                   </span>
-                  <span className="text-[9px] text-zinc-500 font-mono">Oran (x)</span>
+                  <span className="text-[9px] text-slate-550 font-mono font-medium">Oran (x)</span>
                 </div>
                 {/* Scale Presets */}
                 <div className="grid grid-cols-5 gap-1">
@@ -6638,7 +6690,7 @@ export default function App() {
                     <button
                       key={fac}
                       onClick={() => applyCadEditScale(fac)}
-                      className="py-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-850 rounded text-[9px] font-bold font-mono text-zinc-400 hover:text-white transition cursor-pointer"
+                      className="py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded text-[9px] font-bold font-mono text-slate-600 hover:text-slate-900 transition cursor-pointer"
                     >
                       {fac}x
                     </button>
@@ -6655,63 +6707,50 @@ export default function App() {
                       setCadScaleFactor(isNaN(val) ? 1.0 : val);
                     }}
                     placeholder="1.2"
-                    className="w-16 bg-zinc-900 border border-zinc-800 rounded text-center text-xs text-white font-mono outline-none focus:border-emerald-500"
+                    className="w-16 bg-white border border-slate-300 rounded text-center text-xs text-slate-800 font-mono outline-none focus:border-orange-500"
                   />
                   <button
                     onClick={() => applyCadEditScale(cadScaleFactor)}
-                    className="flex-1 py-1 bg-emerald-600/20 hover:bg-emerald-500 border border-emerald-500 rounded text-[10px] font-bold font-mono text-emerald-300 hover:text-white transition cursor-pointer"
+                    className="flex-1 py-1 bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded text-[10px] font-bold font-mono text-orange-700 transition cursor-pointer"
                   >
                     Özel Oranda Ölçekle
                   </button>
                 </div>
               </div>
-
-              {/* Advanced info label inside Edit module */}
-              <div className="text-[9px] font-mono text-zinc-500 leading-normal pl-1 border-l border-zinc-800">
-                💡 **CAD İpucu:** Eğer yeşil/mavi renkteki **Özel Referans Noktasını (Anchor Point)** belirlerseniz; Aynalama, Döndürme ve Ölçeklendirme işlemleri o referans noktasını merkez alarak gerçekleşir! Özel referans noktası yoksa şeklin kendi merkezi baz alınır.
-              </div>
             </div>
-          </div>
 
-          {/* Section C: References & AI Optimization */}
-          <div className="p-4 border-b border-zinc-800 space-y-4 shrink-0">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-yellow-400 animate-pulse" />
-              3. AI Opt & Reference
-            </h2>
-
-            {/* AI Refine button */}
+              {/* AI Refine ve Düzenleme Butonu */}
             <button
               onClick={runDouglasPeucker}
               disabled={rawPoints.length < 3}
               className={`w-full py-2 px-3 rounded text-xs font-bold flex items-center justify-center gap-2 transition border ${
                 rawPoints.length >= 3
-                  ? 'bg-gradient-to-r from-yellow-500 to-amber-600 text-zinc-950 border-yellow-400 hover:scale-105 active:scale-95 cursor-pointer'
-                  : 'bg-zinc-800 text-zinc-600 border-zinc-700 cursor-not-allowed'
+                  ? 'bg-gradient-to-r from-orange-500 to-orange-600 text-white border-orange-400 hover:scale-[1.02] active:scale-95 cursor-pointer shadow-xs'
+                  : 'bg-slate-100 text-slate-300 border-slate-200 cursor-not-allowed'
               }`}
             >
               <Flame className="w-4 h-4" />
-              <span>AI Refine Sketch</span>
+              <span>Yapay Zeka ile Eğriyi Temizle</span>
             </button>
 
             {/* Backplane reference image config */}
-            <div className="bg-zinc-950 p-3 rounded-lg border border-zinc-800 space-y-3">
+            <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-3 shadow-xs">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-zinc-400 font-mono">Technical Design BG</span>
-                <ImageIcon className="w-4 h-4 text-zinc-500" />
+                <span className="text-xs font-bold text-slate-800">Teknik Çizim Altlığı / Referans Resim</span>
+                <ImageIcon className="w-4 h-4 text-orange-600" />
               </div>
               <input
                 type="file"
                 accept="image/*"
                 onChange={handleBgImageUpload}
-                className="block w-full text-xs text-zinc-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700"
+                className="block w-full text-xs text-slate-500 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[11px] file:font-semibold file:bg-slate-100 file:text-slate-750 hover:file:bg-slate-200 cursor-pointer"
               />
               {bgImage && (
-                <div className="space-y-1.5 pt-1 border-t border-zinc-800">
-                  <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500">
-                    <span>Opacity: {Math.round(bgOpacity * 100)}%</span>
-                    <button onClick={removeBgImage} className="text-rose-400 hover:underline">
-                      Remove
+                <div className="space-y-1.5 pt-1 border-t border-slate-200">
+                  <div className="flex justify-between items-center text-[10px] font-mono text-slate-500">
+                    <span>Saydamlık: % {Math.round(bgOpacity * 100)}</span>
+                    <button onClick={removeBgImage} className="text-red-500 hover:underline cursor-pointer font-bold">
+                      Kaldır
                     </button>
                   </div>
                   <input
@@ -6721,7 +6760,7 @@ export default function App() {
                     step="0.05"
                     value={bgOpacity}
                     onChange={(e) => setBgOpacity(parseFloat(e.target.value))}
-                    className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                    className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-orange-600"
                   />
                 </div>
               )}
@@ -6729,64 +6768,64 @@ export default function App() {
 
             {/* Snapping parameters & Ortho toggles */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800">
-                <span className="text-xs text-zinc-400 font-mono">🎯 Smart Snaps (F9)</span>
+              <div className="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-xs">
+                <span className="text-xs text-slate-700 font-medium">🎯 Akıllı Milimetrik Yakalama (Smart Snaps)</span>
                 <input
                   type="checkbox"
                   checked={smartSnap}
                   onChange={(e) => setSmartSnap(e.target.checked)}
-                  className="rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                  className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
                 />
               </div>
 
-              <div className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800">
-                <span className="text-xs text-zinc-400 font-mono">🧱 Izgara Snap (Grid Lock)</span>
+              <div className="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-xs">
+                <span className="text-xs text-slate-700 font-medium">🧱 Izgara Kilitleme (Grid Snap)</span>
                 <input
                   type="checkbox"
                   checked={gridSnap}
                   onChange={(e) => setGridSnap(e.target.checked)}
-                  className="rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                  className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
                 />
               </div>
 
-              <div className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800">
-                <span className="text-xs text-zinc-400 font-mono">🔒 Ortho Snap (F8)</span>
+              <div className="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-xs">
+                <span className="text-xs text-slate-700 font-medium">🔒 Dik Açı Kilitleme (Ortho Snap - F8)</span>
                 <input
                   type="checkbox"
                   checked={orthoSnap}
                   onChange={(e) => setOrthoSnap(e.target.checked)}
-                  className="rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                  className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
                 />
               </div>
 
-              <div className="flex items-center justify-between bg-zinc-950 p-2 rounded border border-zinc-800">
-                <span className="text-xs text-zinc-400 font-mono">📐 Uzunluk Ölçüleri</span>
+              <div className="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-xs">
+                <span className="text-xs text-slate-700 font-medium">📐 Canlı Uzunluk Ölçülerini Göster</span>
                 <input
                   type="checkbox"
                   checked={showDims}
                   onChange={(e) => setShowDims(e.target.checked)}
-                  className="rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                  className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
                 />
               </div>
 
               {/* Advanced Anchor Selector */}
-              <div className="bg-zinc-950 p-2.5 rounded border border-zinc-800 space-y-2 text-left">
+              <div className="bg-white p-2.5 rounded border border-slate-200 space-y-2 text-left shadow-xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-zinc-400 font-mono font-bold uppercase flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-cyan-400 animate-pulse" />
-                    📍 Özel Referans Noktası
+                  <span className="text-[10px] text-slate-800 font-bold uppercase flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-orange-600 animate-pulse" />
+                    📍 Özel Referans Noktası (Anchor)
                   </span>
                   {customAnchor && (
                     <button
                       onClick={() => setCustomAnchor(null)}
-                      className="text-[9px] text-rose-400 hover:text-rose-300 font-mono px-1 rounded bg-rose-950/45 border border-rose-900/40 cursor-pointer"
+                      className="text-[9px] text-red-600 hover:text-red-700 font-mono px-1 rounded bg-red-50 border border-red-200 cursor-pointer font-bold"
                     >
                       Sil
                     </button>
                   )}
                 </div>
                 {customAnchor ? (
-                  <div className="text-[11px] bg-cyan-950/20 border border-cyan-800/50 p-1.5 rounded text-cyan-300 font-mono flex justify-between items-center">
+                  <div className="text-[11px] bg-orange-50 border border-orange-200 p-1.5 rounded text-orange-700 font-mono flex justify-between items-center">
                     <span>X: {customAnchor.x.toFixed(1)} mm, Y: {customAnchor.y.toFixed(1)} mm</span>
                   </div>
                 ) : (
@@ -6797,38 +6836,40 @@ export default function App() {
                     }}
                     className={`w-full py-1 rounded text-[10px] font-mono font-bold border transition cursor-pointer text-center ${
                       anchorSelectMode
-                        ? 'bg-amber-600/30 border-amber-500 text-amber-200 animate-pulse'
-                        : 'bg-zinc-900 hover:bg-zinc-850 border-zinc-800 text-zinc-300 hover:text-white'
+                        ? 'bg-orange-600/30 border-orange-500 text-orange-700 animate-pulse'
+                        : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700 hover:text-slate-950'
                     }`}
                   >
                     {anchorSelectMode ? 'Ekrana Tıkla...' : 'Özel Referans Noktası Belirle'}
                   </button>
                 )}
-                <p className="text-[9px] text-zinc-500 leading-normal">
+                <p className="text-[9px] text-slate-400 leading-normal">
                   Origin (0,0) her zaman otomatiktir. Yukarıdaki butona tıklayıp ekrandan özel bir referans noktası belirlerseniz, o koordinat da yeşil/mavi CAD sembolüyle yakalanabilir hale gelir.
                 </p>
               </div>
             </div>
           </div>
+          )}
 
           {/* Section D: Real-time Parametric Dimensions Tables */}
-          <div className="p-4 border-b border-zinc-800 flex-1 min-h-[180px] flex flex-col">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5 mb-3">
-              <MousePointer2 className="w-4 h-4 text-blue-400" />
-              4. Parametric Constraints
+          {sidebarTab === 'dimensions' && (
+          <div className="p-4 border-b border-slate-200 flex-1 min-h-[180px] flex flex-col bg-slate-50/70">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5 mb-3">
+              <MousePointer2 className="w-4 h-4 text-orange-600 font-extrabold" />
+              <span>3. Parametrik Segment Sınırlandırma</span>
             </h2>
 
             {finalPoints.length < 2 ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-4 rounded-lg bg-zinc-950 border border-zinc-850/80 text-center">
-                <HelpCircle className="w-8 h-8 text-zinc-600 mb-2 animate-pulse" />
-                <p className="text-xs text-zinc-500 font-mono">No sketch segments loaded yet.</p>
+              <div className="flex-1 flex flex-col items-center justify-center p-4 rounded-lg bg-white border border-slate-200 text-center">
+                <HelpCircle className="w-8 h-8 text-slate-300 mb-2 animate-pulse" />
+                <p className="text-xs text-slate-400 font-sans">Yüklenmiş taslak segmenti bulunmamaktadır.</p>
               </div>
             ) : (
               <div className="flex-1 max-h-[250px] overflow-y-auto space-y-1.5 pr-1">
-                <div className="grid grid-cols-12 text-[10px] font-mono text-zinc-500 pb-1 border-b border-zinc-800">
-                  <span className="col-span-3">SEG</span>
-                  <span className="col-span-5 text-center">LENGTH (mm)</span>
-                  <span className="col-span-4 text-right">ANGLE (°)</span>
+                <div className="grid grid-cols-12 text-[9px] font-mono text-slate-400 pb-1 border-b border-slate-200 select-none">
+                  <span className="col-span-3 text-left">SEGMENT</span>
+                  <span className="col-span-5 text-center">UZUNLUK (mm)</span>
+                  <span className="col-span-4 text-right">AÇI (°)</span>
                 </div>
                 {finalPoints.slice(0, -1).map((p, idx) => {
                   const p2 = finalPoints[idx + 1];
@@ -6839,12 +6880,12 @@ export default function App() {
                   return (
                     <div
                       key={idx}
-                      className="grid grid-cols-12 gap-1.5 items-center bg-zinc-950 p-1.5 rounded border border-zinc-850"
+                      className="grid grid-cols-12 gap-1.5 items-center bg-white p-1.5 rounded border border-slate-200 shadow-xs"
                     >
-                      <span className="col-span-3 text-xs font-bold text-blue-400 font-mono">K-{idx + 1}</span>
+                      <span className="col-span-3 text-[10px] font-bold text-orange-700 font-mono bg-orange-50 border border-orange-100 text-center rounded py-0.5">K-{idx + 1}</span>
                       <input
                         type="number"
-                        className="col-span-5 bg-zinc-900 text-white text-xs border border-zinc-800 focus:border-blue-500 outline-none text-center px-1 rounded"
+                        className="col-span-5 bg-slate-50 text-slate-800 text-xs border border-slate-250 focus:border-orange-500 outline-none text-center px-1.5 py-1 rounded font-mono font-medium"
                         value={parseFloat(len.toFixed(1))}
                         onChange={(e) => updatePointsFromTable(idx, parseFloat(e.target.value) || 2.0, ang)}
                         step="1"
@@ -6852,7 +6893,7 @@ export default function App() {
                       />
                       <input
                         type="number"
-                        className="col-span-4 bg-zinc-900 text-white text-xs border border-zinc-800 focus:border-blue-500 outline-none text-right px-1 rounded"
+                        className="col-span-4 bg-slate-50 text-slate-800 text-xs border border-slate-250 focus:border-orange-500 outline-none text-right px-1.5 py-1 rounded font-mono font-medium"
                         value={parseFloat(ang.toFixed(0))}
                         onChange={(e) => updatePointsFromTable(idx, len, parseFloat(e.target.value) || 0)}
                         step="5"
@@ -6865,196 +6906,202 @@ export default function App() {
               </div>
             )}
           </div>
+          )}
 
           {/* Section D: 3D Materializing & Exports */}
-          <div className="p-4 bg-zinc-950 border-t border-zinc-800 space-y-3">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-              <CheckCircle className="w-4 h-4 text-blue-500" />
-              5. 3D Model & Export
-            </h2>
+          {sidebarTab === '3d' && (
+          <div className="p-4 bg-slate-50/75 border-t border-slate-200 space-y-3.5 flex-1 flex flex-col justify-between overflow-y-auto">
+            <div>
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5 mb-2.5">
+                <CheckCircle className="w-4 h-4 text-orange-600 font-extrabold" />
+                <span>5. 3D Model ve Slicing Kontrol</span>
+              </h2>
 
-            <div className="space-y-3">
-              <div>
-                <label className="block text-[10px] font-mono text-zinc-500 mb-1">Process Type:</label>
-                <select
-                  value={opType}
-                  onChange={(e) => setOpType(e.target.value as 'extrude' | 'revolve')}
-                  className="w-full bg-zinc-900 border border-zinc-800 text-xs px-2.5 py-1.5 rounded text-zinc-200 outline-none focus:border-blue-500"
-                >
-                  <option value="extrude">Katılaştır (Extrude)</option>
-                  <option value="revolve">Döndür (Revolve)</option>
-                </select>
-              </div>
-
-              {opType === 'extrude' && (
+              <div className="space-y-3 bg-white p-3 rounded-lg border border-slate-200 shadow-xs">
                 <div>
-                  <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500 mb-1">
-                    <span>Thickness (Z-Depth):</span>
-                    <span className="text-blue-400 font-bold">{depth} mm</span>
-                  </div>
-                  <input
-                    type="number"
-                    value={depth}
-                    onChange={(e) => setDepth(Math.max(5, parseInt(e.target.value) || 5))}
-                    className="w-full bg-zinc-900 border border-zinc-800 text-xs px-2.5 py-1.5 rounded text-zinc-200 outline-none focus:border-blue-500 font-mono"
-                    min="5"
-                    max="1000"
-                  />
-                </div>
-              )}
-
-              {opType === 'revolve' && (
-                <div>
-                  <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500 mb-1">
-                    <span>Revolve Axis (Eksen):</span>
-                    <span className="text-indigo-400 font-bold uppercase">{revolveAxis}</span>
-                  </div>
+                  <label className="block text-[10px] font-sans text-slate-500 font-bold uppercase mb-1">Katılaştırma Biçimi (Process Type):</label>
                   <select
-                    value={revolveAxis}
-                    onChange={(e) => setRevolveAxis(e.target.value as 'left' | 'center' | 'right' | 'origin-y' | 'origin-x')}
-                    className="w-full bg-zinc-900 border border-zinc-800 text-xs px-2.5 py-1.5 rounded text-zinc-200 outline-none focus:border-blue-500 font-sans cursor-pointer"
+                    value={opType}
+                    onChange={(e) => setOpType(e.target.value as 'extrude' | 'revolve')}
+                    className="w-full bg-slate-50 border border-slate-300 text-xs px-2.5 py-1.5 rounded text-slate-800 outline-none focus:border-orange-500 cursor-pointer font-sans"
                   >
-                    <option value="left">Sol Sınır (Left Edge - Min X)</option>
-                    <option value="center">Merkez Aks (Center Axis)</option>
-                    <option value="right">Sağ Sınır (Right Edge - Max X)</option>
-                    <option value="origin-y">Y-Ekseni (Origin X=0 vertical)</option>
-                    <option value="origin-x">X-Ekseni (Origin Y=0 horizontal)</option>
+                    <option value="extrude">Katılaştır (Extrude)</option>
+                    <option value="revolve">Döndür (Revolve)</option>
                   </select>
                 </div>
-              )}
 
-              {/* Infill (Doluluk) Settings & Presets */}
-              <div className="border-t border-zinc-850 pt-2 space-y-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-mono text-zinc-400 uppercase font-bold flex items-center gap-1">
-                    <Sliders className="w-3 h-3 text-amber-500" />
-                    Baskı Doluluk Oranı:
-                  </span>
-                  <div className="flex items-center gap-1">
+                {opType === 'extrude' && (
+                  <div>
+                    <div className="flex justify-between items-center text-[10px] font-mono text-slate-500 mb-1">
+                      <span>Kalınlık (Z-Depth):</span>
+                      <span className="text-orange-600 font-bold">{depth} mm</span>
+                    </div>
                     <input
                       type="number"
-                      value={infill}
-                      onChange={(e) => setInfill(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
-                      className="w-12 bg-zinc-900 border border-zinc-800 text-center text-xs py-0.5 rounded font-mono text-amber-400 font-bold outline-none focus:border-amber-500"
+                      value={depth}
+                      onChange={(e) => setDepth(Math.max(5, parseInt(e.target.value) || 5))}
+                      className="w-full bg-slate-50 border border-slate-300 text-xs px-2.5 py-1.5 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
+                      min="5"
+                      max="1000"
                     />
-                    <span className="text-[10px] font-mono text-zinc-500">%</span>
+                  </div>
+                )}
+
+                {opType === 'revolve' && (
+                  <div>
+                    <div className="flex justify-between items-center text-[10px] font-mono text-slate-500 mb-1">
+                      <span>Revolve Axis (Döndürme Ekseni):</span>
+                      <span className="text-orange-600 font-bold uppercase">{revolveAxis}</span>
+                    </div>
+                    <select
+                      value={revolveAxis}
+                      onChange={(e) => setRevolveAxis(e.target.value as 'left' | 'center' | 'right' | 'origin-y' | 'origin-x')}
+                      className="w-full bg-slate-50 border border-slate-300 text-xs px-2.5 py-1.5 rounded text-slate-800 outline-none focus:border-orange-500 font-sans cursor-pointer"
+                    >
+                      <option value="left">Sol Sınır (Left Edge - Min X)</option>
+                      <option value="center">Merkez Aks (Center Axis)</option>
+                      <option value="right">Sağ Sınır (Right Edge - Max X)</option>
+                      <option value="origin-y">Y-Ekseni (Origin X=0 vertical)</option>
+                      <option value="origin-x">X-Ekseni (Origin Y=0 horizontal)</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Infill (Doluluk) Settings & Presets */}
+                <div className="border-t border-slate-200 pt-2.5 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-sans text-slate-500 uppercase font-bold flex items-center gap-1">
+                      <Sliders className="w-3 h-3 text-orange-600" />
+                      Yazıcı Doluluk Oranı (Infill):
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={infill}
+                        onChange={(e) => setInfill(Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                        className="w-12 bg-slate-50 border border-slate-300 text-center text-xs py-0.5 rounded font-mono text-orange-600 font-bold outline-none focus:border-orange-500"
+                      />
+                      <span className="text-[10px] font-mono text-slate-400 font-bold">%</span>
+                    </div>
+                  </div>
+
+                  {/* Range Slider for quick drag control */}
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={infill}
+                    onChange={(e) => setInfill(parseInt(e.target.value))}
+                    className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-orange-600"
+                  />
+
+                  {/* Preset Fast Selection Tabs */}
+                  <div className="grid grid-cols-4 gap-1">
+                    {[
+                      { val: 10, label: '%10', title: 'Görsel Mac.' },
+                      { val: 20, label: '%20', title: 'Standart' },
+                      { val: 40, label: '%40', title: 'Fonksiyon.' },
+                      { val: 75, label: '%75', title: 'Güçlü' }
+                    ].map((pres, pIdx) => (
+                      <button
+                        key={pIdx}
+                        onClick={() => setInfill(pres.val)}
+                        className={`py-1 rounded font-mono text-[9px] text-center border transition-all cursor-pointer ${
+                          infill === pres.val
+                            ? 'bg-orange-50 border-orange-305 text-orange-600 font-extrabold shadow-2xs'
+                            : 'bg-white border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                        }`}
+                        title={pres.title}
+                      >
+                        {pres.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Dinamik Doluluk Açıklama Kutusu */}
+                  <div className="bg-orange-50/60 border border-orange-200/50 rounded-lg p-2 text-[10px] text-slate-700 leading-relaxed font-sans text-left">
+                    {infill <= 15 ? (
+                      <p>
+                        <strong className="text-orange-700">%0 - %15 Doluluk:</strong> Sadece görsel amaçlı maketler, figürler ve vitrin modelleri için kullanılır. Minimum malzeme tüketir ve en hızlı sürede basılır.
+                      </p>
+                    ) : infill <= 30 ? (
+                      <p>
+                        <strong className="text-orange-700">%15 - %30 Doluluk:</strong> Günlük kullanımdaki biblolar, basit kutular, telefon standları gibi parçalar için en çok tercih edilen <strong className="text-orange-700">"ideal standart"</strong> aralıktır.
+                      </p>
+                    ) : infill <= 50 ? (
+                      <p>
+                        <strong className="text-orange-700">%30 - %50 Doluluk:</strong> Az da olsa yük taşıyacak, mekanik veya fonksiyonel parçalar (örneğin ufak aparatlar ve braketler) için idealdir.
+                      </p>
+                    ) : (
+                      <p>
+                        <strong className="text-orange-700">%50 ve Üzeri Doluluk:</strong> Ciddi ağırlık ve basınca maruz kalacak ağır hizmet parçaları için tercih edilir.
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                {/* Range Slider for quick drag control */}
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={infill}
-                  onChange={(e) => setInfill(parseInt(e.target.value))}
-                  className="w-full h-1.5 bg-zinc-900 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                />
+                {/* 3D Print Metrics & Estimates Desk */}
+                <div className="border-t border-slate-200 pt-2.5 space-y-1.5 font-sans text-[10px] text-slate-500 text-left">
+                  <div className="flex justify-between items-center text-[10px] uppercase tracking-wide text-slate-600 pb-0.5 font-bold">
+                    <span>3D Baskı ve Filament Analizi</span>
+                    <span className="text-[8px] px-1 bg-slate-100 rounded text-slate-450 uppercase font-mono">Hızlı Hesap</span>
+                  </div>
+                  
+                  <div className="flex justify-between bg-slate-50/80 p-1.5 rounded border border-slate-200 items-center">
+                    <span>Toplam Katı Hacmi:</span>
+                    <span className="text-slate-800 font-bold font-mono">
+                      {volumeCm3 > 0 ? `${volumeCm3.toFixed(2)} cm³ (${volumeMm3.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} mm³)` : '0.00 cm³'}
+                    </span>
+                  </div>
 
-                {/* Preset Fast Selection Tabs */}
-                <div className="grid grid-cols-4 gap-1">
-                  {[
-                    { val: 10, label: '%10', title: 'Görsel Mac.' },
-                    { val: 20, label: '%20', title: 'Standart' },
-                    { val: 40, label: '%40', title: 'Fonksiyon.' },
-                    { val: 75, label: '%75', title: 'Güçlü' }
-                  ].map((pres, pIdx) => (
-                    <button
-                      key={pIdx}
-                      onClick={() => setInfill(pres.val)}
-                      className={`py-1 rounded font-mono text-[9px] text-center border transition-all cursor-pointer ${
-                        infill === pres.val
-                          ? 'bg-amber-500/10 border-amber-500/70 text-amber-400 font-extrabold'
-                          : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:border-zinc-700'
-                      }`}
-                      title={pres.title}
-                    >
-                      {pres.label}
-                    </button>
-                  ))}
-                </div>
+                  <div className="flex justify-between bg-slate-50/80 p-1.5 rounded border border-slate-200 items-center">
+                    <span>Filament Ağırlığı:</span>
+                    <span className="text-orange-650 font-extrabold font-mono">
+                      {volumeCm3 > 0 ? `${estimatedWeightG.toFixed(1)} gram (PLA)` : '0.0 gram'}
+                    </span>
+                  </div>
 
-                {/* Dinamik Doluluk Açıklama Kutusu */}
-                <div className="bg-amber-950/20 border border-amber-500/20 rounded p-2 text-[10px] text-amber-400/90 leading-relaxed active-status">
-                  {infill <= 15 ? (
-                    <p>
-                      <strong className="text-amber-300">%0 - %15 Doluluk:</strong> Sadece görsel amaçlı maketler, figürler ve vitrin modelleri için kullanılır. Minimum malzeme tüketir ve en hızlı sürede basılır.
-                    </p>
-                  ) : infill <= 30 ? (
-                    <p>
-                      <strong className="text-amber-300">%15 - %30 Doluluk:</strong> Günlük kullanımdaki biblolar, basit kutular, telefon standları gibi parçalar için en çok tercih edilen <strong className="text-amber-300">"ideal standart"</strong> aralıktır.
-                    </p>
-                  ) : infill <= 50 ? (
-                    <p>
-                      <strong className="text-amber-300">%30 - %50 Doluluk:</strong> Az da olsa yük taşıyacak, mekanik veya fonksiyonel parçalar (örneğin ufak aparatlar ve braketler) için idealdir.
-                    </p>
-                  ) : (
-                    <p>
-                      <strong className="text-amber-300">%50 ve Üzeri Doluluk:</strong> Ciddi ağırlık ve basınca maruz kalacak ağır hizmet parçaları için tercih edilir.
-                    </p>
-                  )}
+                  <div className="flex justify-between bg-slate-50/80 p-1.5 rounded border border-slate-200 items-center">
+                    <span>Tahmini Baskı Süresi:</span>
+                    <span className="text-amber-600 font-extrabold flex items-center gap-1 font-mono">
+                      <Flame className="w-2.5 h-2.5 animate-pulse text-orange-600" />
+                      {formatPrintTime(estimatedMinutes)}
+                    </span>
+                  </div>
                 </div>
               </div>
+            </div>
 
-              {/* 3D Print Metrics & Estimates Desk */}
-              <div className="border-t border-zinc-850 pt-2 space-y-1.5 font-mono text-[10px] text-zinc-400">
-                <div className="flex justify-between items-center text-[10px] font-mono uppercase tracking-wide text-zinc-500 pb-1 font-bold">
-                  <span>3D Baskı Tahminleri</span>
-                  <span className="text-[9px] px-1 bg-zinc-900 rounded text-zinc-400 uppercase text-[8px]">Hızlı Hesap</span>
-                </div>
-                
-                <div className="flex justify-between bg-zinc-900/40 p-1.5 rounded border border-zinc-900/65 items-center">
-                  <span>Toplam Katı Hacmi:</span>
-                  <span className="text-zinc-200 font-bold">
-                    {volumeCm3 > 0 ? `${volumeCm3.toFixed(2)} cm³ (${volumeMm3.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} mm³)` : '0.00 cm³'}
-                  </span>
-                </div>
-
-                <div className="flex justify-between bg-zinc-900/40 p-1.5 rounded border border-zinc-900/65 items-center">
-                  <span>Filament Ağırlığı:</span>
-                  <span className="text-emerald-400 font-extrabold">
-                    {volumeCm3 > 0 ? `${estimatedWeightG.toFixed(1)} gram (PLA)` : '0.0 gram'}
-                  </span>
-                </div>
-
-                <div className="flex justify-between bg-zinc-900/40 p-1.5 rounded border border-zinc-900/65 items-center">
-                  <span>Tahmini Baskı Süresi:</span>
-                  <span className="text-blue-400 font-extrabold flex items-center gap-1">
-                    <Flame className="w-2.5 h-2.5 animate-pulse text-amber-500" />
-                    {formatPrintTime(estimatedMinutes)}
-                  </span>
-                </div>
+            <div className="space-y-2 pt-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={executeStlExport}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded text-xs font-bold bg-orange-600 hover:bg-orange-600/90 text-white transition cursor-pointer shadow-sm shadow-orange-50 border border-orange-500"
+                  title="Üretim kalitesinde 3D STL dosyası indir"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>STL Model İndir</span>
+                </button>
+                <button
+                  onClick={exportToDXF}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-250 transition cursor-pointer"
+                  title="2D CAD DXF Keyline Çizimi indir"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>DXF Profil İndir</span>
+                </button>
               </div>
-
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 pt-2">
               <button
-                onClick={executeStlExport}
-                className="flex items-center justify-center gap-1.5 py-2 px-3 rounded text-xs font-bold bg-blue-600 hover:bg-blue-500 transition cursor-pointer"
-                title="Download production ready 3D solid STL"
+                onClick={exportToPDF}
+                className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 rounded text-xs font-black bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white transition cursor-pointer border border-orange-500 shadow-md shadow-orange-100"
+                title="Mavi Kopya Şablon Çizimini PDF olarak kaydet"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>STL Model</span>
-              </button>
-              <button
-                onClick={exportToDXF}
-                className="flex items-center justify-center gap-1.5 py-2 px-3 rounded text-xs font-bold bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 hover:text-white transition cursor-pointer"
-                title="Download 2D profile keyline DXF"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>DXF Profile</span>
+                <span>Teknik Çizim PDF Blueprint</span>
               </button>
             </div>
-            <button
-              onClick={exportToPDF}
-              className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded text-xs font-black bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-zinc-950 transition cursor-pointer border border-amber-500/50 shadow-lg shadow-amber-950/20"
-              title="Mavi Kopya Şablon Çizimini PDF olarak kaydet"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Teknik Resim PDF Blueprint</span>
-            </button>
           </div>
+          )}
         </aside>
 
         {/* 3. Splitted Dual Viewports */}
