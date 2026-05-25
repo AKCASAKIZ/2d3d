@@ -775,6 +775,171 @@ export default function App() {
     }
   };
 
+  const getSelectedShapeGroupStatus = (): 'joined' | 'independent' | 'none' => {
+    if (!isFinalPointsSelected && selectedPathIndices.length === 0 && selectedPathIdx === -1) {
+      return 'none';
+    }
+    const idx = selectedPathIdx !== -1 ? selectedPathIdx : (isFinalPointsSelected ? -1 : (selectedPathIndices.length > 0 ? selectedPathIndices[0] : -1));
+    if (idx === -1 && !isFinalPointsSelected) return 'none';
+
+    let gId = '';
+    if (idx === -1) {
+      gId = activeLayer.finalPointsSettings?.groupId || '';
+    } else {
+      gId = activeLayer.pathSettings?.[idx]?.groupId || '';
+    }
+
+    if (gId.startsWith('independent_')) {
+      return 'independent';
+    }
+    return 'joined';
+  };
+
+  const handleSeparateFromSketch = () => {
+    saveState();
+    
+    // We want to make the selected path(s) independent
+    // A path is independent if we give it a unique groupId prefix with 'independent_'
+    const makeIndependent = (idx: number, l: CADLayer) => {
+      const independentGroupId = 'independent_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
+      if (idx === -1) {
+        const currentSettings = l.finalPointsSettings || {
+          opType: l.opType || 'extrude',
+          depth: l.depth || 30,
+          revolveAxis: l.revolveAxis || 'center',
+          booleanType: 'union'
+        };
+        l.finalPointsSettings = { ...currentSettings, groupId: independentGroupId };
+      } else {
+        const settingsArray = [...(l.pathSettings || [])];
+        const pathCount = l.paths ? l.paths.length : 0;
+        while (settingsArray.length < pathCount) {
+          settingsArray.push({
+            opType: l.opType || 'extrude',
+            depth: l.depth || 30,
+            revolveAxis: l.revolveAxis || 'center',
+            booleanType: 'union'
+          });
+        }
+        const currentSettings = settingsArray[idx] || {
+          opType: l.opType || 'extrude',
+          depth: l.depth || 30,
+          revolveAxis: l.revolveAxis || 'center',
+          booleanType: 'union'
+        };
+        settingsArray[idx] = { ...currentSettings, groupId: independentGroupId };
+        l.pathSettings = settingsArray;
+      }
+    };
+
+    setLayers(prev => prev.map(l => {
+      if (l.id === activeLayerId) {
+        // Clone layer
+        const cloned = JSON.parse(JSON.stringify(l)) as CADLayer;
+        
+        let separatedCount = 0;
+        if (isFinalPointsSelected) {
+          makeIndependent(-1, cloned);
+          separatedCount++;
+        }
+        
+        selectedPathIndices.forEach(idx => {
+          makeIndependent(idx, cloned);
+          separatedCount++;
+        });
+
+        if (separatedCount === 0 && selectedPathIdx !== -1) {
+          makeIndependent(selectedPathIdx, cloned);
+          separatedCount++;
+        }
+
+        return cloned;
+      }
+      return l;
+    }));
+
+    // Reset selection to just the targeted index so the user doesn't drag other things anymore (since they are now separated!)
+    if (selectedPathIdx !== -1) {
+      if (selectedPathIdx === -1) {
+        setIsFinalPointsSelected(true);
+        setSelectedPathIndices([]);
+      } else {
+        setIsFinalPointsSelected(false);
+        setSelectedPathIndices([selectedPathIdx]);
+      }
+    }
+
+    logCommandResponse(`Sketçten Ayrıldı: Seçili parça(lar) ana sketç bütünlüğünden ayrıldı ve bağımsız hale getirildi. Artık bağımsız olarak hareket ettirebilirsiniz.`);
+  };
+
+  const handleJoinToSketch = () => {
+    saveState();
+    const defaultGrp = 'main_group_' + activeLayerId;
+
+    const makeJoined = (idx: number, l: CADLayer) => {
+      if (idx === -1) {
+        const currentSettings = l.finalPointsSettings || {
+          opType: l.opType || 'extrude',
+          depth: l.depth || 30,
+          revolveAxis: l.revolveAxis || 'center',
+          booleanType: 'union'
+        };
+        l.finalPointsSettings = { ...currentSettings, groupId: defaultGrp };
+      } else {
+        const settingsArray = [...(l.pathSettings || [])];
+        const pathCount = l.paths ? l.paths.length : 0;
+        while (settingsArray.length < pathCount) {
+          settingsArray.push({
+            opType: l.opType || 'extrude',
+            depth: l.depth || 30,
+            revolveAxis: l.revolveAxis || 'center',
+            booleanType: 'union'
+          });
+        }
+        const currentSettings = settingsArray[idx] || {
+          opType: l.opType || 'extrude',
+          depth: l.depth || 30,
+          revolveAxis: l.revolveAxis || 'center',
+          booleanType: 'union'
+        };
+        settingsArray[idx] = { ...currentSettings, groupId: defaultGrp };
+        l.pathSettings = settingsArray;
+      }
+    };
+
+    setLayers(prev => prev.map(l => {
+      if (l.id === activeLayerId) {
+        const cloned = JSON.parse(JSON.stringify(l)) as CADLayer;
+        
+        let joinedCount = 0;
+        if (isFinalPointsSelected) {
+          makeJoined(-1, cloned);
+          joinedCount++;
+        }
+        
+        selectedPathIndices.forEach(idx => {
+          makeJoined(idx, cloned);
+          joinedCount++;
+        });
+
+        if (joinedCount === 0 && selectedPathIdx !== -1) {
+          makeJoined(selectedPathIdx, cloned);
+          joinedCount++;
+        }
+
+        return cloned;
+      }
+      return l;
+    }));
+
+    // Trigger full group selection
+    const resolvedGroup = getJoinedIndices(selectedPathIdx !== -1 ? selectedPathIdx : -1);
+    setIsFinalPointsSelected(resolvedGroup.selectFinalPoints);
+    setSelectedPathIndices(resolvedGroup.selectPathIndices);
+
+    logCommandResponse(`Sketçe Bağlandı: Parçalar ana sketç gövdesiyle birleştirildi. Bütünlük sağlandı.`);
+  };
+
   const handleCopy = () => {
     let copiedCount = 0;
     const items: Point[][] = [];
@@ -2222,6 +2387,40 @@ export default function App() {
     } else {
       return activeLayer.paths ? (activeLayer.paths[selectedPathIdx] || []) : [];
     }
+  };
+
+  const getJoinedIndices = (clickedIdx: number): { selectFinalPoints: boolean; selectPathIndices: number[] } => {
+    const defaultGrp = 'main_group_' + activeLayerId;
+    
+    // Get the effective groupId for the clicked object
+    let clickedGroupId = '';
+    if (clickedIdx === -1) {
+      clickedGroupId = activeLayer.finalPointsSettings?.groupId || defaultGrp;
+    } else {
+      clickedGroupId = activeLayer.pathSettings?.[clickedIdx]?.groupId || defaultGrp;
+    }
+
+    // If the clicked group is explicitly independent, stand alone!
+    if (clickedGroupId.startsWith('independent_')) {
+      return {
+        selectFinalPoints: clickedIdx === -1,
+        selectPathIndices: clickedIdx >= 0 ? [clickedIdx] : []
+      };
+    }
+
+    // Otherwise, find all other shapes in this layer sharing the same groupId
+    const selectFinalPoints = (activeLayer.finalPointsSettings?.groupId || defaultGrp) === clickedGroupId;
+    const selectPathIndices: number[] = [];
+    if (activeLayer.paths) {
+      activeLayer.paths.forEach((_, idx) => {
+        const pGrp = activeLayer.pathSettings?.[idx]?.groupId || defaultGrp;
+        if (pGrp === clickedGroupId) {
+          selectPathIndices.push(idx);
+        }
+      });
+    }
+
+    return { selectFinalPoints, selectPathIndices };
   };
 
   const getSelectedPathSettings = (): PathSettings => {
@@ -4415,29 +4614,37 @@ export default function App() {
               });
               logCommandResponse(`Şekil Taşıma (Oynat): ${dragItems.length} seçili obje beraber taşınıyor.`);
             } else {
-              // Drag only the single clicked piece and set it as selected
-              if (clickedPathIdx === -1) {
+              // Drag the clicked shape along with any shapes joined to it (integrity support)
+              const { selectFinalPoints, selectPathIndices } = getJoinedIndices(clickedPathIdx);
+
+              if (selectFinalPoints && finalPoints.length > 0) {
                 dragItems.push({
                   type: 'finalPoints',
                   pathIdx: -1,
                   originalPoints: finalPoints.map(p => ({ ...p }))
                 });
-                setIsFinalPointsSelected(true);
-                setSelectedPathIndices([]);
-                setSelectedPathIdx(-1);
-              } else {
-                if (activeLayer.paths && activeLayer.paths[clickedPathIdx]) {
+              }
+              selectPathIndices.forEach(idx => {
+                if (activeLayer.paths && activeLayer.paths[idx]) {
                   dragItems.push({
                     type: 'path',
-                    pathIdx: clickedPathIdx,
-                    originalPoints: activeLayer.paths[clickedPathIdx].map(p => ({ ...p }))
+                    pathIdx: idx,
+                    originalPoints: activeLayer.paths[idx].map(p => ({ ...p }))
                   });
-                  setIsFinalPointsSelected(false);
-                  setSelectedPathIndices([clickedPathIdx]);
-                  setSelectedPathIdx(clickedPathIdx);
                 }
+              });
+
+              setIsFinalPointsSelected(selectFinalPoints);
+              setSelectedPathIndices(selectPathIndices);
+              setSelectedPathIdx(selectPathIndices.length > 0 ? selectPathIndices[0] : -1);
+
+              if (selectFinalPoints && selectPathIndices.length > 0) {
+                logCommandResponse(`Bütünlük Korundu: Birbiriyle bütünleşik ${selectPathIndices.length + 1} parça seçildi ve beraber taşınıyor.`);
+              } else if (selectPathIndices.length > 1) {
+                logCommandResponse(`Bütünlük Korundu: Birbiriyle bütünleşik ${selectPathIndices.length} parça seçildi ve beraber taşınıyor.`);
+              } else {
+                logCommandResponse("Taşıma (Move) Aktif: Sürükleyerek konumlandırın.");
               }
-              logCommandResponse("Taşıma (Move) Aktif: Sürükleyerek konumlandırın.");
             }
 
             dragEntirePathRef.current = {
@@ -6969,6 +7176,79 @@ export default function App() {
                   No object selected. Click on a shape to select, copy, delete, rotate, or scale it. Or right-click and drag a box. (Del deletes)
                 </div>
               )}
+            </div>
+
+            {/* Sketch Integrity & Grouping System (Bütünlük ve Bağlantı Kontrolleri) */}
+            <div className="p-2.5 rounded-lg bg-orange-50/45 border border-orange-100 text-left space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[9px] font-mono font-bold uppercase text-orange-600 flex items-center gap-1">
+                  <Workflow className="w-3.5 h-3.5 text-orange-500" />
+                  <span>CAD SKETCH INTEGRITY (BÜTÜNLÜK)</span>
+                </div>
+                {(() => {
+                  const groupStatus = getSelectedShapeGroupStatus();
+                  if (groupStatus === 'joined') {
+                    return (
+                      <span className="text-[9px] font-mono font-bold bg-green-500/10 text-green-700 px-1.5 py-0.5 rounded border border-green-200">
+                        BÜTÜNLEŞİK (JOINED)
+                      </span>
+                    );
+                  }
+                  if (groupStatus === 'independent') {
+                    return (
+                      <span className="text-[9px] font-mono font-bold bg-purple-500/10 text-purple-700 px-1.5 py-0.5 rounded border border-purple-200">
+                        BAĞIMSIZ (SEPARATE)
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="text-[9px] font-mono font-bold bg-slate-105 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200">
+                      SİSTEM AKTİF
+                    </span>
+                  );
+                })()}
+              </div>
+
+              <p className="text-[9.5px] text-slate-600 leading-normal">
+                {(() => {
+                  const groupStatus = getSelectedShapeGroupStatus();
+                  if (groupStatus === 'joined') {
+                    return "Bu obje parça bütünlüğüne bağlıdır. Beraber seçilir, kopyalanır, taşınır ve bütünlüğü korunur.";
+                  }
+                  if (groupStatus === 'independent') {
+                    return "Bu obje ana parçadan ayrılmıştır. Bağımsız olarak tek başına konumlandırılabilir.";
+                  }
+                  return "Yeni eklenen tüm şekiller (daire, poligon, rect vb.) çizerken önceki şekle otomatik join (bağlanıp) olur, parça bütünlüğü korunur.";
+                })()}
+              </p>
+
+              {(() => {
+                const groupStatus = getSelectedShapeGroupStatus();
+                if (groupStatus === 'none') return null;
+                return (
+                  <div className="grid grid-cols-1 gap-1 pt-1">
+                    {groupStatus === 'joined' ? (
+                      <button
+                        onClick={handleSeparateFromSketch}
+                        className="w-full py-1.5 bg-white hover:bg-purple-50 border border-purple-200 hover:border-purple-300 rounded text-[10px] font-extrabold font-mono text-purple-700 flex items-center justify-center gap-1 transition cursor-pointer shadow-xs"
+                        title="Seçili taze eklenen alt şekli sketç bütünlüğünden kopararak tamamen bağımsız hale getirir."
+                      >
+                        <Scissors className="w-3.5 h-3.5 text-purple-500" />
+                        ✂️ SKETÇTEN AYIR (Separate from Sketch)
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleJoinToSketch}
+                        className="w-full py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-250 rounded text-[10px] font-extrabold font-mono text-emerald-850 flex items-center justify-center gap-1 transition cursor-pointer shadow-xs"
+                        title="Ayrılmış olan alt şekli tekrar ana sketç bütünlüğüne bağlayarak tek parça yapar."
+                      >
+                        <Workflow className="w-3.5 h-3.5 text-emerald-600" />
+                        🔗 SKETÇE GERİ BAĞLA (Join to Sketch)
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Editing Controls Grid */}
