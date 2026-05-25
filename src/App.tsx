@@ -547,7 +547,7 @@ export default function App() {
   const [historyStack, setHistoryStack] = useState<HistoryItem[]>([]);
   const [cmdText, setCmdText] = useState('');
   const [cmdLogs, setCmdLogs] = useState<string[]>([
-    'Zeki CAD EXEL v14 - Smart Track & Midpoint Snap System online.',
+    'CADERIM v14 - Smart Track & Midpoint Snap System online.',
     'Type commands (L: Line, R: Rect, C: Circle, POL: Polygon, F: Fillet, CH: Chamfer, U: Undo, CLEAR: Reset) in Command bar.',
   ]);
 
@@ -5086,7 +5086,7 @@ export default function App() {
         <div className="flex items-center gap-1.5 pr-3 border-r border-zinc-800 shrink-0">
           <Workflow className="w-4 h-4 text-blue-500" />
           <span className="text-xs font-bold tracking-wider uppercase text-zinc-200">
-            Zeki <span className="text-yellow-500">CAD</span> EXEL
+            CADE<span className="text-amber-500">RİM</span>
           </span>
           <span className="text-[9px] font-mono bg-zinc-800 border border-zinc-700 px-1 py-0.2 rounded text-zinc-400">
             v14.0
