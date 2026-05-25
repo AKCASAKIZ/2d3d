@@ -5049,6 +5049,185 @@ export default function App() {
         }
       });
 
+      // 6. Draw 3D Isometric Projection box in the bottom-left corner
+      const isoBoxX = 13;
+      const isoBoxY = 148;
+      const isoBoxW = 85;
+      const isoBoxH = 46;
+
+      // Draw box border
+      doc.setLineWidth(0.35);
+      doc.setDrawColor(15, 23, 42); // slate 900
+      doc.setFillColor(248, 250, 252); // clean slate background
+      doc.rect(isoBoxX, isoBoxY, isoBoxW, isoBoxH, "FD");
+
+      // Draw small header text inside 3D Box
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5.5);
+      doc.setTextColor(100, 116, 139); // Slate-500
+      doc.text("3D İZOMETRİK PROJEKSİYON / 3D ISOMETRIC VIEW", isoBoxX + 3, isoBoxY + 4);
+
+      interface IsoLine {
+        p1: { x: number; y: number };
+        p2: { x: number; y: number };
+        colorHex: string;
+        isAct: boolean;
+      }
+      const isoLines: IsoLine[] = [];
+      const allIsoProjPts: { x: number; y: number }[] = [];
+
+      // Geometric isometric projector mapping:
+      // Angles for beautiful isometric perspective
+      const yaw = -Math.PI / 6;   // -30 deg
+      const pitch = Math.PI / 7;  // approx 25.7 deg for beautiful vertical elevation accentuation
+      
+      const projectToIso = (x: number, y: number, z: number) => {
+        // Rotate around Z axis (yaw)
+        const xRot = x * Math.cos(yaw) - y * Math.sin(yaw);
+        const yRot = x * Math.sin(yaw) + y * Math.cos(yaw);
+        
+        // Rotate around X axis (pitch)
+        const xProj = xRot;
+        const yProj = yRot * Math.cos(pitch) - z * Math.sin(pitch);
+        
+        return { x: xProj, y: yProj };
+      };
+
+      // Extract shapes from all layers
+      visibleLayers.forEach(l => {
+        const isAct = l.id === activeLayerId;
+        const colorHex = l.color || "#475569";
+        const h = l.depth || 50; // Use extrusion depth or default to 50
+
+        // Function to extract 2D points with circle discretization
+        const extractPoints = (pts: Point[], closed: boolean) => {
+          if (pts.length === 0) return;
+          const layer2dPts: { x: number; y: number }[] = [];
+          
+          pts.forEach(p => {
+            if (p.circleData) {
+              const cx = p.circleData.center.x;
+              const cy = p.circleData.center.y;
+              const r = p.circleData.radius;
+              // Add a sample of points to form a smooth discretization
+              const samples = 24;
+              const circlePoints: { x: number; y: number }[] = [];
+              for (let i = 0; i < samples; i++) {
+                const angle = (i / samples) * Math.PI * 2;
+                circlePoints.push({
+                  x: cx + r * Math.cos(angle),
+                  y: cy + r * Math.sin(angle)
+                });
+              }
+              // Push all circle points as a path
+              layer2dPts.push(...circlePoints);
+            } else {
+              layer2dPts.push({ x: p.x, y: p.y });
+            }
+          });
+
+          // Draw bottom face (z = 0) and top face (z = h)
+          const bottomProj = layer2dPts.map(pt => projectToIso(pt.x, pt.y, 0));
+          const topProj = layer2dPts.map(pt => projectToIso(pt.x, pt.y, h));
+
+          allIsoProjPts.push(...bottomProj, ...topProj);
+
+          // Connect bottom face points
+          for (let i = 0; i < bottomProj.length; i++) {
+            if (i < bottomProj.length - 1) {
+              isoLines.push({ p1: bottomProj[i], p2: bottomProj[i + 1], colorHex, isAct });
+            } else if (closed && bottomProj.length > 2) {
+              isoLines.push({ p1: bottomProj[i], p2: bottomProj[0], colorHex, isAct });
+            }
+          }
+
+          // Connect top face points
+          for (let i = 0; i < topProj.length; i++) {
+            if (i < topProj.length - 1) {
+              isoLines.push({ p1: topProj[i], p2: topProj[i + 1], colorHex, isAct });
+            } else if (closed && topProj.length > 2) {
+              isoLines.push({ p1: topProj[i], p2: topProj[0], colorHex, isAct });
+            }
+          }
+
+          // Connect corresponding bottom and top vertices (extrusion side lines)
+          // To keep wireframe clean, only render side lines for original vertices or key samples
+          const connectionInterval = pts.some(p => p.circleData) ? 6 : 1; // skip intermediate circle points to keep drawing lightweight
+          for (let i = 0; i < bottomProj.length; i += connectionInterval) {
+            isoLines.push({ p1: bottomProj[i], p2: topProj[i], colorHex, isAct });
+          }
+          // Always connect the end vertex as well
+          if (bottomProj.length > 0 && (bottomProj.length - 1) % connectionInterval !== 0) {
+            const lastIdx = bottomProj.length - 1;
+            isoLines.push({ p1: bottomProj[lastIdx], p2: topProj[lastIdx], colorHex, isAct });
+          }
+        };
+
+        if (l.finalPoints && l.finalPoints.length > 0) {
+          extractPoints(l.finalPoints, !!l.isClosed);
+        }
+        if (l.paths) {
+          l.paths.forEach(p => {
+            if (p.length > 0) {
+              const checkClosed = p.length > 2 && Math.hypot(p[p.length - 1].x - p[0].x, p[p.length - 1].y - p[0].y) < 0.05;
+              extractPoints(p, checkClosed);
+            }
+          });
+        }
+      });
+
+      // Fit and render projected 3D coordinates inside bottom-left box
+      if (allIsoProjPts.length > 0) {
+        const pMinX = Math.min(...allIsoProjPts.map(p => p.x));
+        const pMaxX = Math.max(...allIsoProjPts.map(p => p.x));
+        const pMinY = Math.min(...allIsoProjPts.map(p => p.y));
+        const pMaxY = Math.max(...allIsoProjPts.map(p => p.y));
+
+        const pSpanX = pMaxX - pMinX || 1;
+        const pSpanY = pMaxY - pMinY || 1;
+
+        // Inside the 85mm x 46mm box, keep a border margin
+        const borderMargin = 4;
+        const viewW = isoBoxW - (borderMargin * 2); // 77mm
+        const viewH = isoBoxH - 8 - borderMargin; // 34mm (shifted down for header text)
+
+        const isoScale = Math.min(viewW / pSpanX, viewH / pSpanY);
+
+        const cpProjX = (pMinX + pMaxX) / 2;
+        const cpProjY = (pMinY + pMaxY) / 2;
+        const pdfIsoCenterX = isoBoxX + isoBoxW / 2;
+        const pdfIsoCenterY = isoBoxY + 8 + viewH / 2;
+
+        const mapToIsoPdf = (pt: { x: number; y: number }) => {
+          return {
+            x: pdfIsoCenterX + (pt.x - cpProjX) * isoScale,
+            y: pdfIsoCenterY - (pt.y - cpProjY) * isoScale // Subtracting because Y coordinate runs top-down in PDF
+          };
+        };
+
+        // Render all the 3D projection vector lines onto PDF page
+        isoLines.forEach(line => {
+          const pt1 = mapToIsoPdf(line.p1);
+          const pt2 = mapToIsoPdf(line.p2);
+
+          doc.setLineWidth(line.isAct ? 0.24 : 0.12);
+          const colorHex = line.colorHex;
+          const rColor = parseInt(colorHex.slice(1, 3), 16) || 0;
+          const gColor = parseInt(colorHex.slice(3, 5), 16) || 0;
+          const bColor = parseInt(colorHex.slice(5, 7), 16) || 0;
+          doc.setDrawColor(rColor, gColor, bColor);
+
+          // Draw the physical edge line
+          doc.line(pt1.x, pt1.y, pt2.x, pt2.y);
+        });
+      } else {
+        // Draw elegant placeholder message if drawing is empty
+        doc.setFont("Helvetica", "oblique");
+        doc.setFontSize(6.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text("İzometrik Görünüş için Çizim Boş", isoBoxX + isoBoxW / 2, isoBoxY + isoBoxH / 2 + 3, { align: "center" });
+      }
+
       // Save PDF down
       doc.save(`CADERIM_Teknik_Resim_Blueprint_${activeLayer.name || 'Sketch'}.pdf`);
       logCommandResponse('✨ Mükemmel! 2D Teknik Resim Şeması PDF Blueprint olarak başarıyla dışa aktarıldı.');
