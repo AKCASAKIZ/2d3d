@@ -35,6 +35,7 @@ import {
   Scissors,
   Clipboard,
   Sliders,
+  Grid,
 } from 'lucide-react';
 
 import { Point, CommandType, DrawModeType, HistoryItem, SnapPoint, TrackLine, CADLayer, PathSettings, SnapToggles } from './types';
@@ -1867,6 +1868,179 @@ export default function App() {
     } else {
       logCommandResponse("Ölçeklenecek seçili çizgi veya poligon bulunamadı.");
     }
+  };
+
+  const applyCadEditLinearArray = (xc: number, yc: number, xs: number, ys: number) => {
+    if (xc <= 0 || yc <= 0) {
+      logCommandResponse("Hata: Eleman sayıları 1 veya daha büyük olmalıdır.");
+      return;
+    }
+    const hasSelection = (isFinalPointsSelected && finalPoints.length > 0) || 
+                         (selectedPathIndices.length > 0 && activeLayer.paths && activeLayer.paths.some((_, idx) => selectedPathIndices.includes(idx)));
+    if (!hasSelection) {
+      logCommandResponse("Hata: Çoğaltmak için lütfen önce en az bir şekil veya dış çeper seçin.");
+      return;
+    }
+
+    saveState();
+
+    let newPaths: Point[][] = activeLayer.paths ? [...activeLayer.paths] : [];
+    let addedCount = 0;
+
+    // We will collect the original points list from selection
+    const sources: Point[][] = [];
+    if (isFinalPointsSelected && finalPoints.length > 0) {
+      sources.push(finalPoints);
+    }
+    if (selectedPathIndices.length > 0 && activeLayer.paths) {
+      selectedPathIndices.forEach(idx => {
+        if (activeLayer.paths?.[idx]) {
+          sources.push(activeLayer.paths[idx]);
+        }
+      });
+    }
+
+    // Loop through x and y indices
+    for (let ix = 0; ix < xc; ix++) {
+      for (let iy = 0; iy < yc; iy++) {
+        // Skip 0,0 since it represents the original element itself
+        if (ix === 0 && iy === 0) continue;
+
+        const dx = ix * xs;
+        const dy = iy * ys;
+
+        sources.forEach(src => {
+          const duplicated = src.map(p => {
+            const u: Point = { ...p, x: p.x + dx, y: p.y + dy };
+            if (p.circleData) {
+              u.circleData = {
+                center: { x: p.circleData.center.x + dx, y: p.circleData.center.y + dy },
+                radius: p.circleData.radius
+              };
+            }
+            if (p.polygonData) {
+              u.polygonData = {
+                ...p.polygonData,
+                center: { x: p.polygonData.center.x + dx, y: p.polygonData.center.y + dy }
+              };
+            }
+            return u;
+          });
+          newPaths.push(duplicated);
+          addedCount++;
+        });
+      }
+    }
+
+    setPaths(newPaths);
+    logCommandResponse(`Doğrusal Çoğaltma: ${addedCount} adet yeni kopya üretildi.`);
+  };
+
+  const applyCadEditPolarArray = (count: number, totalAngleDeg: number) => {
+    if (count <= 1) {
+      logCommandResponse("Hata: Dairesel çoğaltma eleman sayısı 2 veya daha fazla olmalıdır.");
+      return;
+    }
+    const hasSelection = (isFinalPointsSelected && finalPoints.length > 0) || 
+                         (selectedPathIndices.length > 0 && activeLayer.paths && activeLayer.paths.some((_, idx) => selectedPathIndices.includes(idx)));
+    if (!hasSelection) {
+      logCommandResponse("Hata: Çoğaltmak için lütfen önce en az bir şekil veya dış çeper seçin.");
+      return;
+    }
+
+    // Determine center of selection or use custom rotationCenter (set rotation axis)
+    let center: Point | null = rotationCenter;
+    if (!center && customAnchor) {
+      center = customAnchor;
+    }
+    if (!center) {
+      // Find bounding average center of all selected elements
+      const pointsToMeasure: Point[] = [];
+      if (isFinalPointsSelected && finalPoints.length > 0) {
+        pointsToMeasure.push(...finalPoints);
+      }
+      if (selectedPathIndices.length > 0 && activeLayer.paths) {
+        selectedPathIndices.forEach(idx => {
+          const p = activeLayer.paths?.[idx];
+          if (p) pointsToMeasure.push(...p);
+        });
+      }
+      if (pointsToMeasure.length > 0) {
+        center = getSelectedCenter(pointsToMeasure);
+      }
+    }
+
+    if (!center) {
+      logCommandResponse("Hata: Çoğaltma merkezi bulunamadı.");
+      return;
+    }
+
+    saveState();
+
+    let newPaths: Point[][] = activeLayer.paths ? [...activeLayer.paths] : [];
+    let addedCount = 0;
+
+    const sources: Point[][] = [];
+    if (isFinalPointsSelected && finalPoints.length > 0) {
+      sources.push(finalPoints);
+    }
+    if (selectedPathIndices.length > 0 && activeLayer.paths) {
+      selectedPathIndices.forEach(idx => {
+        if (activeLayer.paths?.[idx]) {
+          sources.push(activeLayer.paths[idx]);
+        }
+      });
+    }
+
+    const angleIncrementRad = (totalAngleDeg / count) * (Math.PI / 180);
+
+    for (let i = 1; i < count; i++) {
+      const currentAngleRad = i * angleIncrementRad;
+      const cos = Math.cos(currentAngleRad);
+      const sin = Math.sin(currentAngleRad);
+
+      sources.forEach(src => {
+        const duplicated = src.map(p => {
+          const dx = p.x - center.x;
+          const dy = p.y - center.y;
+          const rx = center.x + dx * cos - dy * sin;
+          const ry = center.y + dx * sin + dy * cos;
+          
+          const u: Point = { ...p, x: rx, y: ry };
+
+          if (p.circleData) {
+            const cdx = p.circleData.center.x - center.x;
+            const cdy = p.circleData.center.y - center.y;
+            u.circleData = {
+              center: {
+                x: center.x + cdx * cos - cdy * sin,
+                y: center.y + cdx * sin + cdy * cos
+              },
+              radius: p.circleData.radius
+            };
+          }
+
+          if (p.polygonData) {
+            const pdx = p.polygonData.center.x - center.x;
+            const pdy = p.polygonData.center.y - center.y;
+            u.polygonData = {
+              ...p.polygonData,
+              center: {
+                x: center.x + pdx * cos - pdy * sin,
+                y: center.y + pdx * sin + pdy * cos
+              }
+            };
+          }
+
+          return u;
+        });
+        newPaths.push(duplicated);
+        addedCount++;
+      });
+    }
+
+    setPaths(newPaths);
+    logCommandResponse(`Dairesel Çoğaltma: Merkez (${center.x.toFixed(1)}, ${center.y.toFixed(1)}) etrafında ${addedCount} adet yeni kopya üretildi.`);
   };
 
   // Global drag handler for viewport splitter
@@ -7725,6 +7899,136 @@ export default function App() {
                   >
                     Custom Scale Factor
                   </button>
+                </div>
+              </div>
+
+              {/* Row 5: CAD Array Engine (Linear / Polar Patterns) */}
+              <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-3 shadow-xs">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-1.5 mb-1">
+                  <span className="text-[10px] text-slate-800 font-mono font-bold flex items-center gap-1 uppercase">
+                    <Grid className="w-3.5 h-3.5 text-orange-600 animate-pulse" />
+                    🌐 Array & Pattern Duplication
+                  </span>
+                </div>
+
+                {/* Sub-Tabs / Mode Selection or Accordion */}
+                <div className="space-y-3">
+                  {/* Linear/Rectangular Array Panel */}
+                  <div className="bg-slate-50/75 p-2 rounded-md border border-slate-150 space-y-1.5 text-left">
+                    <span className="text-[9px] text-slate-500 font-extrabold font-sans uppercase block tracking-wider">
+                      📏 Linear (Rectangular) Array:
+                    </span>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                      <div>
+                        <span className="text-[8px] text-slate-400 font-bold block">X Count (Columns)</span>
+                        <input
+                          type="text"
+                          value={arrayXCount}
+                          onChange={(e) => setArrayXCount(e.target.value)}
+                          placeholder="3"
+                          className="w-full bg-white border border-slate-250 rounded text-center text-xs font-mono py-0.5 outline-none focus:border-orange-500"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[8px] text-slate-400 font-bold block">Y Count (Rows)</span>
+                        <input
+                          type="text"
+                          value={arrayYCount}
+                          onChange={(e) => setArrayYCount(e.target.value)}
+                          placeholder="1"
+                          className="w-full bg-white border border-slate-250 rounded text-center text-xs font-mono py-0.5 outline-none focus:border-orange-500"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[8px] text-slate-400 font-bold block">X Spacing (mm)</span>
+                        <input
+                          type="text"
+                          value={arrayXSpacing}
+                          onChange={(e) => setArrayXSpacing(e.target.value)}
+                          placeholder="50"
+                          className="w-full bg-white border border-slate-250 rounded text-center text-xs font-mono py-0.5 outline-none focus:border-orange-500"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[8px] text-slate-400 font-bold block">Y Spacing (mm)</span>
+                        <input
+                          type="text"
+                          value={arrayYSpacing}
+                          onChange={(e) => setArrayYSpacing(e.target.value)}
+                          placeholder="50"
+                          className="w-full bg-white border border-slate-250 rounded text-center text-xs font-mono py-0.5 outline-none focus:border-orange-500"
+                        />
+                      </div>
+                    </div>
+                    
+                    <button
+                      onClick={() => {
+                        const xc = parseInt(arrayXCount);
+                        const yc = parseInt(arrayYCount);
+                        const xs = parseFloat(arrayXSpacing);
+                        const ys = parseFloat(arrayYSpacing);
+                        if (!isNaN(xc) && !isNaN(yc) && !isNaN(xs) && !isNaN(ys)) {
+                          applyCadEditLinearArray(xc, yc, xs, ys);
+                        } else {
+                          logCommandResponse("Hata: Çoğaltma parametrelerini lütfen geçerli sayılarla doldurun.");
+                        }
+                      }}
+                      className="w-full py-1 bg-gradient-to-r from-orange-450 to-orange-550 border border-orange-200 text-white rounded text-[9px] font-bold font-mono hover:brightness-105 active:scale-95 transition cursor-pointer text-center uppercase shadow-xs mt-1"
+                    >
+                      Apply Linear Array
+                    </button>
+                  </div>
+
+                  {/* Polar/Circular Array Panel */}
+                  <div className="bg-slate-50/75 p-2 rounded-md border border-slate-150 space-y-1.5 text-left">
+                    <span className="text-[9px] text-slate-550 font-extrabold font-sans uppercase block tracking-wider">
+                      🔄 Polar (Circular) Array:
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[8px] text-slate-400 font-bold block">Total Items (Count)</span>
+                        <input
+                          type="text"
+                          value={polarCount}
+                          onChange={(e) => setPolarCount(e.target.value)}
+                          placeholder="6"
+                          className="w-full bg-white border border-slate-250 rounded text-center text-xs font-mono py-0.5 outline-none focus:border-orange-500"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[8px] text-slate-400 font-bold block">Total Angle (Degrees)</span>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={polarAngle}
+                            onChange={(e) => setPolarAngle(e.target.value)}
+                            placeholder="360"
+                            className="w-full bg-white border border-slate-250 rounded text-center text-xs font-mono py-0.5 pr-3 outline-none focus:border-orange-500"
+                          />
+                          <span className="absolute right-1 top-0.5 text-[10px] text-slate-400">°</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-[7.5px] text-slate-500 font-mono leading-tight bg-white p-1 rounded border border-slate-100">
+                      💡 Uses current <strong>Pivot Point</strong> as center. If none set, defaults to selection bounding center.
+                    </p>
+
+                    <button
+                      onClick={() => {
+                        const count = parseInt(polarCount);
+                        const angleDef = parseFloat(polarAngle);
+                        if (!isNaN(count) && !isNaN(angleDef)) {
+                          applyCadEditPolarArray(count, angleDef);
+                        } else {
+                          logCommandResponse("Hata: Dairesel çoğaltma katsayılarını düzgün girin.");
+                        }
+                      }}
+                      className="w-full py-1 bg-gradient-to-r from-orange-450 to-orange-550 border border-orange-200 text-white rounded text-[9px] font-bold font-mono hover:brightness-105 active:scale-95 transition cursor-pointer text-center uppercase shadow-xs"
+                    >
+                      Apply Polar Array
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
