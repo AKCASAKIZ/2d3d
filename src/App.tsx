@@ -561,6 +561,7 @@ export default function App() {
   const isDrawingRef = useRef(false);
   const triggerStlExportRef = useRef<(() => void) | null>(null);
   const isDraggingSplitRef = useRef<boolean>(false);
+  const snapStartTimeRef = useRef<number>(0);
   const dragEntirePathRef = useRef<{
     startX: number;
     startY: number;
@@ -1767,9 +1768,30 @@ export default function App() {
   }, [finalPoints, rawPoints, isClosed, viewZoom, panX, panY, snapPoint, trackedLines, tempPoint, showDims, bgImage, bgOpacity, layers, activeLayerId, selectedPathIndices, isFinalPointsSelected, rightClickStart, rightClickEnd, splitRatio, sidebarCollapsed]);
 
   // Dynamic Drawing Loop on frame update/state changes
+  const drawSketchRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    drawSketchRef.current = drawSketch;
+  });
+
   useEffect(() => {
     drawSketch();
   }, [finalPoints, rawPoints, isClosed, viewZoom, panX, panY, snapPoint, trackedLines, tempPoint, showDims, bgImage, bgOpacity, layers, activeLayerId, selectedPathIndices, isFinalPointsSelected, rightClickStart, rightClickEnd, splitRatio, sidebarCollapsed]);
+
+  // High performance micro-animation loop when snapping is active
+  useEffect(() => {
+    if (snapPoint) {
+      snapStartTimeRef.current = performance.now();
+      let frameId: number;
+      const tick = () => {
+        if (drawSketchRef.current) {
+          drawSketchRef.current();
+        }
+        frameId = requestAnimationFrame(tick);
+      };
+      frameId = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(frameId);
+    }
+  }, [snapPoint]);
 
   // Convert mouse clients coordinates to canvas model virtual coordinates
   const getVirtualCoords = (clientX: number, clientY: number) => {
@@ -3077,56 +3099,136 @@ export default function App() {
 
     // 4. Smart snap visual cues (Square / Triangle / Cross)
     if (snapPoint) {
-      ctx.lineWidth = 2.0 / viewZoom;
-      ctx.strokeStyle = '#e11d48'; // Rose-600
-      ctx.fillStyle = '#e11d48';
       const sz = 8 / viewZoom;
+      ctx.lineWidth = 2.0 / viewZoom;
 
+      ctx.save();
+      ctx.translate(snapPoint.x, snapPoint.y);
+
+      // Animation parameters
+      const elapsed = performance.now() - snapStartTimeRef.current;
+      const tPop = Math.min(1, elapsed / 180);
+      let scale = 1.0;
+      if (tPop < 1) {
+        // overshoot easeOutElastic/easeOutBack
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        scale = 1 + c3 * Math.pow(tPop - 1, 3) + c1 * Math.pow(tPop - 1, 2);
+      } else {
+        // subtle continuous breathing/pulsing
+        const breatheTime = (elapsed - 180) / 1000;
+        scale = 1.0 + Math.sin(breatheTime * Math.PI * 2) * 0.08;
+      }
+
+      const currentSz = sz * scale;
+
+      // 4.1. Concentric Expanding Ripple Effect on snap discovery
+      if (elapsed < 350) {
+        const tRipple = elapsed / 350;
+        const rScale = 1.0 + tRipple * 1.3;
+        const rAlpha = 1.0 - tRipple;
+
+        ctx.save();
+        ctx.globalAlpha = rAlpha;
+        ctx.lineWidth = 1.2 / viewZoom;
+        const rSz = sz * rScale;
+
+        if (snapPoint.type === 'end') {
+          ctx.strokeStyle = '#e11d48'; // Rose-600
+          ctx.strokeRect(-rSz / 2, -rSz / 2, rSz, rSz);
+        } else if (snapPoint.type === 'mid') {
+          ctx.strokeStyle = '#e11d48';
+          ctx.beginPath();
+          ctx.moveTo(0, -rSz / 2);
+          ctx.lineTo(rSz / 2, rSz / 2);
+          ctx.lineTo(-rSz / 2, rSz / 2);
+          ctx.closePath();
+          ctx.stroke();
+        } else if (snapPoint.type === 'int') {
+          ctx.strokeStyle = '#e11d48';
+          ctx.beginPath();
+          ctx.moveTo(-rSz / 2, -rSz / 2);
+          ctx.lineTo(rSz / 2, rSz / 2);
+          ctx.moveTo(rSz / 2, -rSz / 2);
+          ctx.lineTo(-rSz / 2, rSz / 2);
+          ctx.stroke();
+        } else if (snapPoint.type === 'origin') {
+          ctx.strokeStyle = '#22c55e'; // Green-500
+          ctx.beginPath();
+          ctx.arc(0, 0, rSz / 1.5, 0, 2 * Math.PI);
+          ctx.stroke();
+        } else if (snapPoint.type === 'anchor') {
+          ctx.strokeStyle = '#06b6d4'; // Cyan-500
+          ctx.strokeRect(-rSz / 2, -rSz / 2, rSz, rSz);
+        }
+        ctx.restore();
+      }
+
+      // 4.2. Main Snap Shapes (Rotated & Scaled)
       if (snapPoint.type === 'end') {
         // Square for End point
         ctx.strokeStyle = '#e11d48'; // Rose-600
         ctx.fillStyle = '#e11d48';
-        ctx.strokeRect(snapPoint.x - sz / 2, snapPoint.y - sz / 2, sz, sz);
+        ctx.strokeRect(-currentSz / 2, -currentSz / 2, currentSz, currentSz);
       } else if (snapPoint.type === 'mid') {
         // Triangle for Midpoint
         ctx.strokeStyle = '#e11d48'; // Rose-600
         ctx.fillStyle = '#e11d48';
         ctx.beginPath();
-        ctx.moveTo(snapPoint.x, snapPoint.y - sz / 2);
-        ctx.lineTo(snapPoint.x + sz / 2, snapPoint.y + sz / 2);
-        ctx.lineTo(snapPoint.x - sz / 2, snapPoint.y + sz / 2);
+        ctx.moveTo(0, -currentSz / 2);
+        ctx.lineTo(currentSz / 2, currentSz / 2);
+        ctx.lineTo(-currentSz / 2, currentSz / 2);
         ctx.closePath();
         ctx.stroke();
       } else if (snapPoint.type === 'int') {
-        // Cross for intersection
+        // Cross for intersection (with subtle spin)
         ctx.strokeStyle = '#e11d48'; // Rose-600
         ctx.fillStyle = '#e11d48';
+        ctx.save();
+        const spinAngle = elapsed / 400; // Rotating intersection cross!
+        ctx.rotate(spinAngle);
         ctx.beginPath();
-        ctx.moveTo(snapPoint.x - sz / 2, snapPoint.y - sz / 2);
-        ctx.lineTo(snapPoint.x + sz / 2, snapPoint.y + sz / 2);
-        ctx.moveTo(snapPoint.x + sz / 2, snapPoint.y - sz / 2);
-        ctx.lineTo(snapPoint.x - sz / 2, snapPoint.y + sz / 2);
+        ctx.moveTo(-currentSz / 2, -currentSz / 2);
+        ctx.lineTo(currentSz / 2, currentSz / 2);
+        ctx.moveTo(currentSz / 2, -currentSz / 2);
+        ctx.lineTo(-currentSz / 2, currentSz / 2);
         ctx.stroke();
+        ctx.restore();
       } else if (snapPoint.type === 'origin') {
-        // Circular crosshairs for Origin Snap - Vibrant Green
+        // Circular crosshairs for Origin Snap (Vibrant Green)
         ctx.strokeStyle = '#22c55e'; // Green-500
         ctx.fillStyle = '#22c55e';
         ctx.beginPath();
-        ctx.arc(snapPoint.x, snapPoint.y, sz / 1.5, 0, 2 * Math.PI);
+        ctx.arc(0, 0, currentSz / 1.5, 0, 2 * Math.PI);
         ctx.stroke();
+
+        ctx.save();
+        const originSpin = -(elapsed / 600); // Inverse spinning radar crosshair!
+        ctx.rotate(originSpin);
         ctx.beginPath();
-        ctx.moveTo(snapPoint.x - sz, snapPoint.y);
-        ctx.lineTo(snapPoint.x + sz, snapPoint.y);
-        ctx.moveTo(snapPoint.x, snapPoint.y - sz);
-        ctx.lineTo(snapPoint.x, snapPoint.y + sz);
+        ctx.moveTo(-currentSz, 0);
+        ctx.lineTo(currentSz, 0);
+        ctx.moveTo(0, -currentSz);
+        ctx.lineTo(0, currentSz);
         ctx.stroke();
+        ctx.restore();
       } else if (snapPoint.type === 'anchor') {
-        // Double concentric boxes for User Custom Anchor - Vibrant Cyan/Blue
+        // Double concentric boxes for Custom Anchor (Vibrant Cyan-500, counter-spinning)
         ctx.strokeStyle = '#06b6d4'; // Cyan-500
         ctx.fillStyle = '#06b6d4';
-        ctx.strokeRect(snapPoint.x - sz / 2, snapPoint.y - sz / 2, sz, sz);
-        ctx.strokeRect(snapPoint.x - sz / 4, snapPoint.y - sz / 4, sz / 2, sz / 2);
+
+        ctx.save();
+        ctx.rotate(elapsed / 800);
+        ctx.strokeRect(-currentSz / 2, -currentSz / 2, currentSz, currentSz);
+        ctx.restore();
+
+        ctx.save();
+        ctx.rotate(-elapsed / 800);
+        ctx.strokeRect(-currentSz / 4, -currentSz / 4, currentSz / 2, currentSz / 2);
+        ctx.restore();
       }
+
+      ctx.restore();
     }
 
     // 5. Draw command visual guides
