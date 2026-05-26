@@ -16,6 +16,10 @@ export interface Point {
     vertexIndex: number;
     polygonType?: 'corner' | 'midpoint';
   };
+  rectData?: {
+    id: string;
+    vertexIndex: number;
+  };
 }
 
 export type SnapType = 'end' | 'mid' | 'int' | 'origin' | 'grid' | 'anchor' | 'quad' | 'tan' | 'near' | 'extension' | 'perpendicular' | 'intersection' | 'align';
