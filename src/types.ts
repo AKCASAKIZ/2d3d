@@ -18,7 +18,7 @@ export interface Point {
   };
 }
 
-export type SnapType = 'end' | 'mid' | 'int' | 'origin' | 'grid' | 'anchor' | 'quad' | 'tan';
+export type SnapType = 'end' | 'mid' | 'int' | 'origin' | 'grid' | 'anchor' | 'quad' | 'tan' | 'near' | 'extension' | 'perpendicular' | 'intersection' | 'align';
 
 export interface SnapToggles {
   origin: boolean;
@@ -27,6 +27,8 @@ export interface SnapToggles {
   mid: boolean;
   tan: boolean;
   quad: boolean;
+  near?: boolean;
+  extension?: boolean;
 }
 
 export interface SnapPoint {
@@ -38,7 +40,10 @@ export interface SnapPoint {
 export interface TrackLine {
   x: number;
   y: number;
-  type: 'H' | 'V';
+  type: 'H' | 'V' | 'angle' | 'extension' | 'perpendicular';
+  angle?: number;
+  p1?: Point;
+  p2?: Point;
 }
 
 export type CommandType = 'line' | 'rect' | 'circle' | 'polygon' | 'trim' | 'extend' | 'offset' | 'stretch' | 'dimension' | '';
