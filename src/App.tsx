@@ -510,7 +510,9 @@ export default function App() {
     end: true,
     mid: true,
     tan: true,
-    quad: true
+    quad: true,
+    near: true,
+    extension: true
   });
   const [customAnchor, setCustomAnchor] = useState<Point | null>(null);
   const [anchorSelectMode, setAnchorSelectMode] = useState(false);
@@ -3645,10 +3647,29 @@ export default function App() {
         } else if (line.type === 'V') {
           ctx.moveTo(line.x, line.y);
           ctx.lineTo(line.x, tempPoint.y);
+        } else if (line.type === 'extension' && line.p1) {
+          ctx.moveTo(line.p1.x, line.p1.y);
+          ctx.lineTo(tempPoint.x, tempPoint.y);
+        } else if (line.type === 'angle' && line.p1) {
+          ctx.moveTo(line.p1.x, line.p1.y);
+          ctx.lineTo(tempPoint.x, tempPoint.y);
         }
       });
       ctx.stroke();
       ctx.setLineDash([]);
+
+      // Draw angle text overlays on top of polar rays
+      trackedLines.forEach((line) => {
+        if (line.type === 'angle' && line.angle !== undefined && line.p1) {
+          ctx.save();
+          ctx.fillStyle = '#f97316';
+          ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px sans-serif`;
+          const midX = (line.p1.x + tempPoint.x) / 2;
+          const midY = (line.p1.y + tempPoint.y) / 2;
+          ctx.fillText(` ${line.angle}°`, midX + 5 / viewZoom, midY - 5 / viewZoom);
+          ctx.restore();
+        }
+      });
     }
 
     // 4. Smart snap visual cues (Square / Triangle / Cross)
@@ -3780,6 +3801,47 @@ export default function App() {
         ctx.rotate(-elapsed / 800);
         ctx.strokeRect(-currentSz / 4, -currentSz / 4, currentSz / 2, currentSz / 2);
         ctx.restore();
+      } else if (snapPoint.type === 'near') {
+        // Hourglass shape for Nearest Point snap (Light Blue)
+        ctx.strokeStyle = '#0284c7'; // Light Blue-600
+        ctx.beginPath();
+        ctx.moveTo(-currentSz / 2, -currentSz / 2);
+        ctx.lineTo(currentSz / 2, -currentSz / 2);
+        ctx.lineTo(-currentSz / 2, currentSz / 2);
+        ctx.lineTo(currentSz / 2, currentSz / 2);
+        ctx.closePath();
+        ctx.stroke();
+      } else if (snapPoint.type === 'extension') {
+        // Diamond with inner dot for axis extensions
+        ctx.strokeStyle = '#f97316'; // Orange-500
+        ctx.beginPath();
+        ctx.moveTo(0, -currentSz / 2);
+        ctx.lineTo(currentSz / 2, 0);
+        ctx.lineTo(0, currentSz / 2);
+        ctx.lineTo(-currentSz / 2, 0);
+        ctx.closePath();
+        ctx.stroke();
+        
+        ctx.fillStyle = '#f97316';
+        ctx.beginPath();
+        ctx.arc(0, 0, 1.5 / viewZoom, 0, 2 * Math.PI);
+        ctx.fill();
+      } else if (snapPoint.type === 'intersection') {
+        // Crosshairs inside circle for virtual intersection
+        ctx.strokeStyle = '#e11d48'; // Rose-600
+        ctx.beginPath();
+        ctx.arc(0, 0, currentSz / 2, 0, 2 * Math.PI);
+        ctx.moveTo(-currentSz / 2, -currentSz / 2);
+        ctx.lineTo(currentSz / 2, currentSz / 2);
+        ctx.moveTo(currentSz / 2, -currentSz / 2);
+        ctx.lineTo(-currentSz / 2, currentSz / 2);
+        ctx.stroke();
+      } else if (snapPoint.type === 'align') {
+        // Target bracket for alignment rays
+        ctx.strokeStyle = '#f59e0b'; // Amber-500
+        ctx.beginPath();
+        ctx.arc(0, 0, currentSz / 2, 0, 2 * Math.PI);
+        ctx.stroke();
       }
 
       ctx.restore();
@@ -6856,6 +6918,24 @@ export default function App() {
             title="Quadrant Snap (Çeyrek Daire)"
           >
             Quad
+          </button>
+          <button
+            onClick={() => setSnapToggles(prev => ({ ...prev, near: !prev.near }))}
+            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
+              snapToggles.near ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+            }`}
+            title="Nearest Snap (En Yakın Çizgi Üstü Nokta)"
+          >
+            Near
+          </button>
+          <button
+            onClick={() => setSnapToggles(prev => ({ ...prev, extension: !prev.extension }))}
+            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
+              snapToggles.extension ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+            }`}
+            title="Extension & Angle Track Alignment (Uzantı ve Eksen Hizalama)"
+          >
+            Extend & Align
           </button>
         </div>
 
