@@ -1950,30 +1950,16 @@ export default function App() {
       return;
     }
 
-    // Determine center of selection or use custom rotationCenter (set rotation axis)
+    // Determine center: explicit rotationCenter or custom anchor set by user
     let center: Point | null = rotationCenter;
     if (!center && customAnchor) {
       center = customAnchor;
     }
-    if (!center) {
-      // Find bounding average center of all selected elements
-      const pointsToMeasure: Point[] = [];
-      if (isFinalPointsSelected && finalPoints.length > 0) {
-        pointsToMeasure.push(...finalPoints);
-      }
-      if (selectedPathIndices.length > 0 && activeLayer.paths) {
-        selectedPathIndices.forEach(idx => {
-          const p = activeLayer.paths?.[idx];
-          if (p) pointsToMeasure.push(...p);
-        });
-      }
-      if (pointsToMeasure.length > 0) {
-        center = getSelectedCenter(pointsToMeasure);
-      }
-    }
 
+    // If center is not explicitly set, ask for it! (polar array döndürme merkezi sorması lazım)
     if (!center) {
-      logCommandResponse("Hata: Çoğaltma merkezi bulunamadı.");
+      setRotationCenterSelectMode(true);
+      logCommandResponse("⚠️ Dairesel Çoğaltma Dönme Merkezi Belirlenmeli: Lütfen çoğaltma merkezi (dönme odağı) olarak kullanılacak noktayı belirlemek için ekranda bir yere tıklayın.");
       return;
     }
 
@@ -8090,9 +8076,38 @@ export default function App() {
                       </div>
                     </div>
 
-                    <p className="text-[7.5px] text-slate-500 font-mono leading-tight bg-white p-1 rounded border border-slate-100">
-                      💡 Uses current <strong>Pivot Point</strong> as center. If none set, defaults to selection bounding center.
-                    </p>
+                    {/* Array Center Point Select Controls */}
+                    <div className="space-y-1 bg-white p-1.5 rounded border border-slate-200 text-left">
+                      <span className="text-[8.5px] text-slate-500 font-bold font-sans uppercase block">🎯 Array Center (Pivot Point):</span>
+                      {rotationCenter ? (
+                        <div className="flex items-center justify-between bg-orange-50/70 border border-orange-200 px-1.5 py-0.5 rounded text-[9px] font-mono text-orange-700">
+                          <span>X: {rotationCenter.x.toFixed(1)} / Y: {rotationCenter.y.toFixed(1)} mm</span>
+                          <button
+                            onClick={() => {
+                              setRotationCenter(null);
+                              logCommandResponse("Dairesel çoğaltma merkezi temizlendi.");
+                            }}
+                            className="text-[8px] text-red-650 hover:text-red-750 px-1 rounded bg-red-50 border border-red-200 cursor-pointer font-bold"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setRotationCenterSelectMode(true);
+                            logCommandResponse("Dairesel Çoğaltma Merkez Noktası Seçin: Dönme eksenini seçmek için çizim ekranında dilediğiniz bir yere tıklayın.");
+                          }}
+                          className={`w-full py-0.5 rounded text-[8.5px] font-mono font-bold border transition cursor-pointer text-center ${
+                            rotationCenterSelectMode
+                              ? 'bg-orange-600/30 border-orange-500 text-orange-700 animate-pulse'
+                              : 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700 font-bold'
+                          }`}
+                        >
+                          {rotationCenterSelectMode ? '📍 Click Canvas...' : '📍 Click Center Point on Canvas'}
+                        </button>
+                      )}
+                    </div>
 
                     <button
                       onClick={() => {
