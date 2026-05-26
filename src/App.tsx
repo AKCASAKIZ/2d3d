@@ -5110,6 +5110,7 @@ export default function App() {
         ? (segmentIdx + 1) % originalPoints.length 
         : segmentIdx + 1;
 
+      const oldPosList: { cx: number; cy: number; nx: number; ny: number }[] = [];
       const updated = originalPoints.map((p, idx) => {
         if (idx === i || (idx === j && j < originalPoints.length)) {
           const updatedPt: Point = {
@@ -5117,6 +5118,7 @@ export default function App() {
             x: p.x + dx,
             y: p.y + dy,
           };
+          oldPosList.push({ cx: p.x, cy: p.y, nx: p.x + dx, ny: p.y + dy });
           if (p.circleData) {
             updatedPt.circleData = {
               center: {
@@ -5133,10 +5135,53 @@ export default function App() {
 
       if (pathIdx === -1) {
         setFinalPoints(updated);
-      } else {
-        const updatedPaths = activeLayer.paths ? [...activeLayer.paths] : [];
-        updatedPaths[pathIdx] = updated;
+
+        // Update coincident paths
+        const updatedPaths = activeLayer.paths ? activeLayer.paths.map(path => {
+          return path.map(pt => {
+            for (const item of oldPosList) {
+              if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                return { ...pt, x: item.nx, y: item.ny };
+              }
+            }
+            return pt;
+          });
+        }) : [];
         setPaths(updatedPaths);
+      } else {
+        const nextPaths = activeLayer.paths ? [...activeLayer.paths] : [];
+        nextPaths[pathIdx] = updated;
+
+        // Update coincident finalPoints
+        const nextFinalPoints = finalPoints.map(pt => {
+          for (const item of oldPosList) {
+            if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+              return { ...pt, x: item.nx, y: item.ny };
+            }
+          }
+          return pt;
+        });
+        setFinalPoints(nextFinalPoints);
+
+        // Update other paths
+        nextPaths.forEach((path, pIdx) => {
+          if (pIdx !== pathIdx) {
+            let changed = false;
+            const nextPath = path.map(pt => {
+              for (const item of oldPosList) {
+                if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                  changed = true;
+                  return { ...pt, x: item.nx, y: item.ny };
+                }
+              }
+              return pt;
+            });
+            if (changed) {
+              nextPaths[pIdx] = nextPath;
+            }
+          }
+        });
+        setPaths(nextPaths);
       }
       return;
     }
@@ -5309,8 +5354,12 @@ export default function App() {
 
           const updated = [...finalPoints];
           const draggedPt = updated[dragIndexRef.current];
+          if (!draggedPt) return;
 
-          if (draggedPt && draggedPt.polygonData) {
+          const cx = draggedPt.x;
+          const cy = draggedPt.y;
+
+          if (draggedPt.polygonData) {
             const polyId = draggedPt.polygonData.id;
             const sides = draggedPt.polygonData.sides;
             const vIndex = draggedPt.polygonData.vertexIndex;
@@ -5321,15 +5370,20 @@ export default function App() {
             const newAngle = Math.atan2(y - center.y, x - center.x);
             const newInitialAngle = newAngle - (vIndex * Math.PI * 2) / sides;
 
+            const oldPosList: { cx: number; cy: number; nx: number; ny: number }[] = [];
+
             // Update all vertices belonging to this polygon
             for (let i = 0; i < updated.length; i++) {
               if (updated[i].polygonData?.id === polyId) {
                 const currentVIndex = updated[i].polygonData.vertexIndex;
                 const targetAngle = newInitialAngle + (currentVIndex * Math.PI * 2) / sides;
+                const nx = center.x + newRadius * Math.cos(targetAngle);
+                const ny = center.y + newRadius * Math.sin(targetAngle);
+                oldPosList.push({ cx: updated[i].x, cy: updated[i].y, nx, ny });
                 updated[i] = {
                   ...updated[i],
-                  x: center.x + newRadius * Math.cos(targetAngle),
-                  y: center.y + newRadius * Math.sin(targetAngle),
+                  x: nx,
+                  y: ny,
                   polygonData: {
                     ...updated[i].polygonData,
                     radius: newRadius,
@@ -5338,6 +5392,7 @@ export default function App() {
                 };
               }
             }
+
             // Sync endpoints
             if (dragIndexRef.current === 0) {
               updated[updated.length - 1] = { ...updated[0] };
@@ -5345,18 +5400,66 @@ export default function App() {
             if (dragIndexRef.current === updated.length - 1) {
               updated[0] = { ...updated[updated.length - 1] };
             }
+
+            // Move coincident vertices in updated (finalPoints)
+            oldPosList.forEach((item) => {
+              for (let k = 0; k < updated.length; k++) {
+                if (updated[k].polygonData?.id !== polyId) {
+                  if (Math.hypot(updated[k].x - item.cx, updated[k].y - item.cy) < 0.05) {
+                    updated[k] = { ...updated[k], x: item.nx, y: item.ny };
+                  }
+                }
+              }
+            });
+
+            setFinalPoints(updated);
+
+            // Move coincident vertices in other paths within updatedPaths
+            const updatedPaths = activeLayer.paths ? activeLayer.paths.map((path) => {
+              return path.map((pt) => {
+                for (const item of oldPosList) {
+                  if (pt.polygonData?.id !== polyId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                    return { ...pt, x: item.nx, y: item.ny };
+                  }
+                }
+                return pt;
+              });
+            }) : [];
+            setPaths(updatedPaths);
+
           } else {
-            updated[dragIndexRef.current] = { x, y };
+            // Standard single vertex drag in finalPoints
+            const updated = finalPoints.map((pt, i) => {
+              if (i === dragIndexRef.current) {
+                return { ...pt, x, y };
+              }
+              if (Math.hypot(pt.x - cx, pt.y - cy) < 0.05) {
+                return { ...pt, x, y };
+              }
+              return pt;
+            });
 
             // Ensure closed chain remains closed on endpoint movements
-            if (dragIndexRef.current === 0) {
-              updated[updated.length - 1] = { x, y };
+            if (dragIndexRef.current === 0 || Math.hypot(finalPoints[0].x - cx, finalPoints[0].y - cy) < 0.05) {
+              updated[updated.length - 1] = { ...updated[0] };
             }
-            if (dragIndexRef.current === updated.length - 1) {
-              updated[0] = { x, y };
+            if (dragIndexRef.current === updated.length - 1 || Math.hypot(finalPoints[finalPoints.length - 1].x - cx, finalPoints[finalPoints.length - 1].y - cy) < 0.05) {
+              updated[0] = { ...updated[updated.length - 1] };
             }
+
+            setFinalPoints(updated);
+
+            // Update coincident paths as well
+            const updatedPaths = activeLayer.paths ? activeLayer.paths.map(path => {
+              return path.map(pt => {
+                if (Math.hypot(pt.x - cx, pt.y - cy) < 0.05) {
+                  return { ...pt, x, y };
+                }
+                return pt;
+              });
+            }) : [];
+            setPaths(updatedPaths);
           }
-          setFinalPoints(updated);
         } else {
           // Dragging a completed path vertex
           const targetPath = activeLayer.paths ? activeLayer.paths[pathIdx] : [];
@@ -5371,6 +5474,9 @@ export default function App() {
           const updatedPaths = activeLayer.paths ? [...activeLayer.paths] : [];
           const updatedPath = [...targetPath];
           const draggedPt = updatedPath[dragIndexRef.current];
+          if (!draggedPt) return;
+          const cx = draggedPt.x;
+          const cy = draggedPt.y;
 
           if (draggedPt && draggedPt.polygonData) {
             const polyId = draggedPt.polygonData.id;
@@ -5410,21 +5516,48 @@ export default function App() {
               }
             }
           } else {
-            updatedPath[dragIndexRef.current] = { x, y };
-
-            const isClosedLoop = distance(targetPath[0], targetPath[targetPath.length - 1]) < 0.1;
-            if (isClosedLoop) {
-              if (dragIndexRef.current === 0) {
-                updatedPath[updatedPath.length - 1] = { x, y };
+            // Standard single vertex drag in completed paths
+            const nextFinalPoints = finalPoints.map(pt => {
+              if (Math.hypot(pt.x - cx, pt.y - cy) < 0.05) {
+                return { ...pt, x, y };
               }
-              if (dragIndexRef.current === updatedPath.length - 1) {
-                updatedPath[0] = { x, y };
+              return pt;
+            });
+            if (finalPoints.length > 2 && distance(finalPoints[0], finalPoints[finalPoints.length - 1]) < 0.1) {
+              if (Math.hypot(finalPoints[0].x - cx, finalPoints[0].y - cy) < 0.05) {
+                nextFinalPoints[nextFinalPoints.length - 1] = { ...nextFinalPoints[0] };
+              }
+              if (Math.hypot(finalPoints[finalPoints.length - 1].x - cx, finalPoints[finalPoints.length - 1].y - cy) < 0.05) {
+                nextFinalPoints[0] = { ...nextFinalPoints[nextFinalPoints.length - 1] };
               }
             }
-          }
+            setFinalPoints(nextFinalPoints);
 
-          updatedPaths[pathIdx] = updatedPath;
-          setPaths(updatedPaths);
+            const nextPaths = updatedPaths.map((path, pIdx) => {
+              const updatedP = path.map((pt, i) => {
+                if (pIdx === pathIdx && i === dragIndexRef.current) {
+                  return { ...pt, x, y };
+                }
+                if (Math.hypot(pt.x - cx, pt.y - cy) < 0.05) {
+                  return { ...pt, x, y };
+                }
+                return pt;
+              });
+
+              const isClosedLoop = distance(path[0], path[path.length - 1]) < 0.1;
+              if (isClosedLoop) {
+                if (Math.hypot(path[0].x - cx, path[0].y - cy) < 0.05 || (pIdx === pathIdx && dragIndexRef.current === 0)) {
+                  updatedP[updatedP.length - 1] = { ...updatedP[0] };
+                }
+                if (Math.hypot(path[path.length - 1].x - cx, path[path.length - 1].y - cy) < 0.05 || (pIdx === pathIdx && dragIndexRef.current === path.length - 1)) {
+                  updatedP[0] = { ...updatedP[updatedP.length - 1] };
+                }
+              }
+              return updatedP;
+            });
+
+            setPaths(nextPaths);
+          }
         }
       } else if (isDrawingRef.current && drawMode === 'freehand') {
         const last = rawPoints[rawPoints.length - 1];
