@@ -4700,12 +4700,13 @@ export default function App() {
           setClickCount(1);
         } else {
           const p1 = finalPoints[0];
+          const rectId = 'rect_' + Math.random().toString(36).substring(2, 9);
           const polyRect = [
-            { x: p1.x, y: p1.y },
-            { x, y: p1.y },
-            { x, y },
-            { x: p1.x, y },
-            { x: p1.x, y: p1.y },
+            { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 0 } },
+            { x: x, y: p1.y, rectData: { id: rectId, vertexIndex: 1 } },
+            { x: x, y: y, rectData: { id: rectId, vertexIndex: 2 } },
+            { x: p1.x, y: y, rectData: { id: rectId, vertexIndex: 3 } },
+            { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 4 } },
           ];
           saveState(polyRect, true, 0);
           setFinalPoints(polyRect);
@@ -5359,7 +5360,97 @@ export default function App() {
           const cx = draggedPt.x;
           const cy = draggedPt.y;
 
-          if (draggedPt.polygonData) {
+          if (draggedPt.rectData) {
+            const rId = draggedPt.rectData.id;
+            const dragVIdx = draggedPt.rectData.vertexIndex;
+
+            const rectIndices: number[] = [];
+            for (let i = 0; i < updated.length; i++) {
+              if (updated[i].rectData?.id === rId) {
+                rectIndices.push(i);
+              }
+            }
+
+            if (rectIndices.length === 5) {
+              const idxMap: { [key: number]: number } = {};
+              rectIndices.forEach(idx => {
+                idxMap[updated[idx].rectData!.vertexIndex] = idx;
+              });
+
+              if (idxMap[0] !== undefined && idxMap[1] !== undefined && idxMap[2] !== undefined && idxMap[3] !== undefined && idxMap[4] !== undefined) {
+                const dragIndexMapped = dragVIdx === 4 ? 0 : dragVIdx;
+
+                const origIdxMap: { [key: number]: Point } = {};
+                rectIndices.forEach(idx => {
+                  origIdxMap[updated[idx].rectData!.vertexIndex] = finalPoints[idx];
+                });
+
+                const oppVIdx = (dragIndexMapped + 2) % 4;
+                const prevVIdx = (dragIndexMapped + 3) % 4;
+                const nextVIdx = (dragIndexMapped + 1) % 4;
+
+                const P_opp = origIdxMap[oppVIdx];
+                const P_prev = origIdxMap[prevVIdx];
+                const P_next = origIdxMap[nextVIdx];
+
+                const vec_u = { x: P_prev.x - P_opp.x, y: P_prev.y - P_opp.y };
+                const vec_v = { x: P_next.x - P_opp.x, y: P_next.y - P_opp.y };
+
+                const len_u = Math.hypot(vec_u.x, vec_u.y);
+                const len_v = Math.hypot(vec_v.x, vec_v.y);
+
+                const u = len_u > 0.0001 ? { x: vec_u.x / len_u, y: vec_u.y / len_u } : { x: 1, y: 0 };
+                const v = len_v > 0.0001 ? { x: vec_v.x / len_v, y: vec_v.y / len_v } : { x: 0, y: 1 };
+
+                const d = { x: x - P_opp.x, y: y - P_opp.y };
+
+                const proj_u = d.x * u.x + d.y * u.y;
+                const proj_v = d.x * v.x + d.y * v.y;
+
+                const P_drag_new = { x, y };
+                const P_prev_new = { x: P_opp.x + proj_u * u.x, y: P_opp.y + proj_u * u.y };
+                const P_next_new = { x: P_opp.x + proj_v * v.x, y: P_opp.y + proj_v * v.y };
+
+                const oldPosList: { cx: number; cy: number; nx: number; ny: number }[] = [];
+
+                const recordChange = (vIdx: number, newPt: { x: number; y: number }) => {
+                  const idx = idxMap[vIdx];
+                  oldPosList.push({ cx: updated[idx].x, cy: updated[idx].y, nx: newPt.x, ny: newPt.y });
+                  updated[idx] = { ...updated[idx], x: newPt.x, y: newPt.y };
+                };
+
+                recordChange(dragIndexMapped, P_drag_new);
+                recordChange(prevVIdx, P_prev_new);
+                recordChange(nextVIdx, P_next_new);
+                
+                updated[idxMap[4]] = { ...updated[idxMap[4]], x: updated[idxMap[0]].x, y: updated[idxMap[0]].y };
+
+                oldPosList.forEach((item) => {
+                  for (let k = 0; k < updated.length; k++) {
+                    if (updated[k].rectData?.id !== rId) {
+                      if (Math.hypot(updated[k].x - item.cx, updated[k].y - item.cy) < 0.05) {
+                        updated[k] = { ...updated[k], x: item.nx, y: item.ny };
+                      }
+                    }
+                  }
+                });
+
+                setFinalPoints(updated);
+
+                const updatedPaths = activeLayer.paths ? activeLayer.paths.map((path) => {
+                  return path.map((pt) => {
+                    for (const item of oldPosList) {
+                      if (pt.rectData?.id !== rId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                        return { ...pt, x: item.nx, y: item.ny };
+                      }
+                    }
+                    return pt;
+                  });
+                }) : [];
+                setPaths(updatedPaths);
+              }
+            }
+          } else if (draggedPt.polygonData) {
             const polyId = draggedPt.polygonData.id;
             const sides = draggedPt.polygonData.sides;
             const vIndex = draggedPt.polygonData.vertexIndex;
@@ -5478,7 +5569,98 @@ export default function App() {
           const cx = draggedPt.x;
           const cy = draggedPt.y;
 
-          if (draggedPt && draggedPt.polygonData) {
+          if (draggedPt && draggedPt.rectData) {
+            const rId = draggedPt.rectData.id;
+            const dragVIdx = draggedPt.rectData.vertexIndex;
+
+            const rectIndices: number[] = [];
+            for (let i = 0; i < updatedPath.length; i++) {
+              if (updatedPath[i].rectData?.id === rId) {
+                rectIndices.push(i);
+              }
+            }
+
+            if (rectIndices.length === 5) {
+              const idxMap: { [key: number]: number } = {};
+              rectIndices.forEach(idx => {
+                idxMap[updatedPath[idx].rectData!.vertexIndex] = idx;
+              });
+
+              if (idxMap[0] !== undefined && idxMap[1] !== undefined && idxMap[2] !== undefined && idxMap[3] !== undefined && idxMap[4] !== undefined) {
+                const dragIndexMapped = dragVIdx === 4 ? 0 : dragVIdx;
+
+                const origIdxMap: { [key: number]: Point } = {};
+                rectIndices.forEach(idx => {
+                  origIdxMap[updatedPath[idx].rectData!.vertexIndex] = targetPath[idx];
+                });
+
+                const oppVIdx = (dragIndexMapped + 2) % 4;
+                const prevVIdx = (dragIndexMapped + 3) % 4;
+                const nextVIdx = (dragIndexMapped + 1) % 4;
+
+                const P_opp = origIdxMap[oppVIdx];
+                const P_prev = origIdxMap[prevVIdx];
+                const P_next = origIdxMap[nextVIdx];
+
+                const vec_u = { x: P_prev.x - P_opp.x, y: P_prev.y - P_opp.y };
+                const vec_v = { x: P_next.x - P_opp.x, y: P_next.y - P_opp.y };
+
+                const len_u = Math.hypot(vec_u.x, vec_u.y);
+                const len_v = Math.hypot(vec_v.x, vec_v.y);
+
+                const u = len_u > 0.0001 ? { x: vec_u.x / len_u, y: vec_u.y / len_u } : { x: 1, y: 0 };
+                const v = len_v > 0.0001 ? { x: vec_v.x / len_v, y: vec_v.y / len_v } : { x: 0, y: 1 };
+
+                const d = { x: x - P_opp.x, y: y - P_opp.y };
+
+                const proj_u = d.x * u.x + d.y * u.y;
+                const proj_v = d.x * v.x + d.y * v.y;
+
+                const P_drag_new = { x, y };
+                const P_prev_new = { x: P_opp.x + proj_u * u.x, y: P_opp.y + proj_u * u.y };
+                const P_next_new = { x: P_opp.x + proj_v * v.x, y: P_opp.y + proj_v * v.y };
+
+                const oldPosList: { cx: number; cy: number; nx: number; ny: number }[] = [];
+
+                const recordChange = (vIdx: number, newPt: { x: number; y: number }) => {
+                  const idx = idxMap[vIdx];
+                  oldPosList.push({ cx: updatedPath[idx].x, cy: updatedPath[idx].y, nx: newPt.x, ny: newPt.y });
+                  updatedPath[idx] = { ...updatedPath[idx], x: newPt.x, y: newPt.y };
+                };
+
+                recordChange(dragIndexMapped, P_drag_new);
+                recordChange(prevVIdx, P_prev_new);
+                recordChange(nextVIdx, P_next_new);
+
+                updatedPath[idxMap[4]] = { ...updatedPath[idxMap[4]], x: updatedPath[idxMap[0]].x, y: updatedPath[idxMap[0]].y };
+
+                const nextPaths = updatedPaths.map((path, pIdx) => {
+                  if (pIdx === pathIdx) {
+                    return updatedPath;
+                  }
+                  return path.map((pt) => {
+                    for (const item of oldPosList) {
+                      if (pt.rectData?.id !== rId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                        return { ...pt, x: item.nx, y: item.ny };
+                      }
+                    }
+                    return pt;
+                  });
+                });
+                setPaths(nextPaths);
+
+                const nextFinalPoints = finalPoints.map(pt => {
+                  for (const item of oldPosList) {
+                    if (pt.rectData?.id !== rId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                      return { ...pt, x: item.nx, y: item.ny };
+                    }
+                  }
+                  return pt;
+                });
+                setFinalPoints(nextFinalPoints);
+              }
+            }
+          } else if (draggedPt && draggedPt.polygonData) {
             const polyId = draggedPt.polygonData.id;
             const sides = draggedPt.polygonData.sides;
             const vIndex = draggedPt.polygonData.vertexIndex;
