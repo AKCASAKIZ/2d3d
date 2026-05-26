@@ -42,6 +42,20 @@ export interface CalculateSnapsResult {
   trackedLines: TrackLine[];
 }
 
+// Auxiliary function to get closest point on infinite line AB
+function getClosestPointOnInfiniteLine(p: Point, a: Point, b: Point) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-8) {
+    return { x: a.x, y: a.y, dist: Math.hypot(p.x - a.x, p.y - a.y), t: 0 };
+  }
+  const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  const rx = a.x + t * dx;
+  const ry = a.y + t * dy;
+  return { x: rx, y: ry, dist: Math.hypot(p.x - rx, p.y - ry), t };
+}
+
 export function calculateSnaps(
   targetX: number,
   targetY: number,
@@ -72,8 +86,13 @@ export function calculateSnaps(
     end: true,
     mid: true,
     tan: true,
-    quad: true
+    quad: true,
+    near: true,
+    extension: true
   };
+
+  const isNearEnabled = toggles.near !== false;
+  const isExtensionEnabled = toggles.extension !== false;
 
   let finalX = targetX;
   let finalY = targetY;
@@ -245,7 +264,7 @@ export function calculateSnaps(
     return { x: intPt.x, y: intPt.y, snapPoint, trackedLines };
   }
 
-  // Nokta/midpoint snap - Çok yakınsa direkt kilitle
+  // 3. Exact Node/Midpoint Snap - Prioritize physical geometry points
   for (const p of pointsToTrack) {
     if (Math.hypot(p.x - targetX, p.y - targetY) < snapTol) {
       snapPoint = { x: p.x, y: p.y, type: p.type };
@@ -253,27 +272,136 @@ export function calculateSnaps(
     }
   }
 
-  // Hizalama (Smart Track)
+  // 4. Virtual Alignment Intersections & Smart Track GUIDELINES ("Uzayda kesişen noktaları yakalama")
+  // Check if horizontal alignment and vertical alignment from different tracking points occur concurrently.
+  let horizAlign: typeof pointsToTrack[0] | null = null;
+  let vertAlign: typeof pointsToTrack[0] | null = null;
+
   for (const p of pointsToTrack) {
-    // Yatay hizalama
-    if (!snappedY && Math.abs(p.y - targetY) < snapTol) {
-      finalY = p.y;
-      snappedY = true;
-      trackedLines.push({ x: p.x, y: p.y, type: 'H' });
+    // Horizontally aligned with this point
+    if (Math.abs(p.y - targetY) < snapTol) {
+      horizAlign = p;
     }
-    // Dikey hizalama
-    if (!snappedX && Math.abs(p.x - targetX) < snapTol) {
-      finalX = p.x;
-      snappedX = true;
-      trackedLines.push({ x: p.x, y: p.y, type: 'V' });
+    // Vertically aligned with this point
+    if (Math.abs(p.x - targetX) < snapTol) {
+      vertAlign = p;
     }
   }
 
-  // Hem X hem Y snaplendiğinde kesişim (Intersection) sayılır
-  if (snappedX && snappedY && toggles.int) {
-    snapPoint = { x: finalX, y: finalY, type: 'int' };
+  if (horizAlign && vertAlign && horizAlign !== vertAlign) {
+    // Both triggered! Snap to the physical virtual coordinate intersection crosshair point in space
+    const virtualX = vertAlign.x;
+    const virtualY = horizAlign.y;
+    snapPoint = { x: virtualX, y: virtualY, type: 'intersection' };
+    trackedLines.push({ x: horizAlign.x, y: horizAlign.y, type: 'H' });
+    trackedLines.push({ x: vertAlign.x, y: vertAlign.y, type: 'V' });
+    return { x: virtualX, y: virtualY, snapPoint, trackedLines };
+  } else if (horizAlign) {
+    finalY = horizAlign.y;
+    snappedY = true;
+    trackedLines.push({ x: horizAlign.x, y: horizAlign.y, type: 'H' });
+  } else if (vertAlign) {
+    finalX = vertAlign.x;
+    snappedX = true;
+    trackedLines.push({ x: vertAlign.x, y: vertAlign.y, type: 'V' });
   }
 
+  // 5. Line Extension Alignment Sensing ("smart eksen uzantıları yakalama")
+  // Form extension guides for all straight segments in drawing
+  const flatSegments: { p1: Point; p2: Point }[] = [];
+  for (let i = 0; i < finalPoints.length - 1; i++) {
+    if (!finalPoints[i].circleData && !finalPoints[i+1].circleData) {
+      flatSegments.push({ p1: finalPoints[i], p2: finalPoints[i+1] });
+    }
+  }
+  if (isClosed && finalPoints.length > 2) {
+    const p0 = finalPoints[0];
+    const pN = finalPoints[finalPoints.length - 1];
+    if (!p0.circleData && !pN.circleData) {
+      flatSegments.push({ p1: pN, p2: p0 });
+    }
+  }
+  if (allPaths) {
+    allPaths.forEach(path => {
+      for (let i = 0; i < path.length - 1; i++) {
+        if (!path[i].circleData && !path[i+1].circleData) {
+          flatSegments.push({ p1: path[i], p2: path[i+1] });
+        }
+      }
+    });
+  }
+
+  let bestExtend: { x: number; y: number; dist: number; p1: Point; p2: Point } | null = null;
+  let bestNear: { x: number; y: number; dist: number } | null = null;
+
+  for (const seg of flatSegments) {
+    const proj = getClosestPointOnInfiniteLine({ x: targetX, y: targetY }, seg.p1, seg.p2);
+    if (proj.dist < snapTol) {
+      if (proj.t < -0.01 || proj.t > 1.01) {
+        // Lies on extension vector of the segment
+        if (!bestExtend || proj.dist < bestExtend.dist) {
+          bestExtend = { x: proj.x, y: proj.y, dist: proj.dist, p1: seg.p1, p2: seg.p2 };
+        }
+      } else {
+        // Lies physically on the line segment itself
+        if (!bestNear || proj.dist < bestNear.dist) {
+          bestNear = { x: proj.x, y: proj.y, dist: proj.dist };
+        }
+      }
+    }
+  }
+
+  // 6. Polar Axis Guide Tracking Alignment from last point
+  let bestPolar: { x: number; y: number; dist: number; angle: number; pivot: Point } | null = null;
+  if (finalPoints.length > 0) {
+    const pivot = finalPoints[finalPoints.length - 1];
+    const angles = [0, 30, 45, 60, 90, 120, 135, 150, 180, -150, -135, -120, -90, -60, -45, -30];
+    const dx = targetX - pivot.x;
+    const dy = targetY - pivot.y;
+    const currentDist = Math.hypot(dx, dy);
+
+    if (currentDist > 4) {
+      for (const angle of angles) {
+        const rad = angle * Math.PI / 180;
+        const ux = Math.cos(rad);
+        const uy = Math.sin(rad);
+        const proj = dx * ux + dy * uy;
+        if (proj > 1) { // Forward projections
+          const rx = pivot.x + proj * ux;
+          const ry = pivot.y + proj * uy;
+          const distToRay = Math.hypot(targetX - rx, targetY - ry);
+          if (distToRay < snapTol) {
+            if (!bestPolar || distToRay < bestPolar.dist) {
+              bestPolar = { x: rx, y: ry, dist: distToRay, angle, pivot };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Check snapping priorities
+  if (isExtensionEnabled && bestExtend) {
+    // Snap directly to the infinite extension line projection
+    trackedLines.push({ x: bestExtend.x, y: bestExtend.y, type: 'extension', p1: bestExtend.p1, p2: bestExtend.p2 });
+    snapPoint = { x: bestExtend.x, y: bestExtend.y, type: 'extension' };
+    return { x: bestExtend.x, y: bestExtend.y, snapPoint, trackedLines };
+  }
+
+  if (bestPolar) {
+    // Snap to the polar tracking guideline angle ray
+    trackedLines.push({ x: bestPolar.x, y: bestPolar.y, type: 'angle', p1: bestPolar.pivot, angle: bestPolar.angle });
+    snapPoint = { x: bestPolar.x, y: bestPolar.y, type: 'align' };
+    return { x: bestPolar.x, y: bestPolar.y, snapPoint, trackedLines };
+  }
+
+  if (isNearEnabled && bestNear) {
+    // Snap directly on nearest segment line itself (perfect for joining paths / nodes exact)
+    snapPoint = { x: bestNear.x, y: bestNear.y, type: 'near' };
+    return { x: bestNear.x, y: bestNear.y, snapPoint, trackedLines };
+  }
+
+  // Defaults to coordinate-axis H/V alignment snapping
   return { x: finalX, y: finalY, snapPoint, trackedLines };
 }
 
