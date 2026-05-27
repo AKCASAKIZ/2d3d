@@ -6946,38 +6946,7 @@ export default function App() {
           </label>
         </div>
 
-        {/* CENTERED SPECIAL AI REDEFINE GEOMETRY BOX */}
-        <div className="flex items-center gap-1.5 px-3 py-1 bg-orange-50 border border-orange-200 rounded-full font-sans shadow-md shadow-orange-500/5 shrink-0 select-none">
-          <Sparkles className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
-          <span className="text-[10px] uppercase font-mono text-orange-600 font-extrabold pb-0.5">AI Redefine:</span>
-          <input
-            type="text"
-            value={aiRefinePrompt}
-            onChange={(e) => setAiRefinePrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAIRedefineSketch();
-            }}
-            placeholder="E.g., 'Make a 40mm circle at center' or 'round the corners'"
-            className="w-80 bg-white border border-slate-200 placeholder-slate-400 text-xs px-3 py-1 text-slate-800 rounded-full focus:outline-none focus:border-orange-500/80 transition font-mono"
-            disabled={aiLoading}
-          />
-          <button
-            onClick={handleAIRedefineSketch}
-            disabled={aiLoading || !aiRefinePrompt.trim()}
-            className={`px-3 py-1 font-mono font-bold text-[10px] rounded-full transition cursor-pointer flex items-center gap-1 ${
-              aiLoading || !aiRefinePrompt.trim()
-                ? 'bg-slate-200 border border-slate-300 text-slate-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-orange-500 to-amber-600 text-white hover:from-orange-600 hover:to-amber-700 font-extrabold border border-orange-600'
-            }`}
-          >
-            {aiLoading ? (
-              <span className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Flame className="w-2.5 h-2.5" />
-            )}
-            <span>{aiLoading ? "Applying..." : "Apply"}</span>
-          </button>
-        </div>
+
 
         {/* Draw Tools */}
         <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
