@@ -547,7 +547,7 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [infill, setInfill] = useState<number>(20);
   const [showGrid, setShowGrid] = useState<boolean>(true);
-  const [gridSize, setGridSize] = useState<number>(50);
+  const [gridSize, setGridSize] = useState<number>(5);
   const [canvasBgColor, setCanvasBgColor] = useState<string>('#09090b');
   const [movePointSelectMode, setMovePointSelectMode] = useState<'base_point' | 'target_point' | null>(null);
   const [copyPointSelectMode, setCopyPointSelectMode] = useState<'base_point' | 'target_point' | null>(null);
@@ -8551,11 +8551,11 @@ export default function App() {
                     />
                     <input
                       type="range"
-                      min="10"
+                      min="5"
                       max="200"
                       step="5"
                       value={gridSize}
-                      onChange={(e) => setGridSize(parseInt(e.target.value) || 50)}
+                      onChange={(e) => setGridSize(parseInt(e.target.value) || 5)}
                       className="flex-1 h-1 bg-slate-200 rounded appearance-none cursor-pointer accent-orange-600"
                     />
                   </div>
