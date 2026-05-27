@@ -6010,23 +6010,32 @@ export default function App() {
     }
   };
 
-  const handleCanvasWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const mX = e.clientX - rect.left;
-    const mY = e.clientY - rect.top;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    const wX = (mX - panX) / viewZoom;
-    const wY = (mY - panY) / viewZoom;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mX = e.clientX - rect.left;
+      const mY = e.clientY - rect.top;
 
-    const scaleFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    const zoom = Math.max(0.1, Math.min(viewZoom * scaleFactor, 10.0));
+      const wX = (mX - panX) / viewZoom;
+      const wY = (mY - panY) / viewZoom;
 
-    setViewZoom(zoom);
-    setPanX(mX - wX * zoom);
-    setPanY(mY - wY * zoom);
-  };
+      const scaleFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const zoom = Math.max(0.1, Math.min(viewZoom * scaleFactor, 10.0));
+
+      setViewZoom(zoom);
+      setPanX(mX - wX * zoom);
+      setPanY(mY - wY * zoom);
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+    };
+  }, [panX, panY, viewZoom]);
 
   // CLI Command processor
   const handleCommandLineSubmit = (e: React.FormEvent) => {
@@ -9284,7 +9293,6 @@ export default function App() {
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
-              onWheel={handleCanvasWheel}
               style={{
                 cursor:
                   currentCommand === 'trim'
