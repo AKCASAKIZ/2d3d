@@ -554,6 +554,14 @@ export default function App() {
   const [baseSelectionPoint, setBaseSelectionPoint] = useState<Point | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'sketch' | 'layers' | 'dimensions' | '3d'>('sketch');
 
+  // WebForge3D & Technical Drawing Layout integration states
+  const [workspaceLayout, setWorkspaceLayout] = useState<'split' | '2d-only' | '3d-only' | 'drawing-sheet'>('split');
+  const [sheetTitle, setSheetTitle] = useState<string>("MEKANIK MIL FLÂNŞI");
+  const [sheetRevision, setSheetRevision] = useState<string>("REV-02");
+  const [sheetMaterial, setSheetMaterial] = useState<string>("Steel"); // Steel, Aluminum, PLA, Oak, Brass, Copper
+  const [sheetScaleMultiplier, setSheetScaleMultiplier] = useState<number>(1.0);
+  const [sheetNotes, setSheetNotes] = useState<string>("1. Keskin kenarlar pah kırılıp çapaklardan arındırılacaktır.\n2. Tüm ölçüler mm (milimetre) cinsindendir.\n3. Genel toleranslar ISO 2768-m standartlarına uygundur.\n4. Parça yüzey pürüzlülüğü Ra 1.6 mikrometredir.");
+
   // Active Layer Dimensions accessor helper (fully automated undo-redo integrated!)
   const dimensions = activeLayer.dimensions || [];
   const setDimensions = (val: any[] | ((prev: any[]) => any[])) => {
@@ -6594,6 +6602,466 @@ export default function App() {
     }
   };
 
+  // FULLY INTEGRATED PRODUCTION-GRADE MECHANICAL BLUEPRINT SHEET EXPORT SYSTEM
+  const exportDrawingSheetToPDF = () => {
+    try {
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const visibleLayers = layers.filter(l => l.visible);
+
+      // Collect all drawing points to compute optimal scaling bounds
+      const allPts: Point[] = [];
+      visibleLayers.forEach(l => {
+        if (l.finalPoints) {
+          l.finalPoints.forEach(p => {
+            if (p.circleData) {
+              const cx = p.circleData.center.x;
+              const cy = p.circleData.center.y;
+              const r = p.circleData.radius;
+              for (let i = 0; i < 16; i++) {
+                const angle = (i / 16) * Math.PI * 2;
+                allPts.push({ x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) });
+              }
+            } else {
+              allPts.push(p);
+            }
+          });
+        }
+        if (l.paths) {
+          l.paths.forEach(p => {
+            p.forEach(pt => {
+              if (pt.circleData) {
+                const cx = pt.circleData.center.x;
+                const cy = pt.circleData.center.y;
+                const r = pt.circleData.radius;
+                for (let i = 0; i < 16; i++) {
+                  const angle = (i / 16) * Math.PI * 2;
+                  allPts.push({ x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) });
+                }
+              } else {
+                allPts.push(pt);
+              }
+            });
+          });
+        }
+      });
+
+      let minX = -40, maxX = 40, minY = -40, maxY = 40;
+      if (allPts.length > 0) {
+        minX = Math.min(...allPts.map(p => p.x));
+        maxX = Math.max(...allPts.map(p => p.x));
+        minY = Math.min(...allPts.map(p => p.y));
+        maxY = Math.max(...allPts.map(p => p.y));
+      }
+
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      const wGeom = Math.max(1, maxX - minX);
+      const hGeom = Math.max(1, maxY - minY);
+
+      // 1. PHYSICAL BORDERS OF SHEET PAPER
+      doc.setLineWidth(0.65);
+      doc.setDrawColor(15, 23, 42); // slate-900
+      doc.rect(10, 10, 277, 190); // primary framing
+
+      doc.setLineWidth(0.18);
+      doc.rect(11.5, 11.5, 274, 187); // secondary framing
+
+      // Center divisions crosshair guides
+      doc.setLineWidth(0.08);
+      doc.setDrawColor(210, 215, 225);
+      doc.line(148.5, 11.5, 148.5, 198.5); // vert dividing lines
+      doc.line(11.5, 105, 285.5, 105);   // horiz dividing lines
+
+      // 2. QUADRANT A: FRONT ELEVATION VIEW (XZ PROFILE)
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5);
+      doc.setTextColor(148, 163, 184);
+      doc.text("A: ON GORUNUS (FRONT ELEVATION XZ)", 15, 16);
+
+      const scaleVal = Math.min(80 / wGeom, 55 / hGeom) * sheetScaleMultiplier;
+      const fMapX = (x: number) => 80 + (x - cx) * scaleVal;
+      const fMapZ = (z: number) => 65 - z * scaleVal; // centered top-left
+
+      doc.setLineWidth(0.42);
+      doc.setDrawColor(15, 23, 42);
+      // Main boundary block paths
+      doc.line(fMapX(minX), fMapZ(0), fMapX(maxX), fMapZ(0));
+      doc.line(fMapX(minX), fMapZ(depth), fMapX(maxX), fMapZ(depth));
+      doc.line(fMapX(minX), fMapZ(0), fMapX(minX), fMapZ(depth));
+      doc.line(fMapX(maxX), fMapZ(0), fMapX(maxX), fMapZ(depth));
+
+      // Key elements project columns
+      doc.setLineWidth(0.12);
+      doc.setDrawColor(100, 116, 139);
+      allPts.forEach(pt => {
+        doc.line(fMapX(pt.x), fMapZ(0), fMapX(pt.x), fMapZ(depth));
+      });
+
+      // Height dimension marker line text
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(6);
+      doc.setTextColor(37, 99, 235); // Blue-600
+      doc.setDrawColor(37, 99, 235);
+      doc.setLineWidth(0.25);
+      doc.line(fMapX(maxX) + 6, fMapZ(0), fMapX(maxX) + 6, fMapZ(depth));
+      doc.line(fMapX(maxX) + 4, fMapZ(0), fMapX(maxX) + 8, fMapZ(0));
+      doc.line(fMapX(maxX) + 4, fMapZ(depth), fMapX(maxX) + 8, fMapZ(depth));
+      doc.text(`H=${depth} mm`, fMapX(maxX) + 8, (fMapZ(0) + fMapZ(depth))/2 + 1.5);
+
+      // 3. QUADRANT B: 3D ISOMETRIC PARCELLING WIREFRAME (ISO VIEW)
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5);
+      doc.setTextColor(148, 163, 184);
+      doc.text("B: IZOMETRIK BAKIS (3D ISOMETRIC WIREFRAME)", 153, 16);
+
+      const yaw = -Math.PI / 6;
+      const pitch = Math.PI / 7;
+      const projectToIsoLocal = (x: number, y: number, z: number) => {
+        const xRot = x * Math.cos(yaw) - y * Math.sin(yaw);
+        const yRot = x * Math.sin(yaw) + y * Math.cos(yaw);
+        const xProj = xRot;
+        const yProj = yRot * Math.cos(pitch) - z * Math.sin(pitch);
+        return { x: xProj, y: yProj };
+      };
+
+      const polyIsoPts: { x: number; y: number }[] = [];
+      const isoLinesLocal: Array<{ p1: { x: number; y: number }, p2: { x: number; y: number }, thick: boolean }> = [];
+
+      visibleLayers.forEach(l => {
+        const processIsoArray = (points: Point[], closed: boolean) => {
+          if (points.length === 0) return;
+          const mapFlat: { x: number; y: number }[] = [];
+          points.forEach(p => {
+            if (p.circleData) {
+              const cx = p.circleData.center.x;
+              const cy = p.circleData.center.y;
+              const r = p.circleData.radius;
+              for (let i = 0; i < 24; i++) {
+                const angle = (i / 24) * Math.PI * 2;
+                mapFlat.push({ cx: cx + r * Math.cos(angle), cy: cy + r * Math.sin(angle) } as any);
+              }
+            } else {
+              mapFlat.push({ cx: p.x, cy: p.y } as any);
+            }
+          });
+
+          const bottomP = mapFlat.map(pt => projectToIsoLocal((pt as any).cx, (pt as any).cy, 0));
+          const topP = mapFlat.map(pt => projectToIsoLocal((pt as any).cx, (pt as any).cy, depth));
+
+          polyIsoPts.push(...bottomP, ...topP);
+
+          // Connect circles and lines
+          for (let i = 0; i < bottomP.length; i++) {
+            const nextIdx = (i + 1) % bottomP.length;
+            if (i < bottomP.length - 1 || closed) {
+              isoLinesLocal.push({ p1: bottomP[i], p2: bottomP[nextIdx], thick: false });
+              isoLinesLocal.push({ p1: topP[i], p2: topP[nextIdx], thick: true });
+            }
+          }
+
+          // pillars
+          const interval = points.some(p => p.circleData) ? 6 : 1;
+          for (let i = 0; i < bottomP.length; i += interval) {
+            isoLinesLocal.push({ p1: bottomP[i], p2: topP[i], thick: false });
+          }
+        };
+
+        if (l.finalPoints && l.finalPoints.length > 0) processIsoArray(l.finalPoints, !!l.isClosed);
+        if (l.paths) l.paths.forEach(p => { if (p.length > 0) processIsoArray(p, true); });
+      });
+
+      if (polyIsoPts.length > 0) {
+        const ipMinX = Math.min(...polyIsoPts.map(p => p.x));
+        const ipMaxX = Math.max(...polyIsoPts.map(p => p.x));
+        const ipMinY = Math.min(...polyIsoPts.map(p => p.y));
+        const ipMaxY = Math.max(...polyIsoPts.map(p => p.y));
+
+        const ipCentX = (ipMinX + ipMaxX) / 2;
+        const ipCentY = (ipMinY + ipMaxY) / 2;
+
+        const isoViewScale = Math.min(80 / (ipMaxX - ipMinX || 1), 45 / (ipMaxY - ipMinY || 1)) * sheetScaleMultiplier;
+        const mapIsoPtToPdf = (pt: { x: number; y: number }) => ({
+          x: 215 + (pt.x - ipCentX) * isoViewScale,
+          y: 58 - (pt.y - ipCentY) * isoViewScale
+        });
+
+        // Draw wireframe outlines
+        isoLinesLocal.forEach(line => {
+          const pt1 = mapIsoPtToPdf(line.p1);
+          const pt2 = mapIsoPtToPdf(line.p2);
+          doc.setLineWidth(line.thick ? 0.38 : 0.15);
+          doc.setDrawColor(line.thick ? 15 : 120, line.thick ? 23 : 130, line.thick ? 42 : 145);
+          doc.line(pt1.x, pt1.y, pt2.x, pt2.y);
+        });
+      }
+
+      // 4. QUADRANT C: TOP VIEW WITH DIMENSIONS (CENTERED AT X=80, Y=150)
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5);
+      doc.setTextColor(148, 163, 184);
+      doc.text("C: UST GORUNUS (TOP VIEW XY + OLCULER)", 15, 110);
+
+      const tScale = Math.min(80 / wGeom, 50 / hGeom) * sheetScaleMultiplier;
+      const tMapX = (x: number) => 80 + (x - cx) * tScale;
+      const tMapY = (y: number) => 150 - (y - cy) * tScale;
+
+      // Draw dashed centerline guidelines
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.08);
+      doc.line(40, 150, 120, 150);
+      doc.line(80, 120, 80, 180);
+
+      // Render actual CAD shapes
+      doc.setLineWidth(0.42);
+      visibleLayers.forEach(l => {
+        const colorHex = l.color || "#0f172a";
+        const rColor = parseInt(colorHex.slice(1, 3), 16) || 0;
+        const gColor = parseInt(colorHex.slice(3, 5), 16) || 0;
+        const bColor = parseInt(colorHex.slice(5, 7), 16) || 0;
+        doc.setDrawColor(rColor, gColor, bColor);
+
+        const drawLoopPoints = (pts: Point[], closed: boolean) => {
+          if (pts.length < 2) return;
+          for (let i = 0; i < pts.length; i++) {
+            const current = pts[i];
+            const px1 = tMapX(current.x);
+            const py1 = tMapY(current.y);
+            
+            if (current.circleData) {
+              const ccx = tMapX(current.circleData.center.x);
+              const ccy = tMapY(current.circleData.center.y);
+              const ccr = current.circleData.radius * tScale;
+              doc.circle(ccx, ccy, ccr, "S");
+            }
+
+            if (i < pts.length - 1) {
+              const next = pts[i+1];
+              doc.line(px1, py1, tMapX(next.x), tMapY(next.y));
+            } else if (closed && pts.length > 2) {
+              doc.line(px1, py1, tMapX(pts[0].x), tMapY(pts[0].y));
+            }
+          }
+        };
+
+        if (l.finalPoints && l.finalPoints.length > 0) drawLoopPoints(l.finalPoints, !!l.isClosed);
+        if (l.paths) l.paths.forEach(p => { if (p.length > 0) drawLoopPoints(p, true); });
+
+        // Dimensions overlay in PDF Top View
+        const layerDims = l.dimensions || [];
+        layerDims.forEach(d => {
+          const p1P = { x: tMapX(d.p1.x), y: tMapY(d.p1.y) };
+          const p2P = { x: tMapX(d.p2.x), y: tMapY(d.p2.y) };
+          
+          const dx = d.p2.x - d.p1.x;
+          const dy = d.p2.y - d.p1.y;
+          const length = Math.hypot(dx, dy);
+          const ux = length > 0 ? dx / length : 1;
+          const uy = length > 0 ? dy / length : 0;
+          
+          const nx = -uy;
+          const ny = ux;
+          
+          const dOff = d.offset || 15;
+          const offProjX = nx * dOff * tScale;
+          const offProjY = -ny * dOff * tScale;
+          
+          const dim1X = p1P.x + offProjX;
+          const dim1Y = p1P.y + offProjY;
+          const dim2X = p2P.x + offProjX;
+          const dim2Y = p2P.y + offProjY;
+          
+          const textX = (dim1X + dim2X) / 2;
+          const textY = (dim1Y + dim2Y) / 2;
+
+          // Guidelines dotted
+          doc.setDrawColor(180, 185, 200);
+          doc.setLineWidth(0.1);
+          doc.line(p1P.x, p1P.y, dim1X, dim1Y);
+          doc.line(p2P.x, p2P.y, dim2X, dim2Y);
+
+          // Measure solid indicator pink
+          doc.setDrawColor(219, 39, 119);
+          doc.setLineWidth(0.24);
+          doc.line(dim1X, dim1Y, dim2X, dim2Y);
+
+          // Text card
+          doc.setFillColor(255, 255, 255);
+          doc.rect(textX - 7, textY - 2, 14, 4, "F");
+          doc.setFont("Helvetica", "bold");
+          doc.setFontSize(4.5);
+          doc.setTextColor(219, 39, 119);
+          doc.text(`${d.value.toFixed(1)}mm`, textX, textY + 1.1, { align: 'center' });
+        });
+      });
+
+      // 5. QUADRANT D: RIGHT SIDE ELEVATION VIEW (YZ PROFILE CENTERED AT X=215, Y=150)
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5);
+      doc.setTextColor(148, 163, 184);
+      doc.text("D: SAG YAN GORUNUS (SIDE ELEVATION YZ)", 153, 110);
+
+      const sScale = Math.min(80 / hGeom, 55 / Math.max(10, depth)) * sheetScaleMultiplier;
+      const sMapY = (yVal: number) => 215 + (yVal - cy) * sScale;
+      const sMapZ = (zVal: number) => 155 - zVal * sScale;
+
+      doc.setLineWidth(0.42);
+      doc.setDrawColor(15, 23, 42);
+      // boundary box outline
+      doc.line(sMapY(minY), sMapZ(0), sMapY(maxY), sMapZ(0));
+      doc.line(sMapY(minY), sMapZ(depth), sMapY(maxY), sMapZ(depth));
+      doc.line(sMapY(minY), sMapZ(0), sMapY(minY), sMapZ(depth));
+      doc.line(sMapY(maxY), sMapZ(0), sMapY(maxY), sMapZ(depth));
+
+      // Side minor projection trails
+      doc.setLineWidth(0.12);
+      doc.setDrawColor(100, 116, 139);
+      allPts.forEach(pt => {
+        doc.line(sMapY(pt.y), sMapZ(0), sMapY(pt.y), sMapZ(depth));
+      });
+
+      // Width measure indicators
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(6);
+      doc.setTextColor(37, 99, 235);
+      doc.setDrawColor(37, 99, 235);
+      doc.setLineWidth(0.25);
+      doc.line(sMapY(minY), sMapZ(0) + 6, sMapY(maxY), sMapZ(0) + 6);
+      doc.line(sMapY(minY), sMapZ(0) + 4, sMapY(minY), sMapZ(0) + 8);
+      doc.line(sMapY(maxY), sMapZ(0) + 4, sMapY(maxY), sMapZ(0) + 8);
+      doc.text(`W=${hGeom.toFixed(1)} mm`, (sMapY(minY) + sMapY(maxY))/2, sMapZ(0) + 12, { align: 'center' });
+
+
+      // 6. GENERAL TECHNICAL PRODUCTION GUIDELINE NOTES (BOTTOM LEFT HALF)
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(5.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text("GENEL TEKNIK NOTLAR (ENGINEERING TECHNICAL NOTES):", 15, 172);
+
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(4.8);
+      doc.setTextColor(51, 65, 85);
+      const noteLines = doc.splitTextToSize(sheetNotes, 115);
+      doc.text(noteLines, 15, 177);
+
+
+      // 7. CAD LEGEND ANTER CARD BOX (SIZE 138mm x 32mm)
+      const tbX = 145;
+      const tbY = 164;
+      const tbW = 138;
+      const tbH = 32;
+
+      doc.setLineWidth(0.4);
+      doc.setDrawColor(15, 23, 42);
+      doc.setFillColor(250, 252, 254);
+      doc.rect(tbX, tbY, tbW, tbH, "FD");
+
+      // Division grids
+      doc.setLineWidth(0.18);
+      doc.line(tbX, tbY + 10, tbX + tbW, tbY + 10);
+      doc.line(tbX, tbY + 21, tbX + tbW, tbY + 21);
+      doc.line(tbX + 70, tbY, tbX + 70, tbY + 21);
+      doc.line(tbX + 105, tbY + 21, tbX + 105, tbY + 32);
+
+      // Row 1 Text
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(4.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("PROJE / PARCA ADI (TITLE)", tbX + 3, tbY + 3.2);
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(15, 23, 42);
+      doc.text(sheetTitle, tbX + 3, tbY + 8);
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(4.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("URETICI / SIRKET", tbX + 73, tbY + 3.2);
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(15, 23, 42);
+      doc.text("CADERIM BİLİŞİM", tbX + 73, tbY + 8);
+
+      // Row 2 Text
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(4.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("TASARIMCI / E-POSTA", tbX + 3, tbY + 13.5);
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(6.2);
+      doc.text("peopleonthearth@gmail.com", tbX + 3, tbY + 18);
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(4.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("MALZEME (MATERIAL)", tbX + 73, tbY + 13.5);
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(7.2);
+      doc.text(sheetMaterial.toUpperCase(), tbX + 73, tbY + 18);
+
+      // Row 3 Text
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(4.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("TANZIM TARIHI", tbX + 3, tbY + 24.5);
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(6.2);
+      doc.text(new Date().toISOString().split('T')[0], tbX + 3, tbY + 28.5);
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(4.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("REV", tbX + 73, tbY + 24.5);
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(6.5);
+      doc.setTextColor(180, 50, 50);
+      doc.text(sheetRevision, tbX + 73, tbY + 28.5);
+
+      // Projected Mass Calculation
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(4.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text("HESAPLANAN KUTLE (MASS)", tbX + 108, tbY + 24.5);
+
+      const massValue = (() => {
+        let area = 0;
+        visibleLayers.forEach(l => {
+          const shapes = [];
+          if (l.finalPoints && l.finalPoints.length > 0) shapes.push({ points: l.finalPoints, isClosed: l.isClosed });
+          if (l.paths) l.paths.forEach(p => { if (p.length > 0) shapes.push({ points: p, isClosed: true }); });
+          
+          shapes.forEach(sh => {
+            if (sh.isClosed && sh.points.length >= 3) {
+              let shArea = 0;
+              const poly = sh.points;
+              for (let i = 0; i < poly.length - 1; i++) {
+                shArea += poly[i].x * poly[i+1].y - poly[i+1].x * poly[i].y;
+              }
+              shArea += poly[poly.length - 1].x * poly[0].y - poly[0].x * poly[poly.length - 1].y;
+              area += Math.abs(shArea / 2);
+            }
+          });
+        });
+        const volumeCm3 = (area * depth) / 1000;
+        const list = {
+          "Steel": 7.85, "Aluminum": 2.70, "Brass": 8.40, "Copper": 8.96, "Acrylic": 1.18, "PLA (3D Print)": 1.24, "Oak Wood": 0.75
+        };
+        const density = (list as any)[sheetMaterial] || 7.85;
+        const massGVal = volumeCm3 * density;
+        return massGVal > 1000 ? `${(massGVal / 1000).toFixed(3)} kg` : `${massGVal.toFixed(1)} g`;
+      })();
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(21, 128, 61); // emerald-700
+      doc.text(massValue, tbX + 108, tbY + 28.5);
+
+      doc.save(`CADERIM_Teknik_Tablo_Sheet_${sheetTitle.replace(/\s+/g, '_')}.pdf`);
+      logCommandResponse("✨ Başarılı: Teknik Üretim Resmi Sheet planı DIN A4 standardında başarıyla PDF olarak dışa aktarıldı.");
+    } catch (err: any) {
+      logCommandResponse(`Hata: Teknik Resim Hazırlanamadı. Nedeni: ${err.message || err}`);
+    }
+  };
+
   // Save entire sketch session as JSON
   const saveSketchJSON = () => {
     try {
@@ -6944,6 +7412,57 @@ export default function App() {
               className="hidden"
             />
           </label>
+        </div>
+
+        {/* Workspace Layout Selector - Unified CAD Workspace */}
+        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 select-none">
+          <button
+            onClick={() => setWorkspaceLayout('split')}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
+              workspaceLayout === 'split'
+                ? 'bg-white text-orange-600 shadow-sm border border-slate-200'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/40'
+            }`}
+            title="Split Mode (2D Sketch Left, 3D View Right)"
+          >
+            📊 Split View
+          </button>
+          <button
+            onClick={() => setWorkspaceLayout('2d-only')}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
+              workspaceLayout === '2d-only'
+                ? 'bg-white text-orange-600 shadow-sm border border-slate-200'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/40'
+            }`}
+            title="Show only 2D Sketch Editor"
+          >
+            📐 2D Sketch Only
+          </button>
+          <button
+            onClick={() => setWorkspaceLayout('3d-only')}
+            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
+              workspaceLayout === '3d-only'
+                ? 'bg-white text-orange-600 shadow-sm border border-slate-200'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/40'
+            }`}
+            title="Show only 3D solid inspector"
+          >
+            📦 3D Model Only
+          </button>
+          <button
+            onClick={() => {
+              setWorkspaceLayout('drawing-sheet');
+              logCommandResponse("Technical Drawing Sheet Mode activated! Modify parameters in Side Panel or export to high-res blueprint PDF.");
+            }}
+            className={`px-3 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
+              workspaceLayout === 'drawing-sheet'
+                ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-sm font-black border border-orange-655'
+                : 'text-orange-650 font-extrabold hover:text-slate-900 hover:bg-slate-200/40'
+            }`}
+            title="Open standard engineering production/manufacturing drawing paper simulation sheet"
+          >
+            📄 2D Teknik Resim Anteti Sheet
+          </button>
         </div>
 
 
@@ -8902,11 +9421,740 @@ export default function App() {
         {/* 3. Splitted Dual Viewports */}
         <main className="flex-1 flex flex-col md:flex-row overflow-hidden bg-zinc-950">
           
-          {/* Viewport A: 2D Sketch canvas */}
-          <div 
-            style={{ flex: `0 0 ${splitRatio}%` }}
-            className="h-1/2 md:h-full relative border-r border-zinc-800 flex flex-col bg-zinc-950 transition-all duration-75 overflow-hidden"
-          >
+          {workspaceLayout === 'drawing-sheet' ? (
+            <div className="flex-1 flex flex-col lg:flex-row bg-[#111827] text-slate-100 overflow-y-auto select-text min-h-0 w-full">
+              
+              {/* SHEET EDITING CONTROL SIDE PANEL */}
+              <div className="w-full lg:w-[325px] bg-[#1f2937] border-b lg:border-b-0 lg:border-r border-slate-700 p-5 flex flex-col gap-4 font-sans shrink-0 overflow-y-auto">
+                <div className="flex items-center gap-1.5 border-b border-slate-700 pb-3">
+                  <span className="p-1 px-1.5 rounded bg-orange-600 text-white font-black text-[10px] tracking-widest leading-none">CAD</span>
+                  <span className="text-xs font-black tracking-widest text-slate-200 uppercase">SHEET SETTINGS (ANTET)</span>
+                </div>
+
+                {/* Form fields */}
+                <div className="space-y-4 text-xs">
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-slate-400 font-bold mb-1">PARÇA ADI (DRAWING TITLE):</label>
+                    <input
+                      type="text"
+                      value={sheetTitle}
+                      onChange={(e) => setSheetTitle(e.target.value.toUpperCase())}
+                      className="w-full bg-[#111827] border border-slate-600 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-orange-500 font-bold uppercase"
+                      placeholder="MEKANIK PARCA ADI"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-slate-400 font-bold mb-1">MALZEME GENEL SEÇİMİ (MATERIAL):</label>
+                    <select
+                      value={sheetMaterial}
+                      onChange={(e) => setSheetMaterial(e.target.value)}
+                      className="w-full bg-[#111827] border border-slate-600 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-orange-500 cursor-pointer font-bold"
+                    >
+                      <option value="Steel">Çelik (Steel - 7.85 g/cm³)</option>
+                      <option value="Aluminum">Alüminyum (Aluminum - 2.70 g/cm³)</option>
+                      <option value="Brass">Pirinç (Brass - 8.40 g/cm³)</option>
+                      <option value="Copper">Bakır (Copper - 8.96 g/cm³)</option>
+                      <option value="Acrylic">Akrilik (Acrylic - 1.18 g/cm³)</option>
+                      <option value="PLA (3D Print)">PLA (3D Baskı Plastiği - 1.24 g/cm³)</option>
+                      <option value="Oak Wood">Meşe Ahşap (Oak Wood - 0.75 g/cm³)</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 font-bold mb-1">REVİZYON (REV):</label>
+                      <input
+                        type="text"
+                        value={sheetRevision}
+                        onChange={(e) => setSheetRevision(e.target.value.toUpperCase())}
+                        className="w-full bg-[#111827] border border-slate-600 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-orange-500 text-center font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 font-bold mb-1">MODEL REVOLVE/EXP (DEPTH):</label>
+                      <div className="flex h-[30px] items-center justify-center bg-[#111827] border border-slate-600 rounded px-2 text-xs text-orange-400 font-mono font-bold leading-none">
+                        {depth} mm
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mb-1">
+                      <span>KAĞIT SÖRF/ÖLÇEK ÇARPANIL:</span>
+                      <span className="text-orange-400 font-bold">{sheetScaleMultiplier.toFixed(1)}x</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.3"
+                      max="2.5"
+                      step="0.1"
+                      value={sheetScaleMultiplier}
+                      onChange={(e) => setSheetScaleMultiplier(parseFloat(e.target.value) || 1.0)}
+                      className="w-full accent-orange-500 bg-[#111827] rounded-lg appearance-none h-1.5 cursor-pointer mt-1"
+                    />
+                    <div className="flex justify-between text-[9px] text-slate-500 font-mono">
+                      <span>0.3x</span>
+                      <span>1.0x (Sığdır)</span>
+                      <span>2.5x</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-slate-400 font-bold mb-1">TEKNİK YAPIM ELEMAN NOTLARI:</label>
+                    <textarea
+                      rows={4}
+                      value={sheetNotes}
+                      onChange={(e) => setSheetNotes(e.target.value)}
+                      className="w-full bg-[#111827] border border-slate-600 rounded p-2 text-[10px] text-slate-300 focus:outline-none focus:border-orange-500 font-mono leading-relaxed resize-none"
+                    />
+                  </div>
+
+                  {/* Mass / Weight HUD */}
+                  <div className="p-3 bg-[#111827] border border-slate-700/60 rounded-lg space-y-1.5 text-slate-300 font-sans shadow-inner">
+                    <span className="text-[10px] font-mono uppercase text-slate-400 font-bold tracking-wider block">HESAPLANAN MALZEME RAPORU:</span>
+                    <div className="flex justify-between text-xs font-mono">
+                      <span>2D Profil Alanı:</span>
+                      <span className="text-slate-200 font-bold">
+                        {(() => {
+                          const list: Array<{ points: Point[]; isClosed: boolean }> = [];
+                          layers.forEach(l => {
+                            if (!l.visible) return;
+                            if (l.finalPoints && l.finalPoints.length > 0) {
+                              list.push({ points: l.finalPoints, isClosed: l.isClosed });
+                            }
+                            if (l.paths) {
+                              l.paths.forEach(p => { if (p.length > 0) list.push({ points: p, isClosed: true }); });
+                            }
+                          });
+                          let area = 0;
+                          list.forEach(sh => {
+                            if (sh.isClosed && sh.points.length >= 3) {
+                              let shArea = 0;
+                              const poly = sh.points;
+                              for (let i = 0; i < poly.length - 1; i++) {
+                                shArea += poly[i].x * poly[i + 1].y - poly[i + 1].x * poly[i].y;
+                              }
+                              shArea += poly[poly.length - 1].x * poly[0].y - poly[0].x * poly[poly.length - 1].y;
+                              area += Math.abs(shArea / 2);
+                            }
+                          });
+                          return `${area.toFixed(1)} mm²`;
+                        })()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs font-mono">
+                      <span>3D Model Hacmi:</span>
+                      <span className="text-slate-200">
+                        {(() => {
+                          const list: Array<{ points: Point[]; isClosed: boolean }> = [];
+                          layers.forEach(l => {
+                            if (!l.visible) return;
+                            if (l.finalPoints && l.finalPoints.length > 0) list.push({ points: l.finalPoints, isClosed: l.isClosed });
+                            if (l.paths) l.paths.forEach(p => { if (p.length > 0) list.push({ points: p, isClosed: true }); });
+                          });
+                          let area = 0;
+                          list.forEach(sh => {
+                            if (sh.isClosed && sh.points.length >= 3) {
+                              let shArea = 0;
+                              const poly = sh.points;
+                              for (let i = 0; i < poly.length - 1; i++) {
+                                shArea += poly[i].x * poly[i + 1].y - poly[i + 1].x * poly[i].y;
+                              }
+                              shArea += poly[poly.length - 1].x * poly[0].y - poly[0].x * poly[poly.length - 1].y;
+                              area += Math.abs(shArea / 2);
+                            }
+                          });
+                          const volumeCm3 = (area * depth) / 1000;
+                          return `${volumeCm3.toFixed(2)} cm³`;
+                        })()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs font-mono pt-1.5 border-t border-slate-700/50">
+                      <span className="font-bold">Toplam Net Kütle:</span>
+                      <span className="text-orange-400 font-extrabold text-[12px]">
+                        {(() => {
+                          const list: Array<{ points: Point[]; isClosed: boolean }> = [];
+                          layers.forEach(l => {
+                            if (!l.visible) return;
+                            if (l.finalPoints && l.finalPoints.length > 0) list.push({ points: l.finalPoints, isClosed: l.isClosed });
+                            if (l.paths) l.paths.forEach(p => { if (p.length > 0) list.push({ points: p, isClosed: true }); });
+                          });
+                          let area = 0;
+                          list.forEach(sh => {
+                            if (sh.isClosed && sh.points.length >= 3) {
+                              let shArea = 0;
+                              const poly = sh.points;
+                              for (let i = 0; i < poly.length - 1; i++) {
+                                shArea += poly[i].x * poly[i + 1].y - poly[i + 1].x * poly[i].y;
+                              }
+                              shArea += poly[poly.length - 1].x * poly[0].y - poly[0].x * poly[poly.length - 1].y;
+                              area += Math.abs(shArea / 2);
+                            }
+                          });
+                          const volumeCm3 = (area * depth) / 1000;
+                          const densityList = {
+                            "Steel": 7.85, "Aluminum": 2.70, "Brass": 8.40, "Copper": 8.96, "Acrylic": 1.18, "PLA (3D Print)": 1.24, "Oak Wood": 0.75
+                          };
+                          const density = (densityList as any)[sheetMaterial] || 7.85;
+                          const massGrams = volumeCm3 * density;
+                          return massGrams > 1000 ? `${(massGrams / 1000).toFixed(3)} kg` : `${massGrams.toFixed(1)} g`;
+                        })()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Print and Download Blueprint Button */}
+                  <button
+                    onClick={exportDrawingSheetToPDF}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded text-xs font-black uppercase tracking-wider bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white transition cursor-pointer border border-orange-600 shadow-md"
+                    title="Export blueprint sheets to high resolution A4 PDF Document"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Yazdır / PDF İndir</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* SHEET PREVIEW DRAFT BOARD CANVAS */}
+              <div id="blueprint-board" className="flex-1 bg-slate-900 overflow-y-auto p-4 md:p-8 flex items-center justify-center min-h-0 select-none">
+                {/* Simulated A4 Horizontal sheet */}
+                <div 
+                  id="a4-sheet-paper"
+                  className="bg-white text-slate-900 border border-slate-950 aspect-[297/210] w-full max-w-[900px] shadow-2xl relative p-3 flex flex-col justify-between font-mono"
+                  style={{ boxSizing: 'border-box' }}
+                >
+                  
+                  {/* TECHNICAL CAD BORDER */}
+                  <div className="absolute inset-2.5 border-2 border-slate-950 pointer-events-none" />
+                  <div className="absolute inset-4 border border-slate-950/80 pointer-events-none" />
+
+                  {/* Centermarks around edge */}
+                  <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-0.5 h-4 bg-slate-950" />
+                  <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 w-0.5 h-4 bg-slate-950" />
+                  <div className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-0.5 bg-slate-950" />
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-0.5 bg-slate-950" />
+
+                  {/* SHEET CONTENT GRID LAYOUT CONTAINING 4 QUADRANTS */}
+                  <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-4 p-4 pb-14 mt-2">
+                    
+                    {/* QUADRANT A (Top Left): FRONT VIEW */}
+                    <div className="border border-slate-100 flex flex-col justify-between relative bg-slate-50/10">
+                      <div className="absolute top-1 left-2 text-[7px] font-bold text-slate-400 tracking-wider">A: ÖN GÖRÜNÜŞ (FRONT ELEVATION XZ)</div>
+                      
+                      <div className="flex-1 flex items-center justify-center min-h-0">
+                        {(() => {
+                          const list: Array<{ points: Point[]; isClosed: boolean }> = [];
+                          layers.forEach(l => {
+                            if (!l.visible) return;
+                            if (l.finalPoints && l.finalPoints.length > 0) list.push({ points: l.finalPoints, isClosed: l.isClosed });
+                            if (l.paths) l.paths.forEach(p => { if (p.length > 0) list.push({ points: p, isClosed: true }); });
+                          });
+
+                          let min_x = Infinity, max_x = -Infinity;
+                          list.forEach(sh => {
+                            sh.points.forEach(p => {
+                              if (p.x < min_x) min_x = p.x;
+                              if (p.x > max_x) max_x = p.x;
+                            });
+                          });
+                          if (min_x === Infinity) { min_x = -50; max_x = 50; }
+                          
+                          const w_cad = Math.max(1, max_x - min_x);
+                          const c_x = (min_x + max_x) / 2;
+                          const scaleVal = 175 / Math.max(35, w_cad, depth) * sheetScaleMultiplier;
+                          
+                          const mapX = (x: number) => 150 + (x - c_x) * scaleVal;
+                          const mapZ = (zValue: number) => 135 - zValue * scaleVal;
+                          
+                          return (
+                            <svg viewBox="0 0 300 200" className="w-full h-full max-h-[150px]">
+                              <line x1="150" y1="15" x2="150" y2="185" stroke="#cbd5e1" strokeWidth="0.5" strokeDasharray="8,2,2,2" />
+                              <line x1="15" y1="135" x2="285" y2="135" stroke="#cbd5e1" strokeWidth="0.5" strokeDasharray="8,2,2,2" />
+
+                              {/* Base & Top bounds of extrusion plate */}
+                              <line x1={mapX(min_x) - 10} x2={mapX(max_x) + 10} y1="135" y2="135" stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="3,3" />
+                              <line x1={mapX(min_x)} x2={mapX(max_x)} y1={mapZ(0)} y2={mapZ(0)} stroke="#1e293b" strokeWidth="1.15" />
+                              <line x1={mapX(min_x)} x2={mapX(max_x)} y1={mapZ(depth)} y2={mapZ(depth)} stroke="#1e293b" strokeWidth="1.15" />
+                              
+                              <line x1={mapX(min_x)} y1={mapZ(0)} x2={mapX(min_x)} y2={mapZ(depth)} stroke="#1e293b" strokeWidth="1.15" />
+                              <line x1={mapX(max_x)} y1={mapZ(0)} x2={mapX(max_x)} y2={mapZ(depth)} stroke="#1e293b" strokeWidth="1.15" />
+
+                              {/* Minor inner vertex pillars projection trails */}
+                              {list[0] && list[0].points.map((pt, i) => (
+                                <line 
+                                  key={i} 
+                                  x1={mapX(pt.x)} 
+                                  y1={mapZ(0)} 
+                                  x2={mapX(pt.x)} 
+                                  y2={mapZ(depth)} 
+                                  stroke="#64748b" 
+                                  strokeWidth="0.5" 
+                                  strokeDasharray="1.5,2" 
+                                />
+                              ))}
+
+                              {/* Height thickness measures on right */}
+                              <g className="text-[7.5px] font-mono fill-blue-600 stroke-blue-600">
+                                <line x1={mapX(max_x) + 10} y1={mapZ(0)} x2={mapX(max_x) + 10} y2={mapZ(depth)} stroke="#2563eb" strokeWidth="0.75" />
+                                <line x1={mapX(max_x) + 6} y1={mapZ(0)} x2={mapX(max_x) + 14} y2={mapZ(0)} stroke="#2563eb" strokeWidth="0.4" />
+                                <line x1={mapX(max_x) + 6} y1={mapZ(depth)} x2={mapX(max_x) + 14} y2={mapZ(depth)} stroke="#2563eb" strokeWidth="0.4" />
+                                <text x={mapX(max_x) + 14} y={(mapZ(0) + mapZ(depth))/2 + 2.5} stroke="none" className="font-bold fill-blue-600">
+                                  H={depth} mm
+                                </text>
+                              </g>
+                            </svg>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* QUADRANT B (Top Right): 3D ISOMETRIC VIEW */}
+                    <div className="border border-slate-100 flex flex-col justify-between relative bg-slate-50/10">
+                      <div className="absolute top-1 left-2 text-[7px] font-bold text-slate-400 tracking-wider">B: İZOMETRİK BAKIŞ (3D ISOMETRIC WIREFRAME)</div>
+                      
+                      <div className="flex-1 flex items-center justify-center min-h-0">
+                        {(() => {
+                          const list: Array<{ points: Point[]; isClosed: boolean }> = [];
+                          layers.forEach(l => {
+                            if (!l.visible) return;
+                            if (l.finalPoints && l.finalPoints.length > 0) list.push({ points: l.finalPoints, isClosed: l.isClosed });
+                            if (l.paths) l.paths.forEach(p => { if (p.length > 0) list.push({ points: p, isClosed: true }); });
+                          });
+
+                          if (list.length === 0) {
+                            return <div className="text-[10px] text-slate-400">Çizim boş, izometrik şema çizilemiyor.</div>;
+                          }
+                          
+                          let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
+                          list.forEach(sh => {
+                            sh.points.forEach(p => {
+                              if (p.x < bMinX) bMinX = p.x;
+                              if (p.x > bMaxX) bMaxX = p.x;
+                              if (p.y < bMinY) bMinY = p.y;
+                              if (p.y > bMaxY) bMaxY = p.y;
+                            });
+                          });
+                          const cx = bMinX === Infinity ? 0 : (bMinX + bMaxX) / 2;
+                          const cy = bMinY === Infinity ? 0 : (bMinY + bMaxY) / 2;
+
+                          // Project boundaries to center
+                          let boundsMinX = Infinity, boundsMaxX = -Infinity, boundsMinY = Infinity, boundsMaxY = -Infinity;
+                          
+                          list.forEach(sh => {
+                            sh.points.forEach(p => {
+                              const x_offset = p.x - cx;
+                              const y_offset = p.y - cy;
+                              
+                              const ix0 = (x_offset - 0) * 0.866025;
+                              const iy0 = (x_offset + 0) * 0.5 - y_offset;
+                              
+                              const ix1 = (x_offset - depth) * 0.866025;
+                              const iy1 = (x_offset + depth) * 0.5 - y_offset;
+
+                              boundsMinX = Math.min(boundsMinX, ix0, ix1);
+                              boundsMaxX = Math.max(boundsMaxX, ix0, ix1);
+                              boundsMinY = Math.min(boundsMinY, iy0, iy1);
+                              boundsMaxY = Math.max(boundsMaxY, iy0, iy1);
+                            });
+                          });
+
+                          const w_proj = Math.max(1, boundsMaxX - boundsMinX);
+                          const h_proj = Math.max(1, boundsMaxY - boundsMinY);
+                          
+                          const mid_proj_x = (boundsMinX + boundsMaxX) / 2;
+                          const mid_proj_y = (boundsMinY + boundsMaxY) / 2;
+                          
+                          const isoScale = 145 / Math.max(30, w_proj, h_proj) * sheetScaleMultiplier;
+                          
+                          const projectPt = (p: Point, zVal: number) => {
+                            const x_val = p.x - cx;
+                            const y_val = p.y - cy;
+                            const prX = (x_val - zVal) * 0.866025;
+                            const prY = (x_val + zVal) * 0.5 - y_val;
+                            return {
+                              x: 154 + (prX - mid_proj_x) * isoScale,
+                              y: 96 + (prY - mid_proj_y) * isoScale
+                            };
+                          };
+
+                          return (
+                            <svg viewBox="0 0 300 200" className="w-full h-full max-h-[150px] text-slate-900">
+                              
+                              {/* Draw small Axis indicator */}
+                              <g transform="translate(25, 160)" className="text-[6.5px] font-mono select-none">
+                                <line x1="0" y1="0" x2="15" y2="8" stroke="#ef4444" strokeWidth="0.8" />
+                                <text x="18" y="11" className="fill-red-500 font-bold" stroke="none">X</text>
+                                
+                                <line x1="0" y1="0" x2="-15" y2="8" stroke="#3b82f6" strokeWidth="0.8" />
+                                <text x="-24" y="11" className="fill-blue-500 font-bold" stroke="none">Z</text>
+                                
+                                <line x1="0" y1="0" x2="0" y2="-15" stroke="#10b981" strokeWidth="0.8" />
+                                <text x="-3" y="-18" className="fill-emerald-500 font-bold" stroke="none">Y</text>
+                              </g>
+
+                              {list.map((sh, sIdx) => {
+                                const pts = sh.points;
+                                const bottomPts = pts.map(p => projectPt(p, 0));
+                                const topPts = pts.map(p => projectPt(p, depth));
+
+                                const buildPathD = (mappedPts: Array<{x: number, y: number}>) => {
+                                  if (mappedPts.length < 2) return "";
+                                  let d = `M ${mappedPts[0].x} ${mappedPts[0].y}`;
+                                  for (let i = 1; i < mappedPts.length; i++) {
+                                    d += ` L ${mappedPts[i].x} ${mappedPts[i].y}`;
+                                  }
+                                  if (sh.isClosed && mappedPts.length >= 3) d += " Z";
+                                  return d;
+                                };
+
+                                return (
+                                  <g key={sIdx}>
+                                    {/* Bottom frame cap lines - dashed */}
+                                    <path 
+                                      d={buildPathD(bottomPts)} 
+                                      fill="none" 
+                                      stroke="#94a3b8" 
+                                      strokeWidth="0.75" 
+                                      strokeDasharray="2.5,2" 
+                                    />
+                                    
+                                    {/* Top frame solid accent line */}
+                                    <path 
+                                      d={buildPathD(topPts)} 
+                                      fill="none" 
+                                      stroke="#0f172a" 
+                                      strokeWidth="1.2" 
+                                    />
+
+                                    {/* Columns edge lines */}
+                                    {pts.map((p, i) => {
+                                      if (p.isCurvePoint && i % 3 !== 0) return null;
+                                      const bot = bottomPts[i];
+                                      const top = topPts[i];
+                                      return (
+                                        <line 
+                                          key={i} 
+                                          x1={bot.x} 
+                                          y1={bot.y} 
+                                          x2={top.x} 
+                                          y2={top.y} 
+                                          stroke="#475569" 
+                                          strokeWidth="0.8" 
+                                        />
+                                      );
+                                    })}
+                                  </g>
+                                );
+                              })}
+                            </svg>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* QUADRANT C (Bottom Left): TOP VIEW WITH MEASURES */}
+                    <div className="border border-slate-100 flex flex-col justify-between relative bg-slate-50/10">
+                      <div className="absolute top-1 left-2 text-[7px] font-bold text-slate-400 tracking-wider">C: ÜST GÖRÜNÜŞ (TOP VIEW XY + ÖLÇÜLER)</div>
+                      
+                      <div className="flex-1 flex items-center justify-center min-h-0">
+                        {(() => {
+                          const list: Array<{ points: Point[]; isClosed: boolean; color: string }> = [];
+                          layers.forEach(l => {
+                            if (!l.visible) return;
+                            if (l.finalPoints && l.finalPoints.length > 0) {
+                              list.push({ points: l.finalPoints, isClosed: l.isClosed, color: l.color || '#1e293b' });
+                            }
+                            if (l.paths) {
+                              l.paths.forEach(p => { if (p.length > 0) list.push({ points: p, isClosed: true, color: l.color || '#1e293b' }); });
+                            }
+                          });
+
+                          if (list.length === 0) {
+                            return <div className="text-[10px] text-slate-400">Top View for empty sketch.</div>;
+                          }
+
+                          let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
+                          list.forEach(sh => {
+                            sh.points.forEach(p => {
+                              if (p.x < bMinX) bMinX = p.x;
+                              if (p.x > bMaxX) bMaxX = p.x;
+                              if (p.y < bMinY) bMinY = p.y;
+                              if (p.y > bMaxY) bMaxY = p.y;
+                            });
+                          });
+                          const cx = bMinX === Infinity ? 0 : (bMinX + bMaxX) / 2;
+                          const cy = bMinY === Infinity ? 0 : (bMinY + bMaxY) / 2;
+                          const widthCAD = bMinX === Infinity ? 100 : Math.max(1, bMaxX - bMinX);
+                          const heightCAD = bMinY === Infinity ? 100 : Math.max(1, bMaxY - bMinY);
+
+                          const scaleVal = 175 / Math.max(35, widthCAD, heightCAD) * sheetScaleMultiplier;
+                          
+                          const mapX = (x: number) => 150 + (x - cx) * scaleVal;
+                          const mapY = (y: number) => 100 - (y - cy) * scaleVal;
+
+                          return (
+                            <svg viewBox="0 0 300 200" className="w-full h-full max-h-[150px]">
+                              {/* fine guidelines center grids */}
+                              <line x1="150" y1="10" x2="150" y2="190" stroke="#cbd5e1" strokeWidth="0.5" strokeDasharray="5,3" />
+                              <line x1="10" y1="100" x2="290" y2="100" stroke="#cbd5e1" strokeWidth="0.5" strokeDasharray="5,3" />
+
+                              {/* Vector paths loop */}
+                              {list.map((sh, sIdx) => {
+                                let dStr = "";
+                                sh.points.forEach((p, pIdx) => {
+                                  const sx = mapX(p.x);
+                                  const sy = mapY(p.y);
+                                  dStr += `${pIdx === 0 ? "M" : "L"} ${sx} ${sy} `;
+                                });
+                                if (sh.isClosed && sh.points.length >= 3) dStr += " Z";
+
+                                return (
+                                  <path 
+                                    key={sIdx} 
+                                    d={dStr} 
+                                    fill="none" 
+                                    stroke={sh.color || "#1e293b"} 
+                                    strokeWidth="1.25" 
+                                  />
+                                );
+                              })}
+
+                              {/* Live measurement tags representation */}
+                              {dimensions.map((d, index) => {
+                                const p1Proj = { x: mapX(d.p1.x), y: mapY(d.p1.y) };
+                                const p2Proj = { x: mapX(d.p2.x), y: mapY(d.p2.y) };
+                                
+                                const dx = d.p2.x - d.p1.x;
+                                const dy = d.p2.y - d.p1.y;
+                                const length = Math.hypot(dx, dy);
+                                const ux = length > 0 ? dx / length : 1;
+                                const uy = length > 0 ? dy / length : 0;
+                                
+                                const nx = -uy;
+                                const ny = ux;
+                                
+                                const cadOffset = d.offset || 15;
+                                const offsetProjX = nx * cadOffset * scaleVal;
+                                const offsetProjY = -ny * cadOffset * scaleVal;
+                                
+                                const dim1X = p1Proj.x + offsetProjX;
+                                const dim1Y = p1Proj.y + offsetProjY;
+                                const dim2X = p2Proj.x + offsetProjX;
+                                const dim2Y = p2Proj.y + offsetProjY;
+                                
+                                const textX = (dim1X + dim2X) / 2;
+                                const textY = (dim1Y + dim2Y) / 2;
+                                
+                                return (
+                                  <g key={d.id || index} className="text-[6.2px] font-mono fill-pink-650 stroke-pink-650">
+                                    <line x1={p1Proj.x} y1={p1Proj.y} x2={dim1X} y2={dim1Y} stroke="#94a3b8" strokeWidth="0.4" strokeDasharray="1.5,1.5" />
+                                    <line x1={p2Proj.x} y1={p2Proj.y} x2={dim2X} y2={dim2Y} stroke="#94a3b8" strokeWidth="0.4" strokeDasharray="1.5,1.5" />
+                                    
+                                    <line x1={dim1X} y1={dim1Y} x2={dim2X} y2={dim2Y} stroke="#db2777" strokeWidth="0.7" />
+                                    <circle cx={dim1X} cy={dim1Y} r="1.2" fill="#db2777" />
+                                    <circle cx={dim2X} cy={dim2Y} r="1.2" fill="#db2777" />
+                                    
+                                    <rect x={textX - 13} y={textY - 4} width="26" height="8" fill="#ffffff" stroke="none" />
+                                    <text x={textX} y={textY + 2} textAnchor="middle" stroke="none" className="font-extrabold fill-pink-650">
+                                      {d.value.toFixed(1)} mm
+                                    </text>
+                                  </g>
+                                );
+                              })}
+                            </svg>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* QUADRANT D (Bottom Right): RIGHT SIDE PROFILE */}
+                    <div className="border border-slate-100 flex flex-col justify-between relative bg-slate-50/10">
+                      <div className="absolute top-1 left-2 text-[7px] font-bold text-slate-400 tracking-wider">D: SAĞ YAN GÖRÜNÜŞ (SIDE ELEVATION YZ)</div>
+                      
+                      <div className="flex-1 flex items-center justify-center min-h-0">
+                        {(() => {
+                          const list: Array<{ points: Point[]; isClosed: boolean }> = [];
+                          layers.forEach(l => {
+                            if (!l.visible) return;
+                            if (l.finalPoints && l.finalPoints.length > 0) list.push({ points: l.finalPoints, isClosed: l.isClosed });
+                            if (l.paths) l.paths.forEach(p => { if (p.length > 0) list.push({ points: p, isClosed: true }); });
+                          });
+
+                          let min_y = Infinity, max_y = -Infinity;
+                          list.forEach(sh => {
+                            sh.points.forEach(p => {
+                              if (p.y < min_y) min_y = p.y;
+                              if (p.y > max_y) max_y = p.y;
+                            });
+                          });
+                          if (min_y === Infinity) { min_y = -50; max_y = 50; }
+                          
+                          const h_cad = Math.max(1, max_y - min_y);
+                          const c_y = (min_y + max_y) / 2;
+                          const scaleVal = 175 / Math.max(35, h_cad, depth) * sheetScaleMultiplier;
+                          
+                          const mapY = (y: number) => 150 + (y - c_y) * scaleVal;
+                          const mapZ = (zValue: number) => 135 - zValue * scaleVal;
+                          
+                          return (
+                            <svg viewBox="0 0 300 200" className="w-full h-full max-h-[150px]">
+                              <line x1="150" y1="15" x2="150" y2="185" stroke="#cbd5e1" strokeWidth="0.5" strokeDasharray="8,2,2,2" />
+                              <line x1="15" y1="135" x2="285" y2="135" stroke="#cbd5e1" strokeWidth="0.5" strokeDasharray="8,2,2,2" />
+
+                              {/* Base & Top boundaries of depth profile */}
+                              <line x1={mapY(min_y) - 10} x2={mapY(max_y) + 10} y1="135" y2="135" stroke="#94a3b8" strokeWidth="0.5" strokeDasharray="3,3" />
+                              <line x1={mapY(min_y)} x2={mapY(max_y)} y1={mapZ(0)} y2={mapZ(0)} stroke="#1e293b" strokeWidth="1.15" />
+                              <line x1={mapY(min_y)} x2={mapY(max_y)} y1={mapZ(depth)} y2={mapZ(depth)} stroke="#1e293b" strokeWidth="1.15" />
+                              
+                              <line x1={mapY(min_y)} y1={mapZ(0)} x2={mapY(min_y)} y2={mapZ(depth)} stroke="#1e293b" strokeWidth="1.15" />
+                              <line x1={mapY(max_y)} y1={mapZ(0)} x2={mapY(max_y)} y2={mapZ(depth)} stroke="#1e293b" strokeWidth="1.15" />
+
+                              {/* minor interior node grid projection guides */}
+                              {list[0] && list[0].points.map((pt, i) => (
+                                <line 
+                                  key={i} 
+                                  x1={mapY(pt.y)} 
+                                  y1={mapZ(0)} 
+                                  x2={mapY(pt.y)} 
+                                  y2={mapZ(depth)} 
+                                  stroke="#64748b" 
+                                  strokeWidth="0.5" 
+                                  strokeDasharray="1.5,2" 
+                                />
+                              ))}
+
+                              {/* width specs arrow info list */}
+                              <g className="text-[7.5px] font-mono fill-blue-600 stroke-blue-600">
+                                <line x1={mapY(min_y)} y1="148" x2={mapY(max_y)} y2="148" stroke="#2563eb" strokeWidth="0.75" />
+                                <line x1={mapY(min_y)} y1="144" x2={mapY(min_y)} y2="152" stroke="#2563eb" strokeWidth="0.4" />
+                                <line x1={mapY(max_y)} y1="144" x2={mapY(max_y)} y2="152" stroke="#2563eb" strokeWidth="0.4" />
+                                <text x={(mapY(min_y) + mapY(max_y))/2} y="157" textAnchor="middle" stroke="none" className="font-bold fill-blue-600">
+                                  W={h_cad.toFixed(1)} mm
+                                </text>
+                              </g>
+                            </svg>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* BOTTOM OVERLAYS: TECHNICAL NOTES BLOCK */}
+                  <div className="absolute bottom-[35px] left-[18px] max-w-[390px] text-left p-0.5 text-[7px] text-slate-400 font-sans tracking-tight block whitespace-pre-line z-10 leading-relaxed max-h-[75px] overflow-hidden border-l border-slate-300 pl-2">
+                    <span className="font-bold text-[7.5px] font-mono text-slate-600 block mb-0.5">GENEL TEKNİK YAPIM NOTLARI:</span>
+                    {sheetNotes}
+                  </div>
+
+                  {/* INTEGRATED CAD ANTET TITLE BLOCK LEGEND BOX (ANTET) */}
+                  <div 
+                    id="technical-title-block"
+                    className="absolute bottom-[16px] right-[16px] w-[375px] h-[92px] bg-slate-50 border-2 border-slate-900 grid grid-cols-4 grid-rows-3 text-left"
+                    style={{ boxSizing: 'border-box' }}
+                  >
+                    {/* Row 1, Col 1-2: Title */}
+                    <div className="col-span-2 border-r border-b border-slate-900 p-1 flex flex-col justify-between bg-slate-100/30">
+                      <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">PROJE / PARÇA ADI (TITLE)</span>
+                      <span className="text-[9px] font-extrabold text-slate-900 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis uppercase">{sheetTitle}</span>
+                    </div>
+
+                    {/* Row 1, Col 3: Company */}
+                    <div className="border-r border-b border-slate-900 p-0.5 flex flex-col justify-between">
+                      <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">ÜRETİCİ / ŞİRKET</span>
+                      <span className="text-[7.5px] font-black text-slate-900 whitespace-nowrap overflow-hidden">CADERIM BİLİŞİM</span>
+                    </div>
+
+                    {/* Row 1, Col 4: Standard Project type */}
+                    <div className="border-b border-slate-900 p-0.5 flex items-center justify-center bg-slate-100/50">
+                      <div className="text-center font-bold text-[7.5px] leading-tight text-slate-800 border border-slate-900 p-0.5 px-1 bg-white">
+                        ISO-E PROJECT
+                      </div>
+                    </div>
+
+                    {/* Row 2, Col 1-2: Designer Email */}
+                    <div className="col-span-2 border-r border-b border-slate-900 p-0.5 flex flex-col justify-between">
+                      <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">TASARIMCI / E-POSTA</span>
+                      <span className="text-[7px] font-bold text-slate-600 whitespace-nowrap overflow-hidden text-ellipsis font-mono">peopleonthearth@gmail.com</span>
+                    </div>
+
+                    {/* Row 2, Col 3: Material */}
+                    <div className="border-r border-b border-slate-900 p-0.5 flex flex-col justify-between bg-amber-50/10">
+                      <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">MALZEME (MATERIAL)</span>
+                      <span className="text-[7.5px] font-black text-slate-800 uppercase whitespace-nowrap overflow-hidden text-ellipsis">{sheetMaterial}</span>
+                    </div>
+
+                    {/* Row 2, Col 4: Weight Indicator */}
+                    <div className="border-b border-slate-900 p-0.5 flex flex-col justify-between bg-emerald-50/10">
+                      <span className="text-[5px] uppercase font-bold text-emerald-600 font-sans">AĞIRLIK (CALC WEIGHT)</span>
+                      <span className="text-[8px] font-black text-emerald-700">
+                        {(() => {
+                          const list: Array<{ points: Point[]; isClosed: boolean }> = [];
+                          layers.forEach(l => {
+                            if (!l.visible) return;
+                            if (l.finalPoints && l.finalPoints.length > 0) list.push({ points: l.finalPoints, isClosed: l.isClosed });
+                            if (l.paths) l.paths.forEach(p => { if (p.length > 0) list.push({ points: p, isClosed: true }); });
+                          });
+                          let area = 0;
+                          list.forEach(sh => {
+                            if (sh.isClosed && sh.points.length >= 3) {
+                              let shArea = 0;
+                              const poly = sh.points;
+                              for (let i = 0; i < poly.length - 1; i++) {
+                                shArea += poly[i].x * poly[i + 1].y - poly[i + 1].x * poly[i].y;
+                              }
+                              shArea += poly[poly.length - 1].x * poly[0].y - poly[0].x * poly[poly.length - 1].y;
+                              area += Math.abs(shArea / 2);
+                            }
+                          });
+                          const volumeCm3 = (area * depth) / 1000;
+                          const densityList = {
+                            "Steel": 7.85, "Aluminum": 2.70, "Brass": 8.40, "Copper": 8.96, "Acrylic": 1.18, "PLA (3D Print)": 1.24, "Oak Wood": 0.75
+                          };
+                          const density = (densityList as any)[sheetMaterial] || 7.85;
+                          const massGrams = volumeCm3 * density;
+                          return massGrams > 1000 ? `${(massGrams / 1000).toFixed(2)} kg` : `${massGrams.toFixed(1)} g`;
+                        })()}
+                      </span>
+                    </div>
+
+                    {/* Row 3, Col 1: Date */}
+                    <div className="border-r p-0.5 flex flex-col justify-between border-slate-900">
+                      <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">SAYFA TARİHİ</span>
+                      <span className="text-[7px] text-slate-800 font-mono">{new Date().toISOString().split('T')[0]}</span>
+                    </div>
+
+                    {/* Row 3, Col 2: Scale Factor */}
+                    <div className="border-r p-0.5 flex flex-col justify-between border-slate-900">
+                      <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">SAYFA ÖLÇEĞİ</span>
+                      <span className="text-[7.5px] font-bold text-slate-800">{sheetScaleMultiplier === 1 ? "1:1 (ISO)" : `${sheetScaleMultiplier.toFixed(1)}:1`}</span>
+                    </div>
+
+                    {/* Row 3, Col 3: Revision Code */}
+                    <div className="border-r p-0.5 flex flex-col justify-between border-slate-900">
+                      <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">REVİZYON</span>
+                      <span className="text-[8px] font-black text-amber-700">{sheetRevision}</span>
+                    </div>
+
+                    {/* Row 3, Col 4: Software code indicator */}
+                    <div className="p-0.5 flex flex-col justify-between">
+                      <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">SAYFA BİLGİSİ</span>
+                      <span className="text-[6.5px] text-zinc-500 font-bold font-mono">CADERIM v14.1</span>
+                    </div>
+
+                  </div>
+
+                </div>
+              </div>
+
+            </div>
+          ) : (
+            <>
+              {/* Viewport A: 2D Sketch canvas */}
+              <div 
+                style={{ flex: workspaceLayout === '2d-only' ? '1 1 100%' : `0 0 ${splitRatio}%`, display: (workspaceLayout === 'split' || workspaceLayout === '2d-only') ? 'flex' : 'none' }}
+                className="h-1/2 md:h-full relative border-r border-zinc-800 flex flex-col bg-zinc-950 transition-all duration-75 overflow-hidden"
+              >
             <div className="absolute top-3 left-3 bg-zinc-900/85 border border-zinc-850 backdrop-blur px-3 py-1.5 rounded text-xs font-mono text-zinc-300 pointer-events-none flex items-center gap-2 z-10 font-bold">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               2D Schematic Sketcher
@@ -9277,17 +10525,19 @@ export default function App() {
           </div>
 
           {/* Viewports Splitter Bar */}
-          <div 
-            onMouseDown={() => { isDraggingSplitRef.current = true; }}
-            className="hidden md:flex flex-col items-center justify-center w-1 hover:w-2 bg-zinc-900 border-l border-r border-zinc-850 hover:border-amber-500/80 hover:bg-amber-500/20 cursor-col-resize transition-all shrink-0 self-stretch group z-20"
-            title="Drag to adjust 2D/3D viewport splitter ratio"
-          >
-            <div className="w-0.5 h-10 bg-zinc-700 rounded-full group-hover:bg-amber-400 group-hover:h-14 transition-all" />
-          </div>
+          {workspaceLayout === 'split' && (
+            <div 
+              onMouseDown={() => { isDraggingSplitRef.current = true; }}
+              className="hidden md:flex flex-col items-center justify-center w-1 hover:w-2 bg-zinc-900 border-l border-r border-zinc-850 hover:border-amber-500/80 hover:bg-amber-500/20 cursor-col-resize transition-all shrink-0 self-stretch group z-20"
+              title="Drag to adjust 2D/3D viewport splitter ratio"
+            >
+              <div className="w-0.5 h-10 bg-zinc-700 rounded-full group-hover:bg-amber-400 group-hover:h-14 transition-all" />
+            </div>
+          )}
 
           {/* Viewport B: 3D ThreeJS renderer */}
           <div 
-            style={{ flex: `0 0 ${100 - splitRatio}%` }}
+            style={{ flex: workspaceLayout === '3d-only' ? '1 1 100%' : `0 0 ${100 - splitRatio}%`, display: (workspaceLayout === 'split' || workspaceLayout === '3d-only') ? 'flex' : 'none' }}
             className="h-1/2 md:h-full border-t md:border-t-0 border-zinc-800 flex flex-col bg-zinc-950 transition-all duration-75 overflow-hidden"
           >
             <ThreeViewport
@@ -9296,6 +10546,8 @@ export default function App() {
               triggerStlExportRef={triggerStlExportRef}
             />
           </div>
+            </>
+          )}
         </main>
       </div>
 
