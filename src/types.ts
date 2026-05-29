@@ -77,6 +77,7 @@ export interface CADLayer {
   dimensions?: Array<{ id: string; p1: Point; p2: Point; offset: number; value: number; dimType?: 'horizontal' | 'vertical' | 'aligned' }>;
   pathSettings?: PathSettings[];
   finalPointsSettings?: PathSettings;
+  zOffset?: number;
 }
 
 export interface HistoryItem {
