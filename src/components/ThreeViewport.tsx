@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
-import { Eye, EyeOff, Sliders, Scissors, RotateCcw, FlipHorizontal } from 'lucide-react';
+import { Eye, EyeOff, Sliders, Scissors, RotateCcw, FlipHorizontal, MousePointer2, Sparkles, Compass, HelpCircle } from 'lucide-react';
 import { Point, CADLayer } from '../types';
 
 function getPolygonArea(poly: Point[]): number {
@@ -32,15 +32,21 @@ interface ThreeViewportProps {
   layers: CADLayer[];
   activeLayerId: string;
   triggerStlExportRef: React.MutableRefObject<(() => void) | null>;
+  onSelectFace?: (params: { zHeight: number; layerId: string; faceName: string }) => void;
 }
 
-export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: ThreeViewportProps) {
+export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef, onSelectFace }: ThreeViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const activeGroupRef = useRef<THREE.Group | null>(null);
+
+  // 3D face selection states
+  const [faceSelectionMode, setFaceSelectionMode] = useState(false);
+  const [hoveredFace, setHoveredFace] = useState<{ zHeight: number; layerName: string; layerId: string } | null>(null);
+  const hoverIndicatorRef = useRef<THREE.Mesh | null>(null);
 
   // 3D Clipping section view state
   const [clipEnabled, setClipEnabled] = useState(false);
@@ -52,9 +58,52 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
   // Camera preset selection states
   const [activePreset, setActivePreset] = useState<'iso' | 'top' | 'front' | 'left' | 'right' | null>('iso');
 
+  // Auto-Orbit turnable states
+  const [autoRotate, setAutoRotate] = useState(false);
+  const [autoRotateSpeed, setAutoRotateSpeed] = useState(2.0);
+
   // ThreeJS Plane objects reference
   const clipPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0));
   const planeHelperRef = useRef<THREE.PlaneHelper | null>(null);
+
+  // Synchronize auto rotation settings with OrbitControls in real-time
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    controls.autoRotate = autoRotate;
+    controls.autoRotateSpeed = autoRotateSpeed;
+    controls.update();
+  }, [autoRotate, autoRotateSpeed]);
+
+  const orbitCameraIncrementally = (direction: 'left' | 'right' | 'up' | 'down') => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+
+    // Rotate camera position around target point vector coordinates
+    const target = controls.target;
+    const offset = camera.position.clone().sub(target);
+
+    // Coordinate state using Spherical coords around target pivot
+    const spherical = new THREE.Spherical().setFromVector3(offset);
+    const angleDelta = 15 * (Math.PI / 180); // Rotate by 15 degrees per click
+
+    if (direction === 'left') {
+      spherical.theta -= angleDelta;
+    } else if (direction === 'right') {
+      spherical.theta += angleDelta;
+    } else if (direction === 'up') {
+      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi - angleDelta));
+    } else if (direction === 'down') {
+      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + angleDelta));
+    }
+
+    const newOffset = new THREE.Vector3().setFromSpherical(spherical);
+    camera.position.copy(target).add(newOffset);
+    camera.lookAt(target);
+    controls.update();
+    setActivePreset(null);
+  };
 
   // Smooth cinematic gliding motion for preset camera transitions
   const animateCameraTo = (targetPos: THREE.Vector3) => {
@@ -215,6 +264,121 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
       renderer.dispose();
     };
   }, []);
+
+  // Surface hover & Selection click detection
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let clickStartX = 0;
+    let clickStartY = 0;
+
+    const onPointerDown = (event: PointerEvent) => {
+      clickStartX = event.clientX;
+      clickStartY = event.clientY;
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (!faceSelectionMode || !cameraRef.current || !sceneRef.current || !activeGroupRef.current) {
+        setHoveredFace(null);
+        if (hoverIndicatorRef.current) {
+          hoverIndicatorRef.current.visible = false;
+        }
+        return;
+      }
+
+      const rect = container.getBoundingClientRect();
+      const mouseX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const mouseY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), cameraRef.current);
+
+      const solidMeshes: THREE.Mesh[] = [];
+      activeGroupRef.current.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          solidMeshes.push(child);
+        }
+      });
+
+      const intersects = raycaster.intersectObjects(solidMeshes);
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        const userData = hit.object.userData;
+
+        // Visual feedback indicator positioning
+        if (!hoverIndicatorRef.current) {
+          const indicatorGeom = new THREE.RingGeometry(2, 6, 16);
+          const indicatorMat = new THREE.MeshBasicMaterial({
+            color: 0xf97316, // Radiant Orange
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.9,
+            depthTest: false
+          });
+          const indicatorMesh = new THREE.Mesh(indicatorGeom, indicatorMat);
+          indicatorMesh.renderOrder = 2000;
+          sceneRef.current.add(indicatorMesh);
+          hoverIndicatorRef.current = indicatorMesh;
+        }
+
+        // Align the hovering indicator plane flat relative to face normal
+        const hitNormal = hit.face ? hit.face.normal.clone() : new THREE.Vector3(0, 0, 1);
+        hitNormal.transformDirection(hit.object.matrixWorld);
+
+        // Position indicators slightly above clicked surface to avoid depth-fighting artifacts
+        const hoverPoint = hit.point.clone().add(hitNormal.clone().multiplyScalar(0.5));
+        hoverIndicatorRef.current.position.copy(hoverPoint);
+        hoverIndicatorRef.current.lookAt(hit.point.clone().add(hitNormal));
+        hoverIndicatorRef.current.visible = true;
+
+        const roundedZ = Math.round(hit.point.z * 10) / 10;
+        setHoveredFace({
+          zHeight: roundedZ,
+          layerName: userData.layerName || 'Unknown Block',
+          layerId: userData.layerId || 'unknown'
+        });
+      } else {
+        setHoveredFace(null);
+        if (hoverIndicatorRef.current) {
+          hoverIndicatorRef.current.visible = false;
+        }
+      }
+    };
+
+    const onPointerUp = (event: PointerEvent) => {
+      if (!faceSelectionMode) return;
+      const diffX = Math.abs(event.clientX - clickStartX);
+      const diffY = Math.abs(event.clientY - clickStartY);
+      // Filter out orbits dragging
+      if (diffX > 6 || diffY > 6) return;
+
+      if (hoveredFace && onSelectFace) {
+        onSelectFace(hoveredFace);
+        setFaceSelectionMode(false); // Reset/disable mode after successful face selection
+      }
+    };
+
+    container.addEventListener('pointerdown', onPointerDown);
+    container.addEventListener('pointermove', onPointerMove, { passive: true });
+    container.addEventListener('pointerup', onPointerUp);
+
+    return () => {
+      container.removeEventListener('pointerdown', onPointerDown);
+      container.removeEventListener('pointermove', onPointerMove);
+      container.removeEventListener('pointerup', onPointerUp);
+      if (hoverIndicatorRef.current && sceneRef.current) {
+        sceneRef.current.remove(hoverIndicatorRef.current);
+        hoverIndicatorRef.current.geometry.dispose();
+        if (Array.isArray(hoverIndicatorRef.current.material)) {
+          hoverIndicatorRef.current.material.forEach((m: any) => m.dispose());
+        } else {
+          hoverIndicatorRef.current.material.dispose();
+        }
+        hoverIndicatorRef.current = null;
+      }
+    };
+  }, [faceSelectionMode, hoveredFace, onSelectFace]);
 
   // Update clipping plane parameters & helper in real-time
   useEffect(() => {
@@ -479,6 +643,14 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
           });
 
           const mesh = new THREE.Mesh(geometry, meshMaterial);
+          mesh.position.z = ly.zOffset || 0;
+          mesh.userData = {
+            layerId: ly.id,
+            layerName: ly.name,
+            zOffset: ly.zOffset || 0,
+            depth: outer.depth,
+            opType: outer.opType,
+          };
 
           const edges = new THREE.EdgesGeometry(geometry, 25);
           const line = new THREE.LineSegments(edges, wireframeMaterial);
@@ -497,10 +669,10 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
         if (pts.length < 2) return;
         const linePoints: THREE.Vector3[] = [];
         pts.forEach((pt) => {
-          linePoints.push(new THREE.Vector3(pt.x - cx, cy - pt.y, 1.2));
+          linePoints.push(new THREE.Vector3(pt.x - cx, cy - pt.y, 1.2 + (ly.zOffset || 0)));
         });
         if (isClosed && pts.length >= 3) {
-          linePoints.push(new THREE.Vector3(pts[0].x - cx, cy - pts[0].y, 1.2));
+          linePoints.push(new THREE.Vector3(pts[0].x - cx, cy - pts[0].y, 1.2 + (ly.zOffset || 0)));
         }
 
         const lineGeom = new THREE.BufferGeometry().setFromPoints(linePoints);
@@ -525,7 +697,7 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
              depthTest: false,
            });
            const vertMesh = new THREE.Mesh(vertGeom, vertMat);
-           vertMesh.position.set(pt.x - cx, cy - pt.y, 1.5);
+           vertMesh.position.set(pt.x - cx, cy - pt.y, 1.5 + (ly.zOffset || 0));
            vertMesh.renderOrder = 1001;
            group.add(vertMesh);
          });
@@ -553,6 +725,39 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
       <div className="absolute top-3 left-3 bg-zinc-900/80 border border-zinc-800 backdrop-blur px-3 py-1.5 rounded text-xs font-mono text-zinc-300 pointer-events-none flex items-center gap-2 z-10">
         <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
         3D Viewport
+      </div>
+
+      {/* 3D Surface Selector Controls Overlay */}
+      <div className="absolute top-12 left-3 flex flex-col gap-2 z-10">
+        <button
+          id="toggle-face-select"
+          onClick={() => setFaceSelectionMode(!faceSelectionMode)}
+          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-sans font-bold shadow-lg border transition-all cursor-pointer ${
+            faceSelectionMode
+              ? 'bg-orange-600 border-orange-500 text-white animate-pulse'
+              : 'bg-zinc-900/90 hover:bg-zinc-800 border-zinc-800 text-zinc-300'
+          }`}
+          title="3D model üzerinde düzlemsel bir yüzey seçerek yeni çizim (sketç) katmanı başlatın."
+        >
+          <MousePointer2 className={`w-3.5 h-3.5 ${faceSelectionMode ? 'text-white' : 'text-orange-500'}`} />
+          <span>{faceSelectionMode ? 'Sınır Yüzeyi Seçin (Click Face)' : 'Yüzey Seçerek Yeni Sketç Başlat'}</span>
+        </button>
+
+        {faceSelectionMode && hoveredFace && (
+          <div className="bg-orange-650/95 text-white border border-orange-500 backdrop-blur-md p-3 rounded-lg text-xs font-mono shadow-xl max-w-[240px] animate-fade-in z-20">
+            <div className="font-extrabold flex items-center gap-1.5 border-b border-orange-500/50 pb-1.5 mb-1.5 text-[10px] uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 animate-spin text-yellow-300" />
+              <span>Yüzey Algılandı</span>
+            </div>
+            <div className="space-y-1">
+              <div><span className="opacity-80">Gövde:</span> <strong className="font-sans font-extrabold">{hoveredFace.layerName}</strong></div>
+              <div><span className="opacity-80">Z Seviyesi:</span> <strong className="text-sm font-semibold text-yellow-300">{hoveredFace.zHeight} mm</strong></div>
+            </div>
+            <div className="mt-2.5 text-[10px] bg-black/30 p-1.5 rounded text-orange-200 leading-relaxed">
+              Bu düz bir çalışma düzlemidir. Seçip isimlendirmek için sol tıklayın!
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 3D Section Cut Plane Floating Utility Panel */}
@@ -817,6 +1022,134 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef }: Th
           <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
           <span>ISO (Isometric)</span>
         </button>
+      </div>
+
+      {/* 3D Orbit, Auto rotation & Mouse guide Controls - Bottom Right Panel */}
+      <div className="absolute bottom-3 right-3 z-10 bg-zinc-900/90 border border-zinc-800/85 backdrop-blur-md p-3 rounded-lg flex flex-col gap-2.5 shadow-xl min-w-[200px] max-w-[245px] animate-fade-in font-sans">
+        <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-450 flex items-center justify-between border-b border-zinc-800/80 pb-1.5">
+          <div className="flex items-center gap-1.5 font-mono text-zinc-300">
+            <Compass className="w-4 h-4 text-orange-500 animate-pulse" />
+            <span>3D Orbit Controls</span>
+          </div>
+          <span className="text-[8px] px-1 py-0.5 bg-orange-950/40 text-orange-400 border border-orange-900/40 rounded uppercase font-bold text-right">Interactive</span>
+        </div>
+
+        {/* Incremental Manual Orbit Section & Buttons Grid */}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[9px] text-zinc-500 font-mono font-bold uppercase tracking-wide">Manual Orbit Keys:</span>
+          <div className="grid grid-cols-3 gap-1">
+            <div />
+            <button
+              onClick={() => orbitCameraIncrementally('up')}
+              className="py-1 bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 hover:border-zinc-550 text-zinc-200 hover:text-white rounded text-center cursor-pointer transition flex items-center justify-center"
+              title="Rotate View Up"
+            >
+              <span className="text-xs font-bold font-mono">▲</span>
+            </button>
+            <div />
+
+            <button
+              onClick={() => orbitCameraIncrementally('left')}
+              className="py-1 bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 hover:border-zinc-550 text-zinc-200 hover:text-white rounded text-center cursor-pointer transition flex items-center justify-center"
+              title="Rotate View Left"
+            >
+              <span className="text-xs font-bold font-mono">◀</span>
+            </button>
+            <button
+              onClick={() => {
+                // Reset/Recut the controls target to model origin
+                const controls = controlsRef.current;
+                const camera = cameraRef.current;
+                if (controls && camera) {
+                  controls.target.set(0, 0, 0);
+                  camera.lookAt(0, 0, 0);
+                  controls.update();
+                }
+              }}
+              className="py-0.5 bg-zinc-850 hover:bg-zinc-805 border border-zinc-750 text-[9px] text-zinc-450 hover:text-zinc-250 rounded text-center cursor-pointer transition font-mono uppercase tracking-tight flex items-center justify-center leading-none"
+              title="Reset view rotation center-point pivot back to coordinate center"
+            >
+              Pivot
+            </button>
+            <button
+              onClick={() => orbitCameraIncrementally('right')}
+              className="py-1 bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 hover:border-zinc-550 text-zinc-200 hover:text-white rounded text-center cursor-pointer transition flex items-center justify-center"
+              title="Rotate View Right"
+            >
+              <span className="text-xs font-bold font-mono">▶</span>
+            </button>
+
+            <div />
+            <button
+              onClick={() => orbitCameraIncrementally('down')}
+              className="py-1 bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 hover:border-zinc-550 text-zinc-200 hover:text-white rounded text-center cursor-pointer transition flex items-center justify-center"
+              title="Rotate View Down"
+            >
+              <span className="text-xs font-bold font-mono">▼</span>
+            </button>
+            <div />
+          </div>
+        </div>
+
+        {/* Automatic turntable Rotation Settings */}
+        <div className="border-t border-zinc-800/80 pt-2 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <label htmlFor="toggle-auto-orbit" className="text-[9px] font-mono font-bold text-zinc-450 uppercase cursor-pointer select-none">
+              Auto Turntable (Pitch):
+            </label>
+            <button
+              id="toggle-auto-orbit"
+              onClick={() => setAutoRotate(!autoRotate)}
+              className={`px-2 py-0.5 rounded text-[9px] font-bold font-mono border transition-all cursor-pointer ${
+                autoRotate
+                  ? 'bg-orange-650/40 border-orange-500 text-orange-400 animate-pulse'
+                  : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-400 hover:text-white'
+              }`}
+            >
+              {autoRotate ? 'RUNNING' : 'DISABLED'}
+            </button>
+          </div>
+
+          {autoRotate && (
+            <div className="flex flex-col gap-0.5 animate-fade-in pl-1">
+              <div className="flex justify-between items-center text-[8px] font-mono text-zinc-500">
+                <span>ROTATION SPEED:</span>
+                <span className="text-orange-400 font-bold">{autoRotateSpeed.toFixed(1)}x</span>
+              </div>
+              <input
+                type="range"
+                min="0.5"
+                max="8.0"
+                step="0.5"
+                value={autoRotateSpeed}
+                onChange={(e) => setAutoRotateSpeed(parseFloat(e.target.value) || 2.0)}
+                className="w-full accent-orange-500 bg-zinc-950 rounded-lg appearance-none h-1 cursor-pointer"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Interactive Guide Mouse Help area */}
+        <div className="border-t border-zinc-800/80 pt-1.5 flex flex-col gap-1 select-none">
+          <div className="flex items-center gap-1.5 text-[8.5px] font-mono font-bold text-zinc-500 uppercase tracking-wide">
+            <HelpCircle className="w-3 h-3 text-zinc-505 shrink-0" />
+            <span>Mouse Gestures Guide</span>
+          </div>
+          <div className="space-y-0.5 pl-1.5 text-[8.5px] font-mono text-zinc-450 leading-relaxed">
+            <div className="flex items-center gap-1">
+              <span className="text-orange-500">左</span>
+              <span>Left Click + Drag : Orbit (Döndür)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-orange-500">右</span>
+              <span>Right Click + Drag : Pan (Kaydır)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-orange-500">輪</span>
+              <span>Scroll Wheel : Zoom (Yakınlaş)</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
