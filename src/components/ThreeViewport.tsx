@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { Eye, EyeOff, Sliders, Scissors, RotateCcw, FlipHorizontal, MousePointer2, Sparkles, Compass, HelpCircle } from 'lucide-react';
 import { Point, CADLayer } from '../types';
+import { calculateAssemblyPhysicalProperties, SolidPhysicsProperties } from '../utils/physics';
 
 function getPolygonArea(poly: Point[]): number {
   if (poly.length < 3) return 0;
@@ -33,9 +34,21 @@ interface ThreeViewportProps {
   activeLayerId: string;
   triggerStlExportRef: React.MutableRefObject<(() => void) | null>;
   onSelectFace?: (params: { zHeight: number; layerId: string; faceName: string }) => void;
+  sheetMaterial?: string;
+  onPhysicsCalculated?: (data: {
+    activeLayerStats: SolidPhysicsProperties | null;
+    assemblyStats: SolidPhysicsProperties | null;
+  }) => void;
 }
 
-export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef, onSelectFace }: ThreeViewportProps) {
+export function ThreeViewport({
+  layers,
+  activeLayerId,
+  triggerStlExportRef,
+  onSelectFace,
+  sheetMaterial = 'Steel',
+  onPhysicsCalculated
+}: ThreeViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -61,6 +74,7 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef, onSe
   // Auto-Orbit turnable states
   const [autoRotate, setAutoRotate] = useState(false);
   const [autoRotateSpeed, setAutoRotateSpeed] = useState(2.0);
+  const [showCoMVisual, setShowCoMVisual] = useState(true);
 
   // ThreeJS Plane objects reference
   const clipPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0));
@@ -483,6 +497,8 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef, onSe
     const cy = pointCount > 0 ? (minY + maxY) / 2 : 0;
 
     const group = new THREE.Group();
+    const activeGeoms: { geometry: THREE.BufferGeometry; zOffset: number }[] = [];
+    const assemblyGeoms: { geometry: THREE.BufferGeometry; zOffset: number }[] = [];
 
     visibleDrawnLayers.forEach((ly) => {
       // Create separate loop structures with individual shape properties
@@ -657,6 +673,13 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef, onSe
           mesh.add(line);
 
           group.add(mesh);
+
+          if (geometry) {
+            assemblyGeoms.push({ geometry, zOffset: ly.zOffset || 0 });
+            if (ly.id === activeLayerId) {
+              activeGeoms.push({ geometry, zOffset: ly.zOffset || 0 });
+            }
+          }
         } catch (e) {
           console.error(`Error generating 3D component for outer loop ${outer.name}:`, e);
         }
@@ -713,9 +736,93 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef, onSe
       }
     });
 
+    // Calculate exact Center of Mass and Moments of Inertia dynamically
+    const densityList = {
+      "Steel": 7.85, "Aluminum": 2.70, "Brass": 8.40, "Copper": 8.96, "Acrylic": 1.18, "PLA (3D Print)": 1.24, "Oak Wood": 0.75
+    };
+    const densityGcm3 = (densityList as any)[sheetMaterial] || 7.85;
+
+    const activeLayerStats = calculateAssemblyPhysicalProperties(activeGeoms, densityGcm3, cx, cy);
+    const assemblyStats = calculateAssemblyPhysicalProperties(assemblyGeoms, densityGcm3, cx, cy);
+
+    if (onPhysicsCalculated) {
+      setTimeout(() => {
+        onPhysicsCalculated({ activeLayerStats, assemblyStats });
+      }, 0);
+    }
+
+    // Centered professional visual Center of Mass helper marker (Alternating color spheres & sub-axes coordinate gauge)
+    if (showCoMVisual && assemblyStats) {
+      const comLocalX = assemblyStats.centerOfMass.x - cx;
+      const comLocalY = cy - assemblyStats.centerOfMass.y;
+      const comLocalZ = assemblyStats.centerOfMass.z;
+
+      const comGroup = new THREE.Group();
+      comGroup.position.set(comLocalX, comLocalY, comLocalZ);
+
+      // Core center Sphere
+      const sphereGeom = new THREE.SphereGeometry(2.5, 16, 16);
+      const sphereMat = new THREE.MeshBasicMaterial({
+        color: 0xf59e0b, // Amber yellow
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+      });
+      const sphere = new THREE.Mesh(sphereGeom, sphereMat);
+      sphere.renderOrder = 2000;
+      comGroup.add(sphere);
+
+      // Rotating decorative outer CAD ring
+      const ringGeom = new THREE.RingGeometry(3.5, 4.0, 32);
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xf59e0b,
+        side: THREE.DoubleSide,
+        depthTest: false,
+        transparent: true,
+        opacity: 0.7,
+      });
+      const ringX = new THREE.Mesh(ringGeom, ringMat);
+      ringX.renderOrder = 2001;
+      comGroup.add(ringX);
+
+      const ringY = ringX.clone();
+      ringY.rotation.y = Math.PI / 2;
+      comGroup.add(ringY);
+
+      // Red/Green/Blue axis guide pointers extending from pivot
+      const axisLength = 15;
+      const pointerPos = [
+        -axisLength, 0, 0,  axisLength, 0, 0, // X
+        0, -axisLength, 0,  0, axisLength, 0, // Y
+        0, 0, -axisLength,  0, 0, axisLength, // Z
+      ];
+      const pointerCol = [
+        0.95, 0.25, 0.25,  0.95, 0.25, 0.25, // Red (X)
+        0.1, 0.8, 0.2,   0.1, 0.8, 0.2,   // Green (Y)
+        0.2, 0.5, 0.95,  0.2, 0.5, 0.95,  // Blue (Z)
+      ];
+
+      const axisGeom = new THREE.BufferGeometry();
+      axisGeom.setAttribute('position', new THREE.Float32BufferAttribute(pointerPos, 3));
+      axisGeom.setAttribute('color', new THREE.Float32BufferAttribute(pointerCol, 3));
+
+      const axisMat = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        linewidth: 2,
+        depthTest: false,
+        transparent: true,
+        opacity: 0.85,
+      });
+      const axisLines = new THREE.LineSegments(axisGeom, axisMat);
+      axisLines.renderOrder = 1999;
+      comGroup.add(axisLines);
+
+      group.add(comGroup);
+    }
+
     scene.add(group);
     activeGroupRef.current = group;
-  }, [layers, clipEnabled, activeLayerId]);
+  }, [layers, clipEnabled, activeLayerId, sheetMaterial, onPhysicsCalculated, showCoMVisual]);
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-zinc-950">
@@ -1127,6 +1234,26 @@ export function ThreeViewport({ layers, activeLayerId, triggerStlExportRef, onSe
               />
             </div>
           )}
+        </div>
+
+        {/* Physical Center of Mass (CoM) Toggle */}
+        <div className="border-t border-zinc-800/80 pt-2 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-mono font-bold text-zinc-400 uppercase flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              Center of Mass Marker:
+            </span>
+            <button
+              onClick={() => setShowCoMVisual(!showCoMVisual)}
+              className={`px-2 py-0.5 rounded text-[9px] font-bold font-mono border transition-all cursor-pointer ${
+                showCoMVisual
+                  ? 'bg-amber-600/20 border-amber-500 text-amber-400'
+                  : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-400 hover:text-white'
+              }`}
+            >
+              {showCoMVisual ? 'VISIBLE' : 'HIDDEN'}
+            </button>
+          </div>
         </div>
 
         {/* Interactive Guide Mouse Help area */}
