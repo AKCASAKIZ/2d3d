@@ -7822,6 +7822,166 @@ export default function App() {
           {sidebarTab === 'sketch' && (
             <div className="flex-1 flex flex-col overflow-y-auto divide-y divide-slate-200">
               
+              {/* SKEÇLER VE TASARIM KODLARI LİSTESİ PANELİ (SKETCHES TREE) */}
+              <div className="p-4 bg-slate-50/80 border-b border-slate-200">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center justify-between mb-3.5">
+                  <span className="flex items-center gap-1.5 font-extrabold text-orange-700">
+                    <Layers className="w-4 h-4 text-orange-600" />
+                    <span>Skeçler & Tasarım Kodları ({layers.length})</span>
+                  </span>
+                  
+                  {/* Quick Add Sketch Button */}
+                  <button
+                    onClick={() => {
+                      const newId = `layer_${Date.now()}`;
+                      const newName = `SKETCH_0${layers.length + 1}`;
+                      const newLayer: CADLayer = {
+                        id: newId,
+                        name: newName,
+                        color: '#f59e0b',
+                        visible: true,
+                        locked: false,
+                        finalPoints: [],
+                        isClosed: false,
+                        opType: 'extrude',
+                        depth: 30,
+                        zOffset: 0,
+                      };
+                      setLayersRaw((prev) => [...prev, newLayer]);
+                      setSketches((prev) => [...prev, { id: newId, name: newName, zOffset: 0 }]);
+                      setActiveLayerId(newId);
+                      setWorkspaceLayout('split');
+                      setCmdLogs((prev) => [
+                        ...prev,
+                        `[CAD ENGINE] Yeni Skeç "${newName}" (Z=0) başarıyla oluşturuldu ve çizim ekranına yüklendi.`
+                      ]);
+                    }}
+                    className="px-2.5 py-1 text-[10px] uppercase font-bold text-white bg-orange-600 hover:bg-orange-500 rounded-lg shadow-sm transition-all duration-150 flex items-center gap-1 cursor-pointer"
+                    title="Yeni boş bir sketç katmanı yaratın"
+                  >
+                    <Plus className="w-3 h-3 text-white" />
+                    <span>Yeni Skeç Ekle</span>
+                  </button>
+                </h2>
+
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                  {layers.map((ly) => {
+                    const isActive = ly.id === activeLayerId;
+                    return (
+                      <div
+                        key={ly.id}
+                        onClick={() => {
+                          if (!isActive) {
+                            setActiveLayerId(ly.id);
+                            // Set layout to split if they are only in 3D
+                            if (workspaceLayout === '3d-only') {
+                              setWorkspaceLayout('split');
+                            }
+                            setCmdLogs((prev) => [
+                              ...prev,
+                              `[CAD ENGINE] "${ly.name}" skeçi aktif edildi ve çizim ekranına yüklendi.`
+                            ]);
+                          }
+                        }}
+                        className={`group relative p-2.5 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col gap-2 ${
+                          isActive
+                            ? 'bg-gradient-to-br from-orange-50 to-amber-50/50 border-orange-300 shadow-sm ring-1 ring-orange-200/50'
+                            : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        {/* Upper line: Edit Name/Code, Z marker, Color dot */}
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                            {/* Color Selector */}
+                            <input
+                              type="color"
+                              value={ly.color || '#3b82f6'}
+                              onChange={(e) => updateLayerProps(ly.id, { color: e.target.value })}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-4 h-4 p-0 bg-transparent rounded-full border-0 cursor-pointer shrink-0 select-none outline-none overflow-hidden"
+                              title="Tasarım/Parça rengini değiştir"
+                            />
+                            {/* Inline Edit Input for Name & Code */}
+                            <input
+                              type="text"
+                              value={ly.name}
+                              onChange={(e) => {
+                                const newName = e.target.value.toUpperCase().replace(/\s+/g, '_');
+                                updateLayerProps(ly.id, { name: newName });
+                                setSketches((prev) => prev.map((s) => s.id === ly.id ? { ...s, name: newName } : s));
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className={`text-xs font-bold font-mono bg-transparent border border-transparent focus:bg-white focus:border-orange-300 focus:ring-1 focus:ring-orange-300/50 px-1 py-0.5 rounded outline-none min-w-0 flex-1 truncate ${
+                                isActive ? 'text-orange-700 font-extrabold focus:text-slate-800' : 'text-slate-750 hover:bg-slate-100'
+                              }`}
+                              placeholder="KOD_GIRIN"
+                              title="Skeçe özel isim veya tasarım kodu verin"
+                            />
+                          </div>
+
+                          {/* Height Indicator HUD tag */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-[9px] font-mono font-bold text-orange-700 bg-orange-100/50 border border-orange-200 px-1.5 py-0.5 rounded leading-none" title={`Bu skeç Z=${ly.zOffset || 0}mm yüksekliğindeki 3D düzlem üzerindedir`}>
+                              Z: {ly.zOffset || 0}mm
+                            </span>
+                            
+                            {/* Visible Indicator */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateLayerProps(ly.id, { visible: !ly.visible });
+                              }}
+                              className="text-slate-400 hover:text-slate-600 transition p-0.5 rounded hover:bg-slate-100"
+                              title={ly.visible ? "Görünür (Gizle)" : "Gizli (Göster)"}
+                            >
+                              {ly.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Lower line: Status indicator, action triggers */}
+                        <div className="flex items-center justify-between text-[10px] font-mono border-t border-slate-100/80 pt-1.5">
+                          <span className="text-slate-400 font-bold shrink-0">
+                            {ly.finalPoints.length + (ly.paths?.length || 0)} geometrik eleman
+                          </span>
+
+                          <div className="flex items-center gap-1.5">
+                            {/* Focus Camera to this sketch plane */}
+                            {isActive && (
+                              <span className="px-1.5 py-0.5 rounded bg-orange-600 text-[8.5px] font-bold text-white uppercase tracking-wider" title="Bu skeç şu anda 2D/3D çizim ekranında işlemlere açıktır">
+                                Aktif Skeç
+                              </span>
+                            )}
+
+                            {/* Delete layer sketch */}
+                            {layers.length > 1 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (confirm(`"${ly.name}" skeç dökümanını ve tüm alt çizimlerini silmek istediğinize emin misiniz?`)) {
+                                    setLayersRaw((prev) => prev.filter((l) => l.id !== ly.id));
+                                    setSketches((prev) => prev.filter((s) => s.id !== ly.id));
+                                    if (isActive) {
+                                      const remaining = layers.filter((l) => l.id !== ly.id);
+                                      setActiveLayerId(remaining[0].id);
+                                    }
+                                    setCmdLogs((prev) => [...prev, `[CAD ENGINE] "${ly.name}" skeçi silindi.`]);
+                                  }
+                                }}
+                                className="text-red-400 hover:text-red-600 p-0.5 rounded hover:bg-red-50 transition"
+                                title="Skeçi sil"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Active Sketchplane Altitude Level HUD */}
               <div className="mx-4 mt-4 bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200 p-3 flex items-center justify-between gap-3 shadow-sm select-none rounded-xl">
                 <div className="flex items-center gap-2 min-w-0">
@@ -10776,6 +10936,44 @@ export default function App() {
                 <span className="text-orange-600 font-extrabold text-right">{pendingSketchPlane.zHeight} mm</span>
               </div>
             </div>
+
+            {/* If it's an existing layer, show Edit option */}
+            {(() => {
+              const matchedLayer = layers.find(l => l.id === pendingSketchPlane.layerId || l.name === pendingSketchPlane.faceName);
+              if (matchedLayer) {
+                return (
+                  <div className="bg-orange-50 border border-orange-200/80 rounded-xl p-3.5 text-xs space-y-2 text-slate-700 select-none">
+                    <p className="font-extrabold flex items-center gap-1.5 text-orange-850">
+                      <Activity className="w-4 h-4 text-orange-655" />
+                      <span>Mevcut Skeçi Düzenle / Seç</span>
+                    </p>
+                    <p className="text-[11px] text-slate-500 leading-relaxed font-sans font-medium">
+                      Tıkladığınız 3D yüzey <b>{matchedLayer.name}</b> isimli mevcut çizime aittir. Bu çizimi düzenlemek için doğrudan skeç ekranına yükleyebilirsiniz:
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveLayerId(matchedLayer.id);
+                        setWorkspaceLayout('split');
+                        setSidebarTab('sketch');
+                        setCmdLogs((prev) => [
+                          ...prev,
+                          `[3D SELECTION] Tıklanan "${matchedLayer.name}" skeçi seçildi ve 2D çizim ekranına aktarıldı!`
+                        ]);
+                        setPendingSketchPlane(null);
+                      }}
+                      className="w-full py-2.5 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-extrabold rounded-lg shadow-md transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                    >
+                      ✏️ BU SKEÇİ AKTİF ET & DÜZENLE
+                    </button>
+                    <div className="text-[10px] text-slate-400 text-center font-bold pt-1">
+                      — VEYA AŞAĞIDAN YENİ BİR SKEÇ SIZINTISI OLUŞTURUN —
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {/* Inputs Form */}
             <div className="space-y-4 font-sans text-xs">
