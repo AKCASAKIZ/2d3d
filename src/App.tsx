@@ -41,6 +41,7 @@ import {
 import { Point, CommandType, DrawModeType, HistoryItem, SnapPoint, TrackLine, CADLayer, PathSettings, SnapToggles } from './types';
 import { calculateSnaps, distance, douglasPeucker, getClosestPointOnSegment, findSegmentIntersection, offsetPolygon } from './utils/geometry';
 import { ThreeViewport } from './components/ThreeViewport';
+import { SolidPhysicsProperties } from './utils/physics';
 
 const getDimensionLinePoints = (
   p1: Point,
@@ -375,7 +376,7 @@ export default function App() {
   ]);
 
   // States to manage elegant 3D surface face selection modal prompts
-  const [pendingSketchPlane, setPendingSketchPlane] = useState<{ zHeight: number; layerId: string; faceName: string } | null>(null);
+  const [pendingSketchPlane, setPendingSketchPlane] = useState<{ zHeight: number; layerId: string; faceName?: string; layerName?: string } | null>(null);
   const [newSketchName, setNewSketchName] = useState<string>('');
   const [newSketchDepth, setNewSketchDepth] = useState<number>(30);
   const [newSketchColor, setNewSketchColor] = useState<string>('#f59e0b');
@@ -576,6 +577,12 @@ export default function App() {
   const [sheetScaleMultiplier, setSheetScaleMultiplier] = useState<number>(1.0);
   const [sheetNotes, setSheetNotes] = useState<string>("1. Keskin kenarlar pah kırılıp çapaklardan arındırılacaktır.\n2. Tüm ölçüler mm (milimetre) cinsindendir.\n3. Genel toleranslar ISO 2768-m standartlarına uygundur.\n4. Parça yüzey pürüzlülüğü Ra 1.6 mikrometredir.");
 
+  // Dynamically populated engineering physical properties
+  const [physicsData, setPhysicsData] = useState<{
+    activeLayerStats: SolidPhysicsProperties | null;
+    assemblyStats: SolidPhysicsProperties | null;
+  } | null>(null);
+
   // Active Layer Dimensions accessor helper (fully automated undo-redo integrated!)
   const dimensions = activeLayer.dimensions || [];
   const setDimensions = (val: any[] | ((prev: any[]) => any[])) => {
@@ -627,6 +634,24 @@ export default function App() {
       originalPoints: Point[];
     }>;
   } | null>(null);
+
+  // Layer and Sketch dynamic viewport loader helper
+  const selectAndLoadSketch = (id: string) => {
+    setActiveLayerId(id);
+    setSelectedVertexIdx(null);
+    setSelectedPathIdx(-1);
+    setSelectedPathIndices([]);
+    setIsFinalPointsSelected(false);
+    setRawPoints([]);
+    setClickCount(0);
+    setTempPoint(null);
+    setSnapPoint(null);
+    setTrackedLines([]);
+    
+    // Smooth user layout transition
+    setWorkspaceLayout((prev) => (prev === '3d-only' ? 'split' : prev));
+    setSidebarTab('sketch');
+  };
 
   // Layer methods helper
   const addNewLayer = () => {
@@ -7849,8 +7874,7 @@ export default function App() {
                       };
                       setLayersRaw((prev) => [...prev, newLayer]);
                       setSketches((prev) => [...prev, { id: newId, name: newName, zOffset: 0 }]);
-                      setActiveLayerId(newId);
-                      setWorkspaceLayout('split');
+                      selectAndLoadSketch(newId);
                       setCmdLogs((prev) => [
                         ...prev,
                         `[CAD ENGINE] Yeni Skeç "${newName}" (Z=0) başarıyla oluşturuldu ve çizim ekranına yüklendi.`
@@ -7872,11 +7896,7 @@ export default function App() {
                         key={ly.id}
                         onClick={() => {
                           if (!isActive) {
-                            setActiveLayerId(ly.id);
-                            // Set layout to split if they are only in 3D
-                            if (workspaceLayout === '3d-only') {
-                              setWorkspaceLayout('split');
-                            }
+                            selectAndLoadSketch(ly.id);
                             setCmdLogs((prev) => [
                               ...prev,
                               `[CAD ENGINE] "${ly.name}" skeçi aktif edildi ve çizim ekranına yüklendi.`
@@ -8499,7 +8519,7 @@ export default function App() {
                         type="radio"
                         name="activeLayerChoice"
                         checked={isActive}
-                        onChange={() => setActiveLayerId(layer.id)}
+                        onChange={() => selectAndLoadSketch(layer.id)}
                         className="rounded-full w-3 h-3 text-orange-500 bg-white border-slate-300 cursor-pointer focus:ring-0 shrink-0 accent-orange-500"
                       />
                       <input
@@ -9580,6 +9600,128 @@ export default function App() {
                       {formatPrintTime(estimatedMinutes)}
                     </span>
                   </div>
+                </div>
+
+                {/* Real-time CAD Physics & Inertia Engine Console */}
+                <div className="border-t border-slate-200 pt-2.5 space-y-2 font-sans text-[10px] text-slate-500 text-left">
+                  <div className="flex justify-between items-center text-[10px] uppercase tracking-wide text-slate-600 pb-0.5 font-bold">
+                    <span className="flex items-center gap-1">
+                      <Workflow className="w-3.5 h-3.5 text-orange-650 animate-spin-slow" />
+                      Dynamic Engineering Physics
+                    </span>
+                    <span className="text-[8px] px-1 bg-blue-50 text-blue-600 rounded uppercase font-mono font-bold">FEA & Inertia</span>
+                  </div>
+
+                  {physicsData?.assemblyStats ? (
+                    <div className="space-y-1.5 animate-fade-in">
+                      {/* Density and Material info */}
+                      <div className="grid grid-cols-2 gap-1.5 bg-slate-50/50 p-2 rounded-lg border border-slate-200/60">
+                        <div>
+                          <span className="block text-[8px] uppercase font-mono text-slate-400 font-bold">Material:</span>
+                          <strong className="text-[10px] font-sans text-slate-700">{sheetMaterial}</strong>
+                        </div>
+                        <div>
+                          <span className="block text-[8px] uppercase font-mono text-slate-400 font-bold">Density:</span>
+                          <strong className="text-[10px] font-mono text-slate-700">
+                            {sheetMaterial === "Steel" ? "7.85" :
+                             sheetMaterial === "Aluminum" ? "2.70" :
+                             sheetMaterial === "Brass" ? "8.40" :
+                             sheetMaterial === "Copper" ? "8.96" :
+                             sheetMaterial === "Acrylic" ? "1.18" :
+                             sheetMaterial === "PLA (3D Print)" ? "1.24" :
+                             sheetMaterial === "Oak Wood" ? "0.75" : "7.85"} g/cm³
+                          </strong>
+                        </div>
+                      </div>
+
+                      {/* Weight and Volume Grid */}
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <div className="bg-slate-50 border border-slate-200 p-2 rounded-lg">
+                          <span className="block text-[8px] text-slate-400 uppercase font-mono font-bold">Engineered Mass:</span>
+                          <span className="text-sm font-black text-amber-600 font-mono">
+                            {physicsData.assemblyStats.mass >= 1000 
+                              ? `${(physicsData.assemblyStats.mass / 1000).toFixed(3)} kg` 
+                              : `${physicsData.assemblyStats.mass.toFixed(1)} g`}
+                          </span>
+                        </div>
+                        <div className="bg-slate-50 border border-slate-200 p-2 rounded-lg">
+                          <span className="block text-[8px] text-slate-400 uppercase font-mono font-bold">Extruded Volume:</span>
+                          <span className="text-sm font-black text-slate-700 font-mono">
+                            {(physicsData.assemblyStats.volume / 1000).toFixed(3)} cm³
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Center of Mass Coordinates */}
+                      <div className="bg-slate-50/80 border border-slate-200 p-2 rounded-lg space-y-1">
+                        <span className="block text-[8px] text-slate-400 uppercase font-mono font-bold">Center of Mass (CoM Coordinate):</span>
+                        <div className="grid grid-cols-3 gap-1">
+                          <div className="bg-white/80 border border-slate-150 rounded px-1.5 py-1 text-center font-mono text-[9px]">
+                            <span className="text-red-500 font-bold mr-0.5">X:</span>
+                            <span className="text-slate-800 font-extrabold">{physicsData.assemblyStats.centerOfMass.x.toFixed(2)}</span>
+                            <span className="text-slate-400 text-[8px] ml-0.5">mm</span>
+                          </div>
+                          <div className="bg-white/80 border border-slate-150 rounded px-1.5 py-1 text-center font-mono text-[9px]">
+                            <span className="text-green-600 font-bold mr-0.5">Y:</span>
+                            <span className="text-slate-800 font-extrabold">{physicsData.assemblyStats.centerOfMass.y.toFixed(2)}</span>
+                            <span className="text-slate-400 text-[8px] ml-0.5">mm</span>
+                          </div>
+                          <div className="bg-white/80 border border-slate-150 rounded px-1.5 py-1 text-center font-mono text-[9px]">
+                            <span className="text-blue-500 font-bold mr-0.5">Z:</span>
+                            <span className="text-slate-800 font-extrabold">{physicsData.assemblyStats.centerOfMass.z.toFixed(2)}</span>
+                            <span className="text-slate-400 text-[8px] ml-0.5">mm</span>
+                          </div>
+                        </div>
+                        <span className="block text-[7.5px] leading-relaxed text-slate-400 italic">
+                          *Gyroscope helper marker is rendered as amber rings in the 3D viewport.
+                        </span>
+                      </div>
+
+                      {/* Moments of Inertia */}
+                      <div className="bg-slate-50/80 border border-slate-200 p-2 rounded-lg space-y-1">
+                        <div className="flex justify-between items-center pr-0.5">
+                          <span className="block text-[8px] text-slate-400 uppercase font-mono font-bold">Principal Moments of Inertia:</span>
+                          <span className="text-[7.5px] text-orange-600 font-bold uppercase tracking-wide">Eigenvalues Io</span>
+                        </div>
+                        <div className="bg-white border border-slate-150 rounded p-1.5 space-y-1 font-mono text-[9px]">
+                          <div className="flex justify-between border-b border-slate-100 pb-1">
+                            <span className="text-slate-500 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                              I₁ (Primary X-Axis):
+                            </span>
+                            <span className="text-slate-800 font-extrabold">
+                              {physicsData.assemblyStats.principalMoments[0].toExponential(3)} g·mm²
+                            </span>
+                          </div>
+                          <div className="flex justify-between border-b border-slate-100 pb-1 pt-0.5">
+                            <span className="text-slate-500 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                              I₂ (Secondary Y-Axis):
+                            </span>
+                            <span className="text-slate-800 font-extrabold">
+                              {physicsData.assemblyStats.principalMoments[1].toExponential(3)} g·mm²
+                            </span>
+                          </div>
+                          <div className="flex justify-between pt-0.5">
+                            <span className="text-slate-500 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                              I₃ (Tertiary Z-Axis):
+                            </span>
+                            <span className="text-slate-800 font-extrabold">
+                              {physicsData.assemblyStats.principalMoments[2].toExponential(3)} g·mm²
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[7.5px] leading-relaxed text-slate-400">
+                          These represent rotation resistance about eigenvectors passing through the centroid. Value shifts as sketch parameters change.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-50 border border-slate-200 rounded p-3 text-center text-slate-400 leading-normal italic py-4">
+                      No solid geometry loaded. Create or draw loop lines to compile physical parameters.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -10748,6 +10890,8 @@ export default function App() {
                 setNewSketchDepth(30);
                 setNewSketchColor('#eab308'); // Amber
               }}
+              sheetMaterial={sheetMaterial}
+              onPhysicsCalculated={setPhysicsData}
             />
           </div>
             </>
@@ -10929,7 +11073,7 @@ export default function App() {
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 text-xs font-mono text-slate-600 space-y-1">
               <div className="flex justify-between">
                 <span>Algılanan Gövde:</span>
-                <strong className="text-slate-800 font-sans font-bold">{pendingSketchPlane.faceName}</strong>
+                <strong className="text-slate-800 font-sans font-bold">{pendingSketchPlane.layerName || pendingSketchPlane.faceName || 'Bilinmeyen Gövde'}</strong>
               </div>
               <div className="flex justify-between items-center text-sm">
                 <span>Düzlem Yüksekliği (Z):</span>
@@ -10939,7 +11083,11 @@ export default function App() {
 
             {/* If it's an existing layer, show Edit option */}
             {(() => {
-              const matchedLayer = layers.find(l => l.id === pendingSketchPlane.layerId || l.name === pendingSketchPlane.faceName);
+              const matchedLayer = layers.find(l => 
+                l.id === pendingSketchPlane.layerId || 
+                l.name === pendingSketchPlane.faceName || 
+                l.name === pendingSketchPlane.layerName
+              );
               if (matchedLayer) {
                 return (
                   <div className="bg-orange-50 border border-orange-200/80 rounded-xl p-3.5 text-xs space-y-2 text-slate-700 select-none">
@@ -10953,9 +11101,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => {
-                        setActiveLayerId(matchedLayer.id);
-                        setWorkspaceLayout('split');
-                        setSidebarTab('sketch');
+                        selectAndLoadSketch(matchedLayer.id);
                         setCmdLogs((prev) => [
                           ...prev,
                           `[3D SELECTION] Tıklanan "${matchedLayer.name}" skeçi seçildi ve 2D çizim ekranına aktarıldı!`
@@ -11071,18 +11217,13 @@ export default function App() {
                     },
                   ]);
 
-                  // 3. Make active immediately
-                  setActiveLayerId(finalLayerId);
+                  // 3. Coordinate activation via selectAndLoadSketch
+                  selectAndLoadSketch(finalLayerId);
 
-                  // 4. Log in command logs history console
                   setCmdLogs((prev) => [
                     ...prev,
                     `[CAD ENGINE] Yeni 3D Sketç Düzlemi "${finalName}" zAltitude=${pendingSketchPlane.zHeight}mm seviyesinde başlatıldı. Çizime başlayabilirsiniz!`
                   ]);
-
-                  // 5. UX Transition - Auto shift to split workspace and open drawing toolbox
-                  setWorkspaceLayout('split');
-                  setSidebarTab('sketch');
 
                   // Close popup
                   setPendingSketchPlane(null);
