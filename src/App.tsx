@@ -328,11 +328,11 @@ const isColorDark = (color: string): boolean => {
 };
 
 export default function App() {
-  // Layer state
+  // Layer / Sketch state
   const [layers, setLayersRaw] = useState<CADLayer[]>([
     {
       id: 'default',
-      name: 'Base Plate',
+      name: 'main_sketch',
       color: '#10b981', // Emerald
       visible: true,
       locked: false,
@@ -340,6 +340,7 @@ export default function App() {
       isClosed: false,
       opType: 'extrude',
       depth: 100,
+      zOffset: 0,
     },
     {
       id: 'housing',
@@ -351,6 +352,7 @@ export default function App() {
       isClosed: false,
       opType: 'extrude',
       depth: 60,
+      zOffset: 0,
     },
     {
       id: 'cutouts',
@@ -362,9 +364,21 @@ export default function App() {
       isClosed: false,
       opType: 'extrude',
       depth: 125,
+      zOffset: 0,
     },
   ]);
   const [activeLayerId, setActiveLayerId] = useState<string>('default');
+
+  // Dedicated Sketches collection state as requested by the user
+  const [sketches, setSketches] = useState<Array<{ id: string; name: string; zOffset: number; parentLayerId?: string }>>([
+    { id: 'default', name: 'main_sketch', zOffset: 0 }
+  ]);
+
+  // States to manage elegant 3D surface face selection modal prompts
+  const [pendingSketchPlane, setPendingSketchPlane] = useState<{ zHeight: number; layerId: string; faceName: string } | null>(null);
+  const [newSketchName, setNewSketchName] = useState<string>('');
+  const [newSketchDepth, setNewSketchDepth] = useState<number>(30);
+  const [newSketchColor, setNewSketchColor] = useState<string>('#f59e0b');
 
   const setLayers = (val: CADLayer[] | ((prev: CADLayer[]) => CADLayer[])) => {
     setLayersRaw((prev) => {
@@ -7808,6 +7822,25 @@ export default function App() {
           {sidebarTab === 'sketch' && (
             <div className="flex-1 flex flex-col overflow-y-auto divide-y divide-slate-200">
               
+              {/* Active Sketchplane Altitude Level HUD */}
+              <div className="mx-4 mt-4 bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200 p-3 flex items-center justify-between gap-3 shadow-sm select-none rounded-xl">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="bg-orange-600 text-white rounded-lg p-1.5 shrink-0 flex items-center justify-center shadow">
+                    <Sparkles className="w-3.5 h-3.5 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[9px] font-mono uppercase tracking-wider text-orange-700 font-bold block leading-none">AKTİF ÇİZİM DÜZLEMİ</span>
+                    <strong className="text-xs font-sans font-extrabold text-slate-800 truncate block mt-1" title={activeLayer.name}>
+                      {activeLayer.name}
+                    </strong>
+                  </div>
+                </div>
+                <div className="bg-white border border-orange-100 rounded-lg px-2.5 py-1 text-center font-mono shadow-xs shrink-0 leading-tight">
+                  <span className="text-[8px] font-extrabold text-slate-400 block pb-0.5 uppercase">Alt (Z)</span>
+                  <span className="text-sm font-extrabold text-orange-600">{activeLayer.zOffset || 0}mm</span>
+                </div>
+              </div>
+
               {/* Section A: Active Sketch Sandbox */}
               <div className="p-4">
                 <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5 mb-3">
@@ -8318,6 +8351,11 @@ export default function App() {
                         }`}
                         title="Click to rename this layer"
                       />
+                      {layer.zOffset !== undefined && layer.zOffset !== 0 && (
+                        <span className="text-[9px] font-mono font-bold text-orange-600 bg-orange-100 hover:bg-orange-200/80 px-1 py-0.5 rounded leading-none shrink-0" title="Bu çizim 3D yüzey üzerinde çalışmaktadır">
+                          Z: {layer.zOffset}mm
+                        </span>
+                      )}
                     </div>
 
                     {/* Layer Action Controls Right Section */}
@@ -10544,6 +10582,12 @@ export default function App() {
               layers={layers}
               activeLayerId={activeLayerId}
               triggerStlExportRef={triggerStlExportRef}
+              onSelectFace={(params) => {
+                setPendingSketchPlane(params);
+                setNewSketchName(`SKETCH_${layers.length + 1}`);
+                setNewSketchDepth(30);
+                setNewSketchColor('#eab308'); // Amber
+              }}
             />
           </div>
             </>
@@ -10696,6 +10740,158 @@ export default function App() {
                 className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold transition shadow cursor-pointer"
               >
                 Build and Draw
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3D SURFACE SELECTION SKETCH PLANE CONFIGURATION MODAL */}
+      {pendingSketchPlane && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs select-none animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transition-all duration-300 scale-100 p-6 flex flex-col gap-5">
+            {/* Modal Header */}
+            <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
+              <div className="bg-orange-500 text-white p-2 rounded-xl flex items-center justify-center shadow-md animate-bounce">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="text-sm font-sans font-extrabold text-slate-800 uppercase tracking-wide leading-none">
+                  Yeni Çalışma Düzlemi Oluştur
+                </h3>
+                <span className="text-[10px] text-slate-400 font-semibold font-mono leading-none block mt-1">
+                  NEW 3D SKETCH WORKSPACE SETTINGS
+                </span>
+              </div>
+            </div>
+
+            {/* Flat surface parameters */}
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 text-xs font-mono text-slate-600 space-y-1">
+              <div className="flex justify-between">
+                <span>Algılanan Gövde:</span>
+                <strong className="text-slate-800 font-sans font-bold">{pendingSketchPlane.faceName}</strong>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <span>Düzlem Yüksekliği (Z):</span>
+                <span className="text-orange-600 font-extrabold text-right">{pendingSketchPlane.zHeight} mm</span>
+              </div>
+            </div>
+
+            {/* Inputs Form */}
+            <div className="space-y-4 font-sans text-xs">
+              {/* Name field */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-slate-500 font-bold uppercase tracking-wider text-[10px] font-mono">
+                  1. Sketç / Katman Adı (Sketch Name):
+                </label>
+                <input
+                  type="text"
+                  value={newSketchName}
+                  onChange={(e) => setNewSketchName(e.target.value.toUpperCase().replace(/\s+/g, '_'))}
+                  placeholder="SKETCH_02"
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-orange-500 rounded px-3 py-2 text-slate-850 font-mono text-sm outline-none font-bold placeholder-slate-400"
+                  autoFocus
+                />
+                <span className="text-[10px] text-slate-400 italic">Boşluklar alt çizgi (`_`) karakterine dönüştürülür.</span>
+              </div>
+
+              {/* Depth field */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-slate-500 font-bold uppercase tracking-wider text-[10px] font-mono">
+                    2. Ekstrüzyon Derinliği:
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      value={newSketchDepth}
+                      onChange={(e) => setNewSketchDepth(Math.max(1, parseInt(e.target.value) || 0))}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-orange-500 rounded px-3 py-2 text-slate-850 font-mono text-sm outline-none font-bold"
+                    />
+                    <span className="text-slate-400 font-bold font-mono">mm</span>
+                  </div>
+                </div>
+
+                {/* Color option */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-slate-500 font-bold uppercase tracking-wider text-[10px] font-mono">
+                    3. Parça Rengi (Color):
+                  </label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <input
+                      type="color"
+                      value={newSketchColor}
+                      onChange={(e) => setNewSketchColor(e.target.value)}
+                      className="w-8 h-8 p-0 bg-transparent cursor-pointer rounded-lg border-0 shrink-0 select-none outline-none overflow-hidden"
+                    />
+                    <span className="text-slate-500 font-mono text-[10px] font-bold uppercase">{newSketchColor}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2.5 justify-end mt-2 text-xs font-mono">
+              <button
+                type="button"
+                onClick={() => setPendingSketchPlane(null)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-550 transition font-bold cursor-pointer"
+              >
+                VAZGEÇ (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const finalName = newSketchName.trim() || `SKETCH_${layers.length + 1}`;
+                  const finalLayerId = `layer_${Date.now()}`;
+                  
+                  // Construct deep-linked CADLayer
+                  const newLayer: CADLayer = {
+                    id: finalLayerId,
+                    name: finalName,
+                    color: newSketchColor,
+                    visible: true,
+                    locked: false,
+                    finalPoints: [],
+                    isClosed: false,
+                    opType: 'extrude',
+                    depth: Number(newSketchDepth) || 30,
+                    zOffset: pendingSketchPlane.zHeight,
+                  };
+
+                  // 1. Put layer state inside the CADerIM document
+                  setLayersRaw((prev) => [...prev, newLayer]);
+
+                  // 2. Put inside user sketches list for reference tracking
+                  setSketches((prev) => [
+                    ...prev,
+                    {
+                      id: finalLayerId,
+                      name: finalName,
+                      zOffset: pendingSketchPlane.zHeight,
+                      parentLayerId: pendingSketchPlane.layerId,
+                    },
+                  ]);
+
+                  // 3. Make active immediately
+                  setActiveLayerId(finalLayerId);
+
+                  // 4. Log in command logs history console
+                  setCmdLogs((prev) => [
+                    ...prev,
+                    `[CAD ENGINE] Yeni 3D Sketç Düzlemi "${finalName}" zAltitude=${pendingSketchPlane.zHeight}mm seviyesinde başlatıldı. Çizime başlayabilirsiniz!`
+                  ]);
+
+                  // 5. UX Transition - Auto shift to split workspace and open drawing toolbox
+                  setWorkspaceLayout('split');
+                  setSidebarTab('sketch');
+
+                  // Close popup
+                  setPendingSketchPlane(null);
+                }}
+                className="px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-extrabold transition shadow-md hover:shadow-lg flex items-center gap-1.5 cursor-pointer"
+              >
+                DÜZLESTİR VE ÇİZ (Draft Plane)
               </button>
             </div>
           </div>
