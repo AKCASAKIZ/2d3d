@@ -547,6 +547,9 @@ export default function App() {
   const [showPolygonPrompt, setShowPolygonPrompt] = useState(false);
   const [polygonSidesInput, setPolygonSidesInput] = useState("6");
   const [polygonTypeInput, setPolygonTypeInput] = useState<'corner' | 'midpoint'>('corner');
+  const [showDraftOpModal, setShowDraftOpModal] = useState(false);
+  const [draftOpType, setDraftOpType] = useState<'union' | 'cut'>('cut');
+  const [draftOpDepth, setDraftOpDepth] = useState<number>(30);
   const [filletRadius, setFilletRadius] = useState<number>(24);
   const [chamferDistance, setChamferDistance] = useState<number>(20);
   const [offsetDistance, setOffsetDistance] = useState<number>(15);
@@ -2945,6 +2948,93 @@ export default function App() {
       return l;
     }));
   };
+  
+  const commitDraftWithSettings = (booleanType: 'union' | 'cut', depth: number) => {
+    saveState();
+    setLayers((prevLayers) =>
+      prevLayers.map((l) => {
+        if (l.id === activeLayerId) {
+          const currentPaths = l.paths || [];
+          const ptsToCommit = [...l.finalPoints];
+          
+          if (l.isClosed && ptsToCommit.length >= 3 && distance(ptsToCommit[0], ptsToCommit[ptsToCommit.length - 1]) > 0.1) {
+            ptsToCommit.push({ ...ptsToCommit[0] });
+          }
+          
+          const newPathIdx = currentPaths.length;
+          const currentSettings = l.pathSettings ? [...l.pathSettings] : [];
+          
+          while (currentSettings.length < newPathIdx) {
+            currentSettings.push({
+              opType: l.opType || 'extrude',
+              depth: l.depth || 30,
+              revolveAxis: l.revolveAxis || 'center',
+              booleanType: 'union'
+            });
+          }
+          
+          currentSettings[newPathIdx] = {
+            opType: 'extrude',
+            depth: depth,
+            revolveAxis: l.revolveAxis || 'center',
+            booleanType: booleanType
+          };
+          
+          return {
+            ...l,
+            paths: [...currentPaths, ptsToCommit],
+            pathSettings: currentSettings,
+            finalPoints: [],
+            isClosed: false
+          };
+        }
+        return l;
+      })
+    );
+    
+    // Select the newly committed path so they can see and modify its settings easily!
+    const newPathCount = (activeLayer.paths || []).length + 1;
+    setSelectedPathIdx(newPathCount - 1);
+    setSelectedVertexIdx(null);
+    
+    clearCommand();
+    setTempPoint(null);
+    setShowDraftOpModal(false);
+    logCommandResponse(`Şekil sketçe kaydedildi: İşlem = ${booleanType === 'union' ? 'UNION (Katı Ekle)' : 'CUT (Oyuk Kes)'}, Derinlik = ${depth} mm.`);
+  };
+
+  const triggerOpPromptForPoints = (pts: Point[]) => {
+    if (pts.length === 0) return;
+    let sx = 0, sy = 0;
+    const circlePt = pts.find(p => p.circleData);
+    const center = circlePt && circlePt.circleData ? circlePt.circleData.center : (() => {
+      pts.forEach(p => { sx += p.x; sy += p.y; });
+      return { x: sx / (pts.length || 1), y: sy / (pts.length || 1) };
+    })();
+
+    let isNested = false;
+    const existingPaths = activeLayer.paths || [];
+    for (const path of existingPaths) {
+      if (path.length >= 3) {
+        let inside = false;
+        for (let i = 0, j = path.length - 1; i < path.length; j = i++) {
+          const xi = path[i].x, yi = path[i].y;
+          const xj = path[j].x, yj = path[j].y;
+          const intersect = ((yi > center.y) !== (yj > center.y))
+            && (center.x < (xj - xi) * (center.y - yi) / (yj - yi || 1) + xi);
+          if (intersect) inside = !inside;
+        }
+        if (inside) {
+          isNested = true;
+          break;
+        }
+      }
+    }
+
+    setDraftOpDepth(activeLayer.depth || 30);
+    setDraftOpType(isNested ? 'cut' : 'union');
+    setShowDraftOpModal(true);
+  };
 
   const renderShapeSolidSettings = () => {
     const label = selectedPathIdx === -1 ? "Aktif Çizim (Active)" : `Şekil #${selectedPathIdx + 1}`;
@@ -5272,13 +5362,15 @@ export default function App() {
     if (currentCommand !== '') {
       if (currentCommand === 'line') {
         if (finalPoints.length > 2 && snapPoint?.type === 'end' && snapPoint.x === finalPoints[0].x) {
-          saveState([...finalPoints, { x: snapPoint.x, y: snapPoint.y }], true, 0);
-          setFinalPoints((prev) => [...prev, { x: snapPoint.x, y: snapPoint.y }]);
+          const closedLinePts = [...finalPoints, { x: snapPoint.x, y: snapPoint.y }];
+          saveState(closedLinePts, true, 0);
+          setFinalPoints(closedLinePts);
           setIsClosed(true);
           setTempPoint(null);
           setDrawMode('drag');
           clearCommand();
           logCommandResponse('Continuous path successfully closed.');
+          triggerOpPromptForPoints(closedLinePts);
         } else {
           saveState([...finalPoints, { x, y }]);
           setFinalPoints((prev) => [...prev, { x, y }]);
@@ -5305,6 +5397,7 @@ export default function App() {
           setDrawMode('drag');
           clearCommand();
           logCommandResponse('Rectangle added to workspace.');
+          triggerOpPromptForPoints(polyRect);
         }
       } else if (currentCommand === 'circle' || currentCommand === 'polygon') {
         if (clickCount === 0) {
@@ -5350,6 +5443,7 @@ export default function App() {
           setSelectedVertexIdx(0);
           setSelectedPathIdx(-1);
           logCommandResponse(`${currentCommand === 'circle' ? 'Circle' : `Polygon (${polygonSides} sides)`} added to workspace.`);
+          triggerOpPromptForPoints(points);
         }
       } else if (currentCommand === 'dimension') {
         const pt = snapPoint ? { x: snapPoint.x, y: snapPoint.y } : { x, y };
@@ -8120,28 +8214,34 @@ export default function App() {
           {finalPoints.length >= 2 && (
             <button
               onClick={() => {
-                saveState();
-                setLayers((prevLayers) =>
-                  prevLayers.map((l) => {
-                    if (l.id === activeLayerId) {
-                      const currentPaths = l.paths || [];
-                      const ptsToCommit = [...l.finalPoints];
-                      if (l.isClosed && ptsToCommit.length >= 3 && distance(ptsToCommit[0], ptsToCommit[ptsToCommit.length - 1]) > 0.1) {
-                        ptsToCommit.push({ ...ptsToCommit[0] });
+                if (finalPoints.length >= 3) {
+                  // Direct trigger prompt modal for 3D operations choice and depth
+                  triggerOpPromptForPoints(finalPoints);
+                } else {
+                  // Standard direct commit for simple line segments
+                  saveState();
+                  setLayers((prevLayers) =>
+                    prevLayers.map((l) => {
+                      if (l.id === activeLayerId) {
+                        const currentPaths = l.paths || [];
+                        const ptsToCommit = [...l.finalPoints];
+                        if (l.isClosed && ptsToCommit.length >= 3 && distance(ptsToCommit[0], ptsToCommit[ptsToCommit.length - 1]) > 0.1) {
+                          ptsToCommit.push({ ...ptsToCommit[0] });
+                        }
+                        return {
+                          ...l,
+                          paths: [...currentPaths, ptsToCommit],
+                          finalPoints: [],
+                          isClosed: false
+                        };
                       }
-                      return {
-                        ...l,
-                        paths: [...currentPaths, ptsToCommit],
-                        finalPoints: [],
-                        isClosed: false
-                      };
-                    }
-                    return l;
-                  })
-                );
-                clearCommand();
-                setTempPoint(null);
-                logCommandResponse("Drafting shape completed and saved to layer paths.");
+                      return l;
+                    })
+                  );
+                  clearCommand();
+                  setTempPoint(null);
+                  logCommandResponse("Drafting shape completed and saved to layer paths.");
+                }
               }}
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100 transition font-mono font-bold animate-pulse cursor-pointer"
               title="Save active path to layer paths database"
@@ -11761,6 +11861,117 @@ export default function App() {
                 className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold transition shadow cursor-pointer"
               >
                 Build and Draw
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDraftOpModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in font-sans">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-5 w-96 shadow-2xl max-w-[95%]">
+            <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-2 mb-3">
+              <span className="p-1 rounded bg-orange-500/20 text-orange-400">
+                <Sparkles className="w-4 h-4 animate-pulse" />
+              </span>
+              3D Katı Model İşlemi (3D Operation)
+            </h3>
+            <p className="text-xs text-zinc-400 mb-4 leading-relaxed text-left">
+              Çizdiğiniz kapalı şeklin 3D katı modelde ne tür bir rol oynayacağını ve derinliğini belirleyin:
+            </p>
+
+            {/* Operation Type Switcher */}
+            <div className="space-y-2 mb-4 text-left">
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-mono font-bold font-semibold">
+                İşlem Tipi / Operation Type:
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDraftOpType('union')}
+                  className={`rounded text-xs px-2 py-2.5 font-mono font-bold border transition text-center cursor-pointer ${
+                    draftOpType === 'union'
+                      ? 'bg-orange-600/20 border-orange-500 text-orange-400'
+                      : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-300'
+                  }`}
+                >
+                  EXTRUDE (Katı Ekle)
+                  <div className="text-[8px] opacity-70 font-sans tracking-tight leading-none mt-1 font-normal">
+                    UNION (Additive Solid)
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraftOpType('cut')}
+                  className={`rounded text-xs px-2 py-2.5 font-mono font-bold border transition text-center cursor-pointer ${
+                    draftOpType === 'cut'
+                      ? 'bg-rose-600/20 border-rose-500 text-rose-400'
+                      : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-zinc-300'
+                  }`}
+                >
+                  HOLE (Delik / Kes)
+                  <div className="text-[8px] opacity-70 font-sans tracking-tight leading-none mt-1 font-normal">
+                    CUT (Subtractive Void)
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Depth Input */}
+            <div className="space-y-1.5 mb-5 text-left">
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider font-mono font-bold">
+                Derinlik / Depth (mm):
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="0.1"
+                  max="1000"
+                  step="1"
+                  value={draftOpDepth}
+                  onChange={(e) => setDraftOpDepth(parseFloat(e.target.value) || 0)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (draftOpDepth > 0) {
+                        commitDraftWithSettings(draftOpType, draftOpDepth);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setShowDraftOpModal(false);
+                    }
+                  }}
+                  className="flex-1 bg-zinc-950 border border-zinc-850 focus:border-orange-500 rounded px-2.5 py-1.5 text-zinc-100 font-mono text-sm outline-none font-bold"
+                  autoFocus
+                />
+              </div>
+              <p className="text-[9px] text-zinc-500 italic mt-1 font-mono">
+                * Varsayılan parça kalınlığı katman kalınlığı kadar ({activeLayer ? activeLayer.depth : 30} mm) alınabilir.
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-2 justify-end text-xs font-mono select-none">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDraftOpModal(false);
+                }}
+                className="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition cursor-pointer"
+                title="Şekli sketçte taslak olarak tutar ama 3D modele katmaz."
+              >
+                Taslak Olarak Koru (Draft)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (draftOpDepth > 0) {
+                    commitDraftWithSettings(draftOpType, draftOpDepth);
+                  }
+                }}
+                disabled={draftOpDepth <= 0}
+                className="px-4 py-1.5 rounded bg-orange-600 hover:bg-orange-500 text-white font-bold transition shadow cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Onayla (Confirm)
               </button>
             </div>
           </div>
