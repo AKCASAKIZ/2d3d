@@ -1,6 +1,6 @@
 {
-  "name": "CADERIM",
-  "description": "Parametric 2D/3D CAD with smart snapping, fillet/chamfer geometry, dimension editing, section analysis, and 3D extrusion/revolution with STL export.",
+  "name": "WebForge3D Pro",
+  "description": "Enterprise-grade parametric 2D/3D CAD modeler & dynamic inertia workspace with real-time interoperability bridge for the WebForge3D ecosystem.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
