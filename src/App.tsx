@@ -37,6 +37,7 @@ import {
   Sliders,
   Grid,
   Zap,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 import { Point, CommandType, DrawModeType, HistoryItem, SnapPoint, TrackLine, CADLayer, PathSettings, SnapToggles } from './types';
@@ -569,6 +570,9 @@ export default function App() {
   const [movePointSelectMode, setMovePointSelectMode] = useState<'base_point' | 'target_point' | null>(null);
   const [copyPointSelectMode, setCopyPointSelectMode] = useState<'base_point' | 'target_point' | null>(null);
   const [baseSelectionPoint, setBaseSelectionPoint] = useState<Point | null>(null);
+  const [alignmentPt1, setAlignmentPt1] = useState<Point | null>(null);
+  const [alignmentPt2, setAlignmentPt2] = useState<Point | null>(null);
+  const [alignmentSelectMode, setAlignmentSelectMode] = useState<'p1' | 'p2' | null>(null);
   const [sidebarTab, setSidebarTab] = useState<'sketch' | 'layers' | 'dimensions' | '3d' | 'bridge'>('sketch');
 
   // WebForge3D & Technical Drawing Layout integration states
@@ -2491,6 +2495,68 @@ export default function App() {
 
       logCommandResponse(`✨ Otomatik Ölçülendirme Tamamlandı! En: ${width.toFixed(1)} mm, Boy: ${height.toFixed(1)} mm parametrik etiketleri eklendi.`);
     }
+  };
+
+  const updatePointCoordinate = (oldPt: Point, newX: number, newY: number) => {
+    saveState();
+    
+    // 1. Check finalPoints
+    const updatedFinalPoints = finalPoints.map(p => {
+      const match = p.id && oldPt.id ? p.id === oldPt.id : (Math.abs(p.x - oldPt.x) < 1e-4 && Math.abs(p.y - oldPt.y) < 1e-4);
+      if (match) {
+        const u = { ...p, x: newX, y: newY };
+        if (p.circleData) {
+          u.circleData = { ...p.circleData, center: { x: newX, y: newY } };
+        }
+        if (p.polygonData) {
+          u.polygonData = { ...p.polygonData, center: { x: newX, y: newY } };
+        }
+        return u;
+      }
+      return p;
+    });
+    setFinalPoints(updatedFinalPoints);
+
+    // 2. Check activeLayer.paths
+    if (activeLayer.paths) {
+      const updatedPaths = activeLayer.paths.map(path => {
+        return path.map(p => {
+          const match = p.id && oldPt.id ? p.id === oldPt.id : (Math.abs(p.x - oldPt.x) < 1e-4 && Math.abs(p.y - oldPt.y) < 1e-4);
+          if (match) {
+            const u = { ...p, x: newX, y: newY };
+            if (p.circleData) {
+              u.circleData = { ...p.circleData, center: { x: newX, y: newY } };
+            }
+            if (p.polygonData) {
+              u.polygonData = { ...p.polygonData, center: { x: newX, y: newY } };
+            }
+            return u;
+          }
+          return p;
+        });
+      });
+      setPaths(updatedPaths);
+    }
+  };
+
+  const alignPointsX = () => {
+    if (!alignmentPt1 || !alignmentPt2) return;
+    // Align Point 2 vertically with Point 1, i.e. make X the same
+    const newX = alignmentPt1.x;
+    const newY = alignmentPt2.y;
+    updatePointCoordinate(alignmentPt2, newX, newY);
+    setAlignmentPt2({ ...alignmentPt2, x: newX, y: newY });
+    logCommandResponse(`✨ Dikeyde hizalandı: Nokta 2 X değeri ${newX.toFixed(2)} mm yapıldı.`);
+  };
+
+  const alignPointsY = () => {
+    if (!alignmentPt1 || !alignmentPt2) return;
+    // Align Point 2 horizontally with Point 1, i.e. make Y the same
+    const newX = alignmentPt2.x;
+    const newY = alignmentPt1.y;
+    updatePointCoordinate(alignmentPt2, newX, newY);
+    setAlignmentPt2({ ...alignmentPt2, x: newX, y: newY });
+    logCommandResponse(`✨ Yatayda hizalandı: Nokta 2 Y değeri ${newY.toFixed(2)} mm yapıldı.`);
   };
 
   // Geometric modifiers
@@ -4615,6 +4681,185 @@ export default function App() {
       ctx.restore();
     }
 
+    // ==========================================
+    // 8.5 ACTIVE ALIGNMENT VISUALIZER DRAWING
+    // ==========================================
+    if (alignmentPt1) {
+      const activeP2 = alignmentPt2 || (alignmentSelectMode === 'p2' && hoverCoords ? hoverCoords : null);
+      
+      ctx.save();
+      
+      // Draw Point 1 indicator (Anchor)
+      const x1 = alignmentPt1.x;
+      const y1 = alignmentPt1.y;
+      
+      ctx.lineWidth = 2.0 / viewZoom;
+      ctx.strokeStyle = '#06b6d4'; // Cyan primary anchor color
+      ctx.fillStyle = 'rgba(6, 182, 212, 0.2)';
+      ctx.beginPath();
+      ctx.arc(x1, y1, 8 / viewZoom, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.stroke();
+      
+      ctx.fillStyle = '#06b6d4';
+      ctx.beginPath();
+      ctx.arc(x1, y1, 3 / viewZoom, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Label for Point 1
+      ctx.fillStyle = '#06b6d4';
+      ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px monospace`;
+      ctx.fillText(`[P1: ${x1.toFixed(1)}, ${y1.toFixed(1)}]`, x1 + 10 / viewZoom, y1 - 10 / viewZoom);
+
+      if (activeP2) {
+        const x2 = activeP2.x;
+        const y2 = activeP2.y;
+        
+        // Draw Point 2 indicator (Target)
+        ctx.strokeStyle = '#a855f7'; // Purple-500
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.2)';
+        ctx.beginPath();
+        ctx.arc(x2, y2, 8 / viewZoom, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.fillStyle = '#a855f7';
+        ctx.beginPath();
+        ctx.arc(x2, y2, 3 / viewZoom, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        // Label for Point 2
+        ctx.fillStyle = '#a855f7';
+        ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px monospace`;
+        ctx.fillText(`[P2: ${x2.toFixed(1)}, ${y2.toFixed(1)}]`, x2 + 10 / viewZoom, y2 - 10 / viewZoom);
+        
+        // Let's compute offsets
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        const dist = Math.hypot(dx, dy);
+        const angleRad = Math.atan2(dy, dx);
+        const angleDeg = (angleRad * 180) / Math.PI;
+        
+        // 1. Slant direct connector line
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.7)'; // Cyan slant line
+        ctx.lineWidth = 1.5 / viewZoom;
+        ctx.setLineDash([4 / viewZoom, 3 / viewZoom]);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        
+        // 2. Horizontal & Vertical error projections
+        // Intersection corner at (x2, y1)
+        const cornerX = x2;
+        const cornerY = y1;
+        
+        ctx.setLineDash([]);
+        
+        // X Offset Line (Horizontal offset along y = y1 from x1 to x2)
+        ctx.strokeStyle = '#ef4444'; // Red-550 for X misalignment
+        ctx.lineWidth = 2.0 / viewZoom;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(cornerX, cornerY);
+        ctx.stroke();
+        
+        // Y Offset Line (Vertical offset along x = x2 from y1 to y2)
+        ctx.strokeStyle = '#10b981'; // Emerald-550 for Y misalignment
+        ctx.lineWidth = 2.0 / viewZoom;
+        ctx.beginPath();
+        ctx.moveTo(cornerX, cornerY);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        
+        // 3. Dynamic helper boxes and offset values text
+        const drawOffsetLabel = (mx: number, my: number, val: number, isX: boolean) => {
+          if (val < 0.01) return; // Hide if perfectly aligned
+          
+          ctx.save();
+          ctx.translate(mx, my);
+          
+          const txt = `${isX ? 'ΔX: ' : 'ΔY: '}${val.toFixed(1)} mm`;
+          ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px monospace`;
+          const textWidth = ctx.measureText(txt).width;
+          
+          ctx.fillStyle = isX ? 'rgba(239, 68, 68, 0.9)' : 'rgba(16, 185, 129, 0.9)';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 0.5 / viewZoom;
+          ctx.fillRect(-textWidth/2 - 4 / viewZoom, -7 / viewZoom, textWidth + 8 / viewZoom, 14 / viewZoom);
+          ctx.strokeRect(-textWidth/2 - 4 / viewZoom, -7 / viewZoom, textWidth + 8 / viewZoom, 14 / viewZoom);
+          
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(txt, 0, 0);
+          ctx.restore();
+        };
+        
+        // Draw X midpoint label
+        drawOffsetLabel((x1 + cornerX) / 2, y1 - 8 / viewZoom, absDx, true);
+        
+        // Draw Y midpoint label
+        drawOffsetLabel(cornerX + 12 / viewZoom, (y1 + y2) / 2, absDy, false);
+        
+        // 4. Center Slant Distance & Angle Tag (floating overlay box)
+        const midX = (x1 + x2) / 2;
+        const midY = (y1 + y2) / 2;
+        
+        ctx.save();
+        ctx.translate(midX, midY + 12 / viewZoom);
+        
+        let alignmentStatus = "";
+        let statusColor = "rgba(249, 115, 22, 0.95)"; // Orange
+        
+        if (absDx < 0.05 && absDy < 0.05) {
+          alignmentStatus = "✓ COINCIDENT";
+          statusColor = "rgba(16, 185, 129, 0.95)"; // Emerald green
+        } else if (absDx < 0.05) {
+          alignmentStatus = "✓ DIKEY HİZALAMA!";
+          statusColor = "rgba(16, 185, 129, 0.95)"; // Emerald green
+        } else if (absDy < 0.05) {
+          alignmentStatus = "✓ YATAY HİZALAMA!";
+          statusColor = "rgba(16, 185, 129, 0.95)"; // Emerald green
+        } else {
+          const testAngles = [0, 30, 45, 60, 90, 120, 135, 150, 180, -30, -45, -60, -90, -120, -135, -150, -180];
+          let matchedAngle = false;
+          for (const a of testAngles) {
+            if (Math.abs(Math.abs(angleDeg) - Math.abs(a)) < 1.0) {
+              alignmentStatus = `✓ ${a}° HİZALI!`;
+              statusColor = "rgba(59, 130, 246, 0.95)"; // Bright blue
+              matchedAngle = true;
+              break;
+            }
+          }
+          if (!matchedAngle) {
+            alignmentStatus = `⚠️ HİZALAMA BOZUK (${angleDeg.toFixed(1)}°)`;
+          }
+        }
+        
+        const mainLabel = `Uzaklık: ${dist.toFixed(1)} mm | ${alignmentStatus}`;
+        ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px sans-serif`;
+        const mainW = ctx.measureText(mainLabel).width;
+        
+        ctx.fillStyle = statusColor;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 0.5 / viewZoom;
+        ctx.fillRect(-mainW/2 - 6 / viewZoom, -9 / viewZoom, mainW + 12 / viewZoom, 18 / viewZoom);
+        ctx.strokeRect(-mainW/2 - 6 / viewZoom, -9 / viewZoom, mainW + 12 / viewZoom, 18 / viewZoom);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(mainLabel, 0, 0);
+        
+        ctx.restore();
+      }
+      
+      ctx.restore();
+    }
+
     ctx.restore();
   };
 
@@ -4659,6 +4904,59 @@ export default function App() {
     }
 
     let { x, y } = tempPoint ? tempPoint : getVirtualCoords(e.clientX, e.clientY);
+
+    // Intercept Alignment Visualizer point selection
+    if (alignmentSelectMode) {
+      let closestPt: Point | null = null;
+      let minDist = Infinity;
+      
+      const checkAndSet = (p: Point) => {
+        let px = p.x;
+        let py = p.y;
+        if (p.circleData) {
+          px = p.circleData.center.x;
+          py = p.circleData.center.y;
+        }
+        const dist = Math.hypot(px - x, py - y);
+        if (dist < minDist) {
+          minDist = dist;
+          closestPt = p;
+        }
+      };
+
+      if (finalPoints.length > 0) {
+        finalPoints.forEach(checkAndSet);
+      }
+      if (activeLayer.paths) {
+        activeLayer.paths.forEach(path => {
+          path.forEach(checkAndSet);
+        });
+      }
+
+      const snapDist = 30 / viewZoom;
+      if (closestPt && minDist < snapDist) {
+        const selectedPt = closestPt;
+        if (alignmentSelectMode === 'p1') {
+          setAlignmentPt1(selectedPt);
+          logCommandResponse(`Hizalama Nokta 1 (Snap) seçildi: (X: ${selectedPt.x.toFixed(1)}, Y: ${selectedPt.y.toFixed(1)} mm).`);
+        } else {
+          setAlignmentPt2(selectedPt);
+          logCommandResponse(`Hizalama Nokta 2 (Snap) seçildi: (X: ${selectedPt.x.toFixed(1)}, Y: ${selectedPt.y.toFixed(1)} mm).`);
+        }
+        setAlignmentSelectMode(null);
+      } else {
+        const selectedPt = { x, y };
+        if (alignmentSelectMode === 'p1') {
+          setAlignmentPt1(selectedPt);
+          logCommandResponse(`Hizalama Nokta 1 (Serbest Çizim) seçildi: (X: ${x.toFixed(1)}, Y: ${y.toFixed(1)} mm).`);
+        } else {
+          setAlignmentPt2(selectedPt);
+          logCommandResponse(`Hizalama Nokta 2 (Serbest Çizim) seçildi: (X: ${x.toFixed(1)}, Y: ${y.toFixed(1)} mm).`);
+        }
+        setAlignmentSelectMode(null);
+      }
+      return;
+    }
 
     // Intercept Point Selective Move
     if (movePointSelectMode === 'base_point') {
@@ -8365,6 +8663,123 @@ export default function App() {
                     <p className="text-[9px] text-slate-500 leading-relaxed">
                       Detects the entire contour boundary and active geometric paths to generate overall bounding box horizontal (width) and vertical (height) dimension annotations automatically.
                     </p>
+                  </div>
+
+                  {/* Advanced Alignment Visualizer (Gelişmiş Hizalama Görselleştirici) */}
+                  <div className="bg-gradient-to-br from-slate-50 to-cyan-50/40 p-3 rounded-lg border border-cyan-100 space-y-2.5 shadow-xs">
+                    <span className="text-[10px] uppercase font-mono font-bold text-cyan-800 flex items-center gap-1">
+                      <ArrowRightLeft className="w-3.5 h-3.5 text-cyan-600" />
+                      Hizalama Görselleştirici
+                    </span>
+                    
+                    <p className="text-[9px] text-slate-500 leading-relaxed font-sans">
+                      Seçilen iki nokta arasındaki X/Y hizalama farklarını ve mesafeyi dinamik olarak 2D tuval üzerinde renkli kılavuz çizgilerle gösterir.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => {
+                          setAlignmentSelectMode('p1');
+                          logCommandResponse("Hizalama için Başlangıç Noktası (Point 1) seçin: Çizim ekranındaki bir köşeye/merkeze tıklayın veya serbestçe tıklayın.");
+                        }}
+                        className={`py-1.5 px-2 font-sans font-bold text-[10px] rounded transition duration-150 flex items-center justify-center gap-1 cursor-pointer select-none border border-cyan-250 ${
+                          alignmentSelectMode === 'p1' 
+                            ? 'bg-cyan-600 text-white border-cyan-600 ring-2 ring-cyan-205 animate-pulse font-black' 
+                            : alignmentPt1 
+                              ? 'bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border-cyan-300 font-black font-mono' 
+                              : 'bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        📍 P1: {alignmentPt1 ? `${alignmentPt1.x.toFixed(1)}, ${alignmentPt1.y.toFixed(1)}` : "Nokta 1 Seç"}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setAlignmentSelectMode('p2');
+                          logCommandResponse("Hizalama için Hedef Noktası (Point 2) seçin: Çizim ekranındaki bir köşeye/merkeze tıklayın veya serbestçe tıklayın.");
+                        }}
+                        className={`py-1.5 px-2 font-sans font-bold text-[10px] rounded transition duration-150 flex items-center justify-center gap-1 cursor-pointer select-none border border-purple-250 ${
+                          alignmentSelectMode === 'p2' 
+                            ? 'bg-purple-600 text-white border-purple-600 ring-2 ring-purple-205 animate-pulse font-black' 
+                            : alignmentPt2 
+                              ? 'bg-purple-50 text-purple-700 hover:bg-purple-100 border-purple-300 font-black font-mono' 
+                              : 'bg-white text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        🎯 P2: {alignmentPt2 ? `${alignmentPt2.x.toFixed(1)}, ${alignmentPt2.y.toFixed(1)}` : "Nokta 2 Seç"}
+                      </button>
+                    </div>
+
+                    {alignmentPt1 && alignmentPt2 && (
+                      <div className="space-y-1.5 bg-white/70 p-2 rounded border border-slate-100 my-1">
+                        <div className="flex items-center justify-between text-[9px] font-mono border-b border-slate-100 pb-1 text-slate-500">
+                          <span>Uzaklık (D):</span>
+                          <span className="font-bold text-slate-850">
+                            {Math.hypot(alignmentPt2.x - alignmentPt1.x, alignmentPt2.y - alignmentPt1.y).toFixed(2)} mm
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[9px] font-mono border-b border-slate-100 pb-1 text-slate-500">
+                          <span>X Farkı (ΔX):</span>
+                          <span className="font-bold text-red-600 flex items-center gap-1">
+                            {Math.abs(alignmentPt2.x - alignmentPt1.x).toFixed(2)} mm
+                            {Math.abs(alignmentPt2.x - alignmentPt1.x) < 0.05 && (
+                              <span className="text-[8px] text-emerald-600 font-sans font-black">✓ Hizalı</span>
+                            )}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[9px] font-mono border-b border-slate-100 pb-1 text-slate-500">
+                          <span>Y Farkı (ΔY):</span>
+                          <span className="font-bold text-emerald-600 flex items-center gap-1">
+                            {Math.abs(alignmentPt2.y - alignmentPt1.y).toFixed(2)} mm
+                            {Math.abs(alignmentPt2.y - alignmentPt1.y) < 0.05 && (
+                              <span className="text-[8px] text-emerald-600 font-sans font-black">✓ Hizalı</span>
+                            )}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[9px] font-mono border-b border-slate-100 pb-1.5 text-slate-500">
+                          <span>Açı (Angle):</span>
+                          <span className="font-bold text-blue-600">
+                            {((Math.atan2(alignmentPt2.y - alignmentPt1.y, alignmentPt2.x - alignmentPt1.x) * 180) / Math.PI).toFixed(1)}°
+                          </span>
+                        </div>
+
+                        {/* Alignment actions */}
+                        <div className="grid grid-cols-2 gap-1 pt-1">
+                          <button
+                            onClick={alignPointsX}
+                            className="py-1 bg-red-50 hover:bg-red-100 active:bg-red-200 border border-red-200 rounded text-[8.5px] font-bold font-mono text-red-700 transition cursor-pointer text-center uppercase"
+                            title="Nokta 2 X değerini Nokta 1 X değerine eşitler"
+                          >
+                            ↕ Dikeyde Hizala
+                          </button>
+
+                          <button
+                            onClick={alignPointsY}
+                            className="py-1 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-200 rounded text-[8.5px] font-bold font-mono text-emerald-700 transition cursor-pointer text-center uppercase"
+                            title="Nokta 2 Y değerini Nokta 1 Y değerine eşitler"
+                          >
+                            ↔ Yatayda Hizala
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {(alignmentPt1 || alignmentPt2) && (
+                      <button
+                        onClick={() => {
+                          setAlignmentPt1(null);
+                          setAlignmentPt2(null);
+                          setAlignmentSelectMode(null);
+                          logCommandResponse("Hizalama görselleştiricisi sıfırlandı.");
+                        }}
+                        className="w-full py-1 bg-slate-100 hover:bg-slate-200 border border-slate-205 rounded text-[8.5px] font-bold font-mono text-slate-650 hover:text-slate-800 transition cursor-pointer text-center uppercase"
+                      >
+                        Sıfırla / Temizle
+                      </button>
+                    )}
                   </div>
 
                   {renderShapeSolidSettings()}
