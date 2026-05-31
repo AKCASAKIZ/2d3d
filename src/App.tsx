@@ -36,12 +36,14 @@ import {
   Clipboard,
   Sliders,
   Grid,
+  Zap,
 } from 'lucide-react';
 
 import { Point, CommandType, DrawModeType, HistoryItem, SnapPoint, TrackLine, CADLayer, PathSettings, SnapToggles } from './types';
 import { calculateSnaps, distance, douglasPeucker, getClosestPointOnSegment, findSegmentIntersection, offsetPolygon } from './utils/geometry';
 import { ThreeViewport } from './components/ThreeViewport';
 import { SolidPhysicsProperties } from './utils/physics';
+import { WebForgeBridge } from './components/WebForgeBridge';
 
 const getDimensionLinePoints = (
   p1: Point,
@@ -567,7 +569,7 @@ export default function App() {
   const [movePointSelectMode, setMovePointSelectMode] = useState<'base_point' | 'target_point' | null>(null);
   const [copyPointSelectMode, setCopyPointSelectMode] = useState<'base_point' | 'target_point' | null>(null);
   const [baseSelectionPoint, setBaseSelectionPoint] = useState<Point | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<'sketch' | 'layers' | 'dimensions' | '3d'>('sketch');
+  const [sidebarTab, setSidebarTab] = useState<'sketch' | 'layers' | 'dimensions' | '3d' | 'bridge'>('sketch');
 
   // WebForge3D & Technical Drawing Layout integration states
   const [workspaceLayout, setWorkspaceLayout] = useState<'split' | '2d-only' | '3d-only' | 'drawing-sheet'>('split');
@@ -613,7 +615,7 @@ export default function App() {
   const [historyStack, setHistoryStack] = useState<HistoryItem[]>([]);
   const [cmdText, setCmdText] = useState('');
   const [cmdLogs, setCmdLogs] = useState<string[]>([
-    'CADERIM v14 - Smart Track & Midpoint Snap System online.',
+    'WebForge3D Pro v15.2 - Dynamic Parametric Engineering CAD Workspace online.',
     'Type commands (L: Line, R: Rect, C: Circle, POL: Polygon, F: Fillet, CH: Chamfer, U: Undo, CLEAR: Reset) in Command bar.',
   ]);
 
@@ -2346,6 +2348,149 @@ export default function App() {
   const removeBgImage = () => {
     setBgImage(null);
     logCommandResponse('Reference background image removed.');
+  };
+
+  const applyOneClickDimensioning = () => {
+    if (activeLayer.locked) {
+      logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it to add dimensions.`);
+      return;
+    }
+
+    // Collect all points on the active layer
+    const allPts: Point[] = [];
+    if (activeLayer.finalPoints && activeLayer.finalPoints.length > 0) {
+      allPts.push(...activeLayer.finalPoints);
+    }
+    if (activeLayer.paths && activeLayer.paths.length > 0) {
+      activeLayer.paths.forEach(pList => allPts.push(...pList));
+    }
+
+    if (allPts.length === 0) {
+      logCommandResponse('No sketch points or geometries found in active layer.');
+      return;
+    }
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    // Helper points to anchor the dimension
+    let bestLeftPt: Point | null = null;
+    let bestRightPt: Point | null = null;
+    let bestTopPt: Point | null = null;
+    let bestBottomPt: Point | null = null;
+
+    allPts.forEach(p => {
+      let pxMin = p.x;
+      let pxMax = p.x;
+      let pyMin = p.y;
+      let pyMax = p.y;
+
+      if (p.circleData) {
+        pxMin = p.circleData.center.x - p.circleData.radius;
+        pxMax = p.circleData.center.x + p.circleData.radius;
+        pyMin = p.circleData.center.y - p.circleData.radius;
+        pyMax = p.circleData.center.y + p.circleData.radius;
+      }
+
+      if (pxMin < minX) {
+        minX = pxMin;
+        bestLeftPt = p;
+      }
+      if (pxMax > maxX) {
+        maxX = pxMax;
+        bestRightPt = p;
+      }
+      if (pyMin < minY) {
+        minY = pyMin;
+        bestTopPt = p;
+      }
+      if (pyMax > maxY) {
+        maxY = pyMax;
+        bestBottomPt = p;
+      }
+    });
+
+    if (minX === Infinity || maxX === -Infinity || minY === Infinity || maxY === -Infinity) {
+      logCommandResponse('Could not calculate a bounding box for the active sketch geometry.');
+      return;
+    }
+
+    const width = maxX - minX;
+    const height = maxY - minY;
+
+    if (width < 0.1 && height < 0.1) {
+      logCommandResponse('Geometry scale is too small to place dimension annotations.');
+      return;
+    }
+
+    // Anchor points for horizontal dimension (Width / En)
+    const horizP1 = {
+      x: minX,
+      y: bestLeftPt ? (bestLeftPt.circleData ? bestLeftPt.circleData.center.y : bestLeftPt.y) : minY
+    };
+    const horizP2 = {
+      x: maxX,
+      y: bestRightPt ? (bestRightPt.circleData ? bestRightPt.circleData.center.y : bestRightPt.y) : minY
+    };
+
+    // Anchor points for vertical dimension (Height / Boy)
+    const vertP1 = {
+      x: bestTopPt ? (bestTopPt.circleData ? bestTopPt.circleData.center.x : bestTopPt.x) : minX,
+      y: minY
+    };
+    const vertP2 = {
+      x: bestBottomPt ? (bestBottomPt.circleData ? bestBottomPt.circleData.center.x : bestBottomPt.x) : minX,
+      y: maxY
+    };
+
+    // Placement logic for perfect CAD appearance
+    // Horizontal segment midpoint Y
+    const hMidY = (horizP1.y + horizP2.y) / 2;
+    // Offset horizontal dimension downwards below maxY
+    const offsetValHoriz = (maxY + 25) - hMidY;
+
+    // Vertical segment midpoint X
+    const vMidX = (vertP1.x + vertP2.x) / 2;
+    // Offset vertical dimension to the right beyond maxX
+    const offsetValVert = (maxX + 25) - vMidX;
+
+    const autoDimensionsList = [];
+
+    if (width >= 0.1) {
+      autoDimensionsList.push({
+        id: 'auto_h_' + Math.random().toString(36).substring(2, 9),
+        p1: horizP1,
+        p2: horizP2,
+        offset: offsetValHoriz,
+        value: width,
+        dimType: 'horizontal' as const
+      });
+    }
+
+    if (height >= 0.1) {
+      autoDimensionsList.push({
+        id: 'auto_v_' + Math.random().toString(36).substring(2, 9),
+        p1: vertP1,
+        p2: vertP2,
+        offset: offsetValVert,
+        value: height,
+        dimType: 'vertical' as const
+      });
+    }
+
+    if (autoDimensionsList.length > 0) {
+      saveState();
+      setDimensions(prev => {
+        // Clear any existing automative horizontal/vertical bounding dimensions to avoid clatter if user runs multiple times
+        // Keep user customized dimensions intact
+        const filtered = prev.filter(d => !d.id.startsWith('auto_h_') && !d.id.startsWith('auto_v_'));
+        return [...filtered, ...autoDimensionsList];
+      });
+
+      logCommandResponse(`✨ Otomatik Ölçülendirme Tamamlandı! En: ${width.toFixed(1)} mm, Boy: ${height.toFixed(1)} mm parametrik etiketleri eklendi.`);
+    }
   };
 
   // Geometric modifiers
@@ -6177,7 +6322,7 @@ export default function App() {
     const blob = new Blob([dxf], { type: 'application/dxf' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `CADERIM_${activeLayer.name || 'Sketch'}.dxf`;
+    link.download = `WEBFORGE3D_PRO_${activeLayer.name || 'Sketch'}.dxf`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -6634,7 +6779,7 @@ export default function App() {
       }
 
       // Save PDF down
-      doc.save(`CADERIM_Teknik_Resim_Blueprint_${activeLayer.name || 'Sketch'}.pdf`);
+      doc.save(`WEBFORGE3D_PRO_Blueprint_${activeLayer.name || 'Sketch'}.pdf`);
       logCommandResponse('✨ Mükemmel! 2D Teknik Resim Şeması PDF Blueprint olarak başarıyla dışa aktarıldı.');
     } catch (err: any) {
       logCommandResponse(`PDF oluşturma hatası: ${err.message || err}`);
@@ -7018,7 +7163,7 @@ export default function App() {
       doc.setFont("Helvetica", "normal");
       doc.setFontSize(7);
       doc.setTextColor(15, 23, 42);
-      doc.text("CADERIM BİLİŞİM", tbX + 73, tbY + 8);
+      doc.text("WEBFORGE3D STUDIO", tbX + 73, tbY + 8);
 
       // Row 2 Text
       doc.setFont("Helvetica", "bold");
@@ -7094,7 +7239,7 @@ export default function App() {
       doc.setTextColor(21, 128, 61); // emerald-700
       doc.text(massValue, tbX + 108, tbY + 28.5);
 
-      doc.save(`CADERIM_Teknik_Tablo_Sheet_${sheetTitle.replace(/\s+/g, '_')}.pdf`);
+      doc.save(`WEBFORGE3D_PRO_Sheet_${sheetTitle.replace(/\s+/g, '_')}.pdf`);
       logCommandResponse("✨ Başarılı: Teknik Üretim Resmi Sheet planı DIN A4 standardında başarıyla PDF olarak dışa aktarıldı.");
     } catch (err: any) {
       logCommandResponse(`Hata: Teknik Resim Hazırlanamadı. Nedeni: ${err.message || err}`);
@@ -7406,13 +7551,13 @@ export default function App() {
       
       {/* 1. Upper Ribbon Bar (Actions & Quick Toolings) */}
       <header className="flex items-center gap-4 px-3 py-1.5 bg-white border-b border-slate-200 overflow-x-auto shrink-0 shadow-sm">
-        <div className="flex items-center gap-1.5 pr-3 border-r border-slate-200 shrink-0">
-          <Workflow className="w-4 h-4 text-orange-500" />
+        <div className="flex items-center gap-1.5 pr-3 border-r border-slate-200 shrink-0 select-none">
+          <Zap className="w-4 h-4 text-orange-500 fill-orange-500/10 animate-pulse" />
           <span className="text-xs font-black tracking-wider uppercase text-slate-900">
-            CADE<span className="text-orange-500">RIM</span>
+            WEBFORGE<span className="text-orange-500">3D</span>
           </span>
-          <span className="text-[9px] font-mono bg-slate-100 border border-slate-200 px-1 py-0.2 rounded text-slate-500">
-            v14.1
+          <span className="text-[9px] font-mono bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded text-slate-500 font-bold">
+            PRO v15.2
           </span>
         </div>
 
@@ -7564,6 +7709,15 @@ export default function App() {
           >
             <Ruler className="w-3 h-3 text-white" />
             <span>Dimension</span>
+          </button>
+
+          <button
+            onClick={applyOneClickDimensioning}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-mono font-bold transition shadow-xs cursor-pointer"
+            title="Automatically detect boundary paths in the 2D sketch and place horizontal & vertical dimensions for the overall bounding box"
+          >
+            <Sparkles className="w-3 h-3 text-yellow-200 fill-yellow-200/20" />
+            <span>Auto Dim</span>
           </button>
 
           {finalPoints.length >= 2 && (
@@ -7808,38 +7962,51 @@ export default function App() {
         <aside className={`bg-slate-50 border-r border-slate-200 flex flex-col overflow-y-auto shrink-0 transition-all duration-200 overflow-hidden ${sidebarCollapsed ? 'w-0 border-r-0 pb-0' : 'w-[290px]'}`}>
           
           {/* Elegant Sidebar Tab Bar Toggle */}
-          <div className="flex border-b border-slate-200 bg-slate-100/80 p-1 shrink-0 gap-1">
+          <div className="flex border-b border-slate-200 bg-slate-100/80 p-0.5 shrink-0 gap-0.5">
             <button
               onClick={() => setSidebarTab('sketch')}
-              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
-                sidebarTab === 'sketch' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              className={`flex-1 py-1.5 text-[9px] sm:text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === 'sketch' ? 'bg-white text-orange-650 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
               }`}
+              title="CAD Design Tools"
             >
               🛠 Tools
             </button>
             <button
               onClick={() => setSidebarTab('layers')}
-              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
-                sidebarTab === 'layers' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              className={`flex-1 py-1.5 text-[9px] sm:text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === 'layers' ? 'bg-white text-orange-650 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
               }`}
+              title="Layers Manager"
             >
               🔍 Layers
             </button>
             <button
               onClick={() => setSidebarTab('dimensions')}
-              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
-                sidebarTab === 'dimensions' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              className={`flex-1 py-1.5 text-[9px] sm:text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === 'dimensions' ? 'bg-white text-orange-650 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
               }`}
+              title="Dimensions and Constraints"
             >
-              📐 Dim/Pos
+              📐 Dim
             </button>
             <button
               onClick={() => setSidebarTab('3d')}
-              className={`flex-1 py-1.5 text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
-                sidebarTab === '3d' ? 'bg-white text-orange-600 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              className={`flex-1 py-1.5 text-[9px] sm:text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === '3d' ? 'bg-white text-orange-650 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
               }`}
+              title="3D Model Inspector"
             >
-              📦 3D View
+              📦 3D
+            </button>
+            <button
+              onClick={() => setSidebarTab('bridge')}
+              className={`flex-1 py-1.5 text-[9px] sm:text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === 'bridge' ? 'bg-white text-orange-650 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              }`}
+              title="WebForge3D Pro Sync & Telemetry Bridge"
+            >
+              ⚡ Bridge
             </button>
           </div>
           
@@ -8181,6 +8348,25 @@ export default function App() {
                     <p className="font-semibold text-slate-800 mb-1">💡 Parametric Placement & 3D Boolean:</p>
                     In Vertex Selection mode, click any vertex on the screen to view and adjust its precise coordinates, connected lines lengths, or round/bevel parameters. You can also configure circle dimensions precisely here.
                   </div>
+
+                  {/* One-Click Automatic Dimensioning Tool Box */}
+                  <div className="bg-gradient-to-br from-slate-50 to-orange-50/40 p-3 rounded-lg border border-orange-100 space-y-2.5 shadow-xs">
+                    <span className="text-[10px] uppercase font-mono font-bold text-orange-700 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-orange-650 animate-pulse" />
+                      Dynamic Automation
+                    </span>
+                    <button
+                      onClick={applyOneClickDimensioning}
+                      className="w-full py-2 bg-orange-600 hover:bg-orange-500 active:bg-orange-700 text-white font-sans font-bold text-xs rounded-lg transition duration-150 flex items-center justify-center gap-2 shadow-xs cursor-pointer select-none"
+                    >
+                      <Sparkles className="w-4 h-4 text-yellow-300 fill-yellow-300/20" />
+                      One-Click Dimensioning
+                    </button>
+                    <p className="text-[9px] text-slate-500 leading-relaxed">
+                      Detects the entire contour boundary and active geometric paths to generate overall bounding box horizontal (width) and vertical (height) dimension annotations automatically.
+                    </p>
+                  </div>
+
                   {renderShapeSolidSettings()}
                 </div>
               ) : (() => {
@@ -9756,6 +9942,23 @@ export default function App() {
             </div>
           </div>
           )}
+
+          {sidebarTab === 'bridge' && (
+            <WebForgeBridge
+              layers={layers}
+              activeLayerId={activeLayerId}
+              sheetMaterial={sheetMaterial}
+              physicsData={physicsData}
+              addLog={(msg) => setCmdLogs((prev) => [...prev, msg])}
+              onImportLayers={(imported) => {
+                saveState();
+                setLayersRaw(imported);
+                if (imported.length > 0) {
+                  setActiveLayerId(imported[0].id);
+                }
+              }}
+            />
+          )}
         </aside>
 
         {/* 3. Splitted Dual Viewports */}
@@ -10402,7 +10605,7 @@ export default function App() {
                     {/* Row 1, Col 3: Company */}
                     <div className="border-r border-b border-slate-900 p-0.5 flex flex-col justify-between">
                       <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">ÜRETİCİ / ŞİRKET</span>
-                      <span className="text-[7.5px] font-black text-slate-900 whitespace-nowrap overflow-hidden">CADERIM BİLİŞİM</span>
+                      <span className="text-[7.5px] font-black text-slate-900 whitespace-nowrap overflow-hidden">WEBFORGE3D STUDIO</span>
                     </div>
 
                     {/* Row 1, Col 4: Standard Project type */}
@@ -10479,7 +10682,7 @@ export default function App() {
                     {/* Row 3, Col 4: Software code indicator */}
                     <div className="p-0.5 flex flex-col justify-between">
                       <span className="text-[5px] uppercase font-bold text-slate-400 font-sans">SAYFA BİLGİSİ</span>
-                      <span className="text-[6.5px] text-zinc-500 font-bold font-mono">CADERIM v14.1</span>
+                      <span className="text-[6.5px] text-zinc-550 font-bold font-mono">WEBFORGE3D PRO v15.2</span>
                     </div>
 
                   </div>
