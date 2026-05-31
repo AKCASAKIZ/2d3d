@@ -3800,6 +3800,32 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Calculate bounding box of active layer to size dimensions and arrowheads dynamically
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    const allActiveLayerPts: Point[] = [];
+    if (finalPoints) allActiveLayerPts.push(...finalPoints);
+    if (activeLayer.paths) {
+      activeLayer.paths.forEach(p => allActiveLayerPts.push(...p));
+    }
+    allActiveLayerPts.forEach(p => {
+      if (p.circleData) {
+        const { center, radius } = p.circleData;
+        minX = Math.min(minX, center.x - radius);
+        maxX = Math.max(maxX, center.x + radius);
+        minY = Math.min(minY, center.y - radius);
+        maxY = Math.max(maxY, center.y + radius);
+      } else {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+      }
+    });
+
+    const sketchWidth = (minX === Infinity) ? 150 : (maxX - minX);
+    const sketchHeight = (minY === Infinity) ? 150 : (maxY - minY);
+    const sketchSide = Math.max(sketchWidth, sketchHeight, 15);
+
     // Paint dynamic background color
     ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -4245,7 +4271,9 @@ export default function App() {
 
         // Draw dimension lines and text only for the active layer
         if (showDims && isActive && pts.length > 1) {
-          ctx.font = `${Math.max(10, 11 / viewZoom)}px monospace`;
+          // Dynamic segment text size is based on sketchSide (in mm) and viewZoom (zoom factor)
+          const autoTextHeightPx = Math.max(9.5, Math.min(24.0, Math.max(1.8, Math.min(10.0, sketchSide * 0.035)) * viewZoom));
+          ctx.font = `bold ${Math.round(autoTextHeightPx)}px monospace`;
           ctx.textAlign = 'center';
 
           const isCirclePath = pts.some(p => p.circleData);
@@ -4270,10 +4298,11 @@ export default function App() {
               
               // Draw dimension text
               ctx.fillStyle = '#f43f5e';
+              const fontHeightMm = autoTextHeightPx / viewZoom;
               ctx.fillText(
                 `R: ${radius.toFixed(1)} mm`,
-                (center.x + targetX) / 2 + 10 / viewZoom,
-                (center.y + targetY) / 2 - 5 / viewZoom
+                (center.x + targetX) / 2 + fontHeightMm * 0.9,
+                (center.y + targetY) / 2 - fontHeightMm * 0.45
               );
             }
           } else {
@@ -4286,10 +4315,11 @@ export default function App() {
 
               // Dimension Text
               ctx.fillStyle = '#f43f5e'; // Rose
+              const fontHeightMm = autoTextHeightPx / viewZoom;
               ctx.fillText(
                 `${d.toFixed(1)} mm`,
                 (p1.x + p2.x) / 2,
-                (p1.y + p2.y) / 2 - 12 / viewZoom
+                (p1.y + p2.y) / 2 - fontHeightMm * 1.05
               );
 
               // Angle guides
@@ -4308,8 +4338,8 @@ export default function App() {
               ctx.fillStyle = '#a1a1aa';
               ctx.fillText(
                 `${ang.toFixed(0)}°`,
-                p1.x + 25 / viewZoom,
-                p1.y - 6 / viewZoom
+                p1.x + fontHeightMm * 2.2,
+                p1.y - fontHeightMm * 0.55
               );
             }
           }
@@ -4381,27 +4411,51 @@ export default function App() {
         dP2_offY = p2.y + ny * offset;
       }
 
+      // 1. Dynamic scale of arrows and labels based on drawing's bounding box and zoom
+      // Virtual arrowhead length targets ~4.2% of active layer size, clamped safely
+      const baseArrowLengthMm = Math.max(1.5, Math.min(18.0, sketchSide * 0.042));
+      // Ensure arrows don't exceed 35% of the total dimension line length
+      let arrowLength = Math.min(baseArrowLengthMm, len * 0.35);
+
+      // Convert to screen pixels for robust minimum screen visibility
+      let arrowLengthPx = arrowLength * viewZoom;
+      arrowLengthPx = Math.max(5.0, Math.min(45.0, arrowLengthPx)); // beautiful dynamic screen scaling bounds
+      // Back to virtual coordinates
+      arrowLength = arrowLengthPx / viewZoom;
+
+      // 1:3 ratio for arrowhead (width is exactly 1/3 of the length)
+      const arrowWidth = arrowLength / 3;
+
+      // Dynamic text sizing based on active drawing size & screen footprint
+      const baseTextHeightMm = Math.max(1.8, Math.min(10.0, sketchSide * 0.035));
+      let textHeightPx = baseTextHeightMm * viewZoom;
+      textHeightPx = Math.max(9.5, Math.min(30.0, textHeightPx)); // robust read bounds on screen
+
+      const fontHeightMm = textHeightPx / viewZoom;
+
       // Draw extension lines (faint dashed lines)
       ctx.save();
       ctx.strokeStyle = '#52525b'; // Zinc-600
       ctx.lineWidth = 1.0 / viewZoom;
       ctx.setLineDash([3 / viewZoom, 3 / viewZoom]);
       ctx.beginPath();
+      
+      const extExtension = fontHeightMm * 0.55; // extension line past the outer dimension line
       if (dimType === 'horizontal') {
         ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p1.x, midY + offset + (5 / viewZoom * (offset < 0 ? -1 : 1)));
+        ctx.lineTo(p1.x, midY + offset + (extExtension * (offset < 0 ? -1 : 1)));
         ctx.moveTo(p2.x, p2.y);
-        ctx.lineTo(p2.x, midY + offset + (5 / viewZoom * (offset < 0 ? -1 : 1)));
+        ctx.lineTo(p2.x, midY + offset + (extExtension * (offset < 0 ? -1 : 1)));
       } else if (dimType === 'vertical') {
         ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(midX + offset + (5 / viewZoom * (offset < 0 ? -1 : 1)), p1.y);
+        ctx.lineTo(midX + offset + (extExtension * (offset < 0 ? -1 : 1)), p1.y);
         ctx.moveTo(p2.x, p2.y);
-        ctx.lineTo(midX + offset + (5 / viewZoom * (offset < 0 ? -1 : 1)), p2.y);
+        ctx.lineTo(midX + offset + (extExtension * (offset < 0 ? -1 : 1)), p2.y);
       } else {
         ctx.moveTo(p1.x + nx * (offset * 0.1), p1.y + ny * (offset * 0.1));
-        ctx.lineTo(dP1_offX + nx * (5 / viewZoom * (offset < 0 ? -1 : 1)), dP1_offY + ny * (5 / viewZoom * (offset < 0 ? -1 : 1)));
+        ctx.lineTo(dP1_offX + nx * (extExtension * (offset < 0 ? -1 : 1)), dP1_offY + ny * (extExtension * (offset < 0 ? -1 : 1)));
         ctx.moveTo(p2.x + nx * (offset * 0.1), p2.y + ny * (offset * 0.1));
-        ctx.lineTo(dP2_offX + nx * (5 / viewZoom * (offset < 0 ? -1 : 1)), dP2_offY + ny * (5 / viewZoom * (offset < 0 ? -1 : 1)));
+        ctx.lineTo(dP2_offX + nx * (extExtension * (offset < 0 ? -1 : 1)), dP2_offY + ny * (extExtension * (offset < 0 ? -1 : 1)));
       }
       ctx.stroke();
       ctx.restore();
@@ -4414,15 +4468,47 @@ export default function App() {
       ctx.lineTo(dP2_offX, dP2_offY);
       ctx.stroke();
 
-      // Draw stylish slash/tick end markers
+      // Draw 1:3 ratio CAD arrowhead cones filled at endpoints
+      ctx.save();
+      ctx.fillStyle = isHighlighted ? '#f472b6' : '#db2777';
       ctx.strokeStyle = isHighlighted ? '#f472b6' : '#db2777';
-      ctx.lineWidth = isHighlighted ? 3.0 / viewZoom : 2.0 / viewZoom;
+      ctx.lineWidth = isHighlighted ? 1.5 / viewZoom : 1.0 / viewZoom;
+
+      // Endpoint P1 Arrow base calculations (pointing from baseCenter towards dP1_offX/Y)
+      const arrow1BaseCenterX = dP1_offX + ux * arrowLength;
+      const arrow1BaseCenterY = dP1_offY + uy * arrowLength;
+      const arrow1LeftX = arrow1BaseCenterX + nx * (arrowWidth / 2);
+      const arrow1LeftY = arrow1BaseCenterY + ny * (arrowWidth / 2);
+      const arrow1RightX = arrow1BaseCenterX - nx * (arrowWidth / 2);
+      const arrow1RightY = arrow1BaseCenterY - ny * (arrowWidth / 2);
+
+      // Endpoint P2 Arrow base calculations (pointing from baseCenter towards dP2_offX/Y)
+      const arrow2BaseCenterX = dP2_offX - ux * arrowLength;
+      const arrow2BaseCenterY = dP2_offY - uy * arrowLength;
+      const arrow2LeftX = arrow2BaseCenterX + nx * (arrowWidth / 2);
+      const arrow2LeftY = arrow2BaseCenterY + ny * (arrowWidth / 2);
+      const arrow2RightX = arrow2BaseCenterX - nx * (arrowWidth / 2);
+      const arrow2RightY = arrow2BaseCenterY - ny * (arrowWidth / 2);
+
+      // Render Endpoint 1 Arrowhead triangle
       ctx.beginPath();
-      ctx.moveTo(dP1_offX - (ux - nx) * (5 / viewZoom), dP1_offY - (uy - ny) * (5 / viewZoom));
-      ctx.lineTo(dP1_offX + (ux - nx) * (5 / viewZoom), dP1_offY + (uy - ny) * (5 / viewZoom));
-      ctx.moveTo(dP2_offX - (ux + nx) * (5 / viewZoom), dP2_offY - (uy + ny) * (5 / viewZoom));
-      ctx.lineTo(dP2_offX + (ux + nx) * (5 / viewZoom), dP2_offY + (uy + ny) * (5 / viewZoom));
+      ctx.moveTo(dP1_offX, dP1_offY);
+      ctx.lineTo(arrow1LeftX, arrow1LeftY);
+      ctx.lineTo(arrow1RightX, arrow1RightY);
+      ctx.closePath();
+      ctx.fill();
       ctx.stroke();
+
+      // Render Endpoint 2 Arrowhead triangle
+      ctx.beginPath();
+      ctx.moveTo(dP2_offX, dP2_offY);
+      ctx.lineTo(arrow2LeftX, arrow2LeftY);
+      ctx.lineTo(arrow2RightX, arrow2RightY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.restore();
 
       // Draw dimension textbox masked over the dimension line
       const textMidX = (dP1_offX + dP2_offX) / 2;
@@ -4444,17 +4530,30 @@ export default function App() {
       ctx.rotate(textAngle);
 
       const valText = customValueText || `${displayValue.toFixed(1)} mm`;
-      ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+      ctx.font = `bold ${Math.round(textHeightPx)}px monospace`;
       const textWidth = ctx.measureText(valText).width;
+
+      const verticalPadding = fontHeightMm * 0.55; 
+      const horizontalPadding = fontHeightMm * 0.75; 
 
       // Background card mask
       ctx.fillStyle = '#18181b'; // Zinc-900 matches app background
-      ctx.fillRect(-textWidth/2 - 6 / viewZoom, -7 / viewZoom, textWidth + 12 / viewZoom, 14 / viewZoom);
+      ctx.fillRect(
+        -textWidth / 2 - horizontalPadding, 
+        -fontHeightMm / 2 - verticalPadding / 2, 
+        textWidth + horizontalPadding * 2, 
+        fontHeightMm + verticalPadding
+      );
 
       // Border frame around active dimension label for extra premium polish
       ctx.strokeStyle = isHighlighted ? '#f472b6' : '#ec4899';
       ctx.lineWidth = 1.0 / viewZoom;
-      ctx.strokeRect(-textWidth/2 - 6 / viewZoom, -7 / viewZoom, textWidth + 12 / viewZoom, 14 / viewZoom);
+      ctx.strokeRect(
+        -textWidth / 2 - horizontalPadding, 
+        -fontHeightMm / 2 - verticalPadding / 2, 
+        textWidth + horizontalPadding * 2, 
+        fontHeightMm + verticalPadding
+      );
 
       // Text label filled
       ctx.fillStyle = isHighlighted ? '#fbcfe8' : '#f472b6'; // lighter pink vs dark text
