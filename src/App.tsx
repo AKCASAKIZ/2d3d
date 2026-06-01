@@ -547,6 +547,16 @@ export default function App() {
   const [showPolygonPrompt, setShowPolygonPrompt] = useState(false);
   const [polygonSidesInput, setPolygonSidesInput] = useState("6");
   const [polygonTypeInput, setPolygonTypeInput] = useState<'corner' | 'midpoint'>('corner');
+  const [arcMethod, setArcMethod] = useState<'3point' | 'sce' | 'sca' | 'scl' | 'sea' | 'sed' | 'ser' | 'cse' | 'csa' | 'csl' | 'continue'>('3point');
+  const [circleMethod, setCircleMethod] = useState<'center-radius' | 'center-diameter' | '2point' | '3point' | 'ttr' | 'ttt'>('center-radius');
+  const [rectMethod, setRectMethod] = useState<'2point' | 'center' | 'dimensions' | 'rotated'>('2point');
+  const [rectWidthInput, setRectWidthInput] = useState<string>("100");
+  const [rectHeightInput, setRectHeightInput] = useState<string>("60");
+  const [ttrRadiusInput, setTtrRadiusInput] = useState<string>("40");
+  const [arcAngleInput, setArcAngleInput] = useState<string>("90");
+  const [arcLengthInput, setArcLengthInput] = useState<string>("50");
+  const [arcRadiusInput, setArcRadiusInput] = useState<string>("60");
+  const [ttrSelectedLines, setTtrSelectedLines] = useState<any[]>([]);
   const [showDraftOpModal, setShowDraftOpModal] = useState(false);
   const [draftOpType, setDraftOpType] = useState<'union' | 'cut'>('cut');
   const [draftOpDepth, setDraftOpDepth] = useState<number>(30);
@@ -2306,6 +2316,7 @@ export default function App() {
 
     saveState();
     setCurrentCommand(cmd);
+    setTtrSelectedLines([]);
 
     // Auto-commit previous shape to layers if it has enough vertices
     if (finalPoints.length >= 3) {
@@ -4214,29 +4225,403 @@ export default function App() {
       ctx.lineWidth = 1.5 / viewZoom;
       ctx.beginPath();
 
+      const solveCircle3P = (p1: Point, p2: Point, p3: Point) => {
+        const d = 2 * (p1.x * (p2.y - p3.y) + p2.x * (p3.y - p1.y) + p3.x * (p1.y - p2.y));
+        if (Math.abs(d) < 1e-6) return null;
+        const ux = ((p1.x*p1.x + p1.y*p1.y)*(p2.y - p3.y) + (p2.x*p2.x + p2.y*p2.y)*(p3.y - p1.y) + (p3.x*p3.x + p3.y*p3.y)*(p1.y - p2.y)) / d;
+        const uy = ((p1.x*p1.x + p1.y*p1.y)*(p3.x - p2.x) + (p2.x*p2.x + p2.y*p2.y)*(p1.x - p3.x) + (p3.x*p3.x + p3.y*p3.y)*(p2.x - p1.x)) / d;
+        const center = { x: ux, y: uy };
+        const radius = Math.hypot(p1.x - ux, p1.y - uy);
+        return { center, radius };
+      };
+
+      const solveTTR = (s1: {p1: Point, p2: Point}, s2: {p1: Point, p2: Point}, r: number, clickPt: Point) => {
+        const dx1 = s1.p2.x - s1.p1.x;
+        const dy1 = s1.p2.y - s1.p1.y;
+        const len1 = Math.hypot(dx1, dy1);
+        if (len1 < 1e-5) return null;
+        const nx1 = -dy1 / len1;
+        const ny1 = dx1 / len1;
+
+        const dx2 = s2.p2.x - s2.p1.x;
+        const dy2 = s2.p2.y - s2.p1.y;
+        const len2 = Math.hypot(dx2, dy2);
+        if (len2 < 1e-5) return null;
+        const nx2 = -dy2 / len2;
+        const ny2 = dx2 / len2;
+
+        const centers: Point[] = [];
+        const signs = [-1, 1];
+        for (const sgn1 of signs) {
+          for (const sgn2 of signs) {
+            const p1_off = { x: s1.p1.x + nx1 * sgn1 * r, y: s1.p1.y + ny1 * sgn1 * r };
+            const p2_off = { x: s2.p1.x + nx2 * sgn2 * r, y: s2.p1.y + ny2 * sgn2 * r };
+            const denom = dx1 * dy2 - dy1 * dx2;
+            if (Math.abs(denom) > 1e-4) {
+              const t = ((p2_off.x - p1_off.x) * dy2 - (p2_off.y - p1_off.y) * dx2) / denom;
+              centers.push({ x: p1_off.x + t * dx1, y: p1_off.y + t * dy1 });
+            }
+          }
+        }
+        if (centers.length === 0) return null;
+        let bestCenter = centers[0];
+        let minDist = Math.hypot(bestCenter.x - clickPt.x, bestCenter.y - clickPt.y);
+        for (let i = 1; i < centers.length; i++) {
+          const d = Math.hypot(centers[i].x - clickPt.x, centers[i].y - clickPt.y);
+          if (d < minDist) {
+            minDist = d;
+            bestCenter = centers[i];
+          }
+        }
+        return bestCenter;
+      };
+
+      const solveTTT = (s1: {p1: Point, p2: Point}, s2: {p1: Point, p2: Point}, s3: {p1: Point, p2: Point}) => {
+        const intersectLines = (la: {p1: Point, p2: Point}, lb: {p1: Point, p2: Point}) => {
+          const x1 = la.p1.x, y1 = la.p1.y, x2 = la.p2.x, y2 = la.p2.y;
+          const x3 = lb.p1.x, y3 = lb.p1.y, x4 = lb.p2.x, y4 = lb.p2.y;
+          const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+          if (Math.abs(denom) < 1e-4) return null;
+          const px = ((x1*y2 - y1*x2)*(x3 - x4) - (x1 - x2)*(x3*y4 - y3*x4)) / denom;
+          const py = ((x1*y2 - y1*x2)*(y3 - y4) - (y1 - y2)*(x3*y4 - y3*x4)) / denom;
+          return { x: px, y: py };
+        };
+        const A = intersectLines(s1, s2);
+        const B = intersectLines(s2, s3);
+        const C = intersectLines(s3, s1);
+        if (!A || !B || !C) return null;
+        const a = Math.hypot(B.x - C.x, B.y - C.y);
+        const b = Math.hypot(A.x - C.x, A.y - C.y);
+        const c = Math.hypot(A.x - B.x, A.y - B.y);
+        const sum = a + b + c;
+        if (sum < 1e-4) return null;
+        const incenter = {
+          x: (a * A.x + b * B.x + c * C.x) / sum,
+          y: (a * A.y + b * B.y + c * C.y) / sum
+        };
+        const s = sum / 2;
+        const r = Math.sqrt(Math.max(0, (s - a) * (s - b) * (s - c) / s));
+        return { center: incenter, radius: r };
+      };
+
+      const findClosestSegment = (pt: { x: number; y: number }, zoomVal: number) => {
+        let bestSeg: { p1: Point; p2: Point } | null = null;
+        let bestDist = Infinity;
+        const limitDist = 40 / zoomVal;
+        const activePaths = activeLayer?.paths || [];
+        for (const path of activePaths) {
+          for (let i = 0; i < path.length - 1; i++) {
+            const p1 = path[i];
+            const p2 = path[i + 1];
+            const d = getClosestPointOnSegment(pt, p1, p2).dist;
+            if (d < bestDist && d < limitDist) {
+              bestDist = d;
+              bestSeg = { p1, p2 };
+            }
+          }
+        }
+        return bestSeg;
+      };
+
       if (currentCommand === 'rect' && finalPoints.length > 0) {
-        ctx.strokeRect(
-          finalPoints[0].x,
-          finalPoints[0].y,
-          tempPoint.x - finalPoints[0].x,
-          tempPoint.y - finalPoints[0].y
-        );
-      } else if ((currentCommand === 'circle' || currentCommand === 'polygon') && finalPoints.length > 0) {
-        const center = finalPoints[0];
-        const r = Math.hypot(tempPoint.x - center.x, tempPoint.y - center.y);
-        if (currentCommand === 'circle') {
+        if (rectMethod === '2point') {
+          ctx.strokeRect(
+            finalPoints[0].x,
+            finalPoints[0].y,
+            tempPoint.x - finalPoints[0].x,
+            tempPoint.y - finalPoints[0].y
+          );
+        } else if (rectMethod === 'center') {
+          const center = finalPoints[0];
+          const dx = Math.abs(tempPoint.x - center.x);
+          const dy = Math.abs(tempPoint.y - center.y);
+          ctx.strokeRect(center.x - dx, center.y - dy, dx * 2, dy * 2);
+        } else if (rectMethod === 'dimensions') {
+          const p1 = finalPoints[0];
+          const dx = tempPoint.x >= p1.x ? 1 : -1;
+          const dy = tempPoint.y >= p1.y ? 1 : -1;
+          const w = parseFloat(rectWidthInput) || 100;
+          const h = parseFloat(rectHeightInput) || 60;
+          ctx.strokeRect(p1.x, p1.y, dx * w, dy * h);
+        } else if (rectMethod === 'rotated') {
+          if (finalPoints.length === 1) {
+            ctx.moveTo(finalPoints[0].x, finalPoints[0].y);
+            ctx.lineTo(tempPoint.x, tempPoint.y);
+            ctx.stroke();
+          } else if (finalPoints.length === 2) {
+            const p1 = finalPoints[0];
+            const p2 = finalPoints[1];
+            const theta = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            const nx = -Math.sin(theta);
+            const ny = Math.cos(theta);
+            const h = (tempPoint.x - p2.x) * nx + (tempPoint.y - p2.y) * ny;
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineTo(p2.x + h * nx, p2.y + h * ny);
+            ctx.lineTo(p1.x + h * nx, p1.y + h * ny);
+            ctx.closePath();
+            ctx.stroke();
+          }
+        }
+      } else if (currentCommand === 'circle' && finalPoints.length > 0) {
+        if (circleMethod === 'center-radius') {
+          const center = finalPoints[0];
+          const r = Math.hypot(tempPoint.x - center.x, tempPoint.y - center.y);
           ctx.arc(center.x, center.y, r, 0, 2 * Math.PI);
           ctx.stroke();
-        } else {
-          const sides = polygonSides;
-          const initialAngle = Math.atan2(tempPoint.y - center.y, tempPoint.x - center.x);
-          const isMidpoint = polygonType === 'midpoint';
-          const drawRadius = isMidpoint ? r / Math.cos(Math.PI / sides) : r;
-          const startAngle = isMidpoint ? initialAngle - Math.PI / sides : initialAngle;
-          for (let i = 0; i <= sides; i++) {
-            const angle = startAngle + (i * Math.PI * 2) / sides;
-            const px = center.x + drawRadius * Math.cos(angle);
-            const py = center.y + drawRadius * Math.sin(angle);
+        } else if (circleMethod === 'center-diameter') {
+          const center = finalPoints[0];
+          const r = Math.hypot(tempPoint.x - center.x, tempPoint.y - center.y) / 2;
+          ctx.arc(center.x, center.y, r, 0, 2 * Math.PI);
+          ctx.stroke();
+        } else if (circleMethod === '2point') {
+          const p1 = finalPoints[0];
+          const center = { x: (p1.x + tempPoint.x) / 2, y: (p1.y + tempPoint.y) / 2 };
+          const r = Math.hypot(tempPoint.x - p1.x, tempPoint.y - p1.y) / 2;
+          ctx.arc(center.x, center.y, r, 0, 2 * Math.PI);
+          ctx.stroke();
+        } else if (circleMethod === '3point') {
+          if (finalPoints.length === 1) {
+            ctx.moveTo(finalPoints[0].x, finalPoints[0].y);
+            ctx.lineTo(tempPoint.x, tempPoint.y);
+            ctx.stroke();
+          } else if (finalPoints.length === 2) {
+            const solved = solveCircle3P(finalPoints[0], finalPoints[1], tempPoint);
+            if (solved) {
+              ctx.arc(solved.center.x, solved.center.y, solved.radius, 0, 2 * Math.PI);
+              ctx.stroke();
+            }
+          }
+        } else if (circleMethod === 'ttr') {
+          if (finalPoints.length === 1) {
+            ctx.moveTo(finalPoints[0].x, finalPoints[0].y);
+            ctx.lineTo(tempPoint.x, tempPoint.y);
+            ctx.stroke();
+          } else if (finalPoints.length === 2 && ttrSelectedLines.length === 2) {
+            const rVal = parseFloat(ttrRadiusInput) || Math.hypot(tempPoint.x - finalPoints[1].x, tempPoint.y - finalPoints[1].y);
+            const solvedCenter = solveTTR(ttrSelectedLines[0], ttrSelectedLines[1], rVal, tempPoint);
+            if (solvedCenter) {
+              ctx.arc(solvedCenter.x, solvedCenter.y, rVal, 0, 2 * Math.PI);
+              ctx.stroke();
+            }
+          }
+        } else if (circleMethod === 'ttt') {
+          if (finalPoints.length === 1) {
+            ctx.moveTo(finalPoints[0].x, finalPoints[0].y);
+            ctx.lineTo(tempPoint.x, tempPoint.y);
+            ctx.stroke();
+          } else if (finalPoints.length === 2 && ttrSelectedLines.length === 2) {
+            const closestSeg = findClosestSegment(tempPoint, viewZoom);
+            if (closestSeg) {
+              const solved = solveTTT(ttrSelectedLines[0], ttrSelectedLines[1], closestSeg);
+              if (solved) {
+                ctx.arc(solved.center.x, solved.center.y, solved.radius, 0, 2 * Math.PI);
+                ctx.stroke();
+              }
+            }
+          }
+        }
+      } else if (currentCommand === 'polygon' && finalPoints.length > 0) {
+        const center = finalPoints[0];
+        const r = Math.hypot(tempPoint.x - center.x, tempPoint.y - center.y);
+        const sides = polygonSides;
+        const initialAngle = Math.atan2(tempPoint.y - center.y, tempPoint.x - center.x);
+        const isMidpoint = polygonType === 'midpoint';
+        const drawRadius = isMidpoint ? r / Math.cos(Math.PI / sides) : r;
+        const startAngle = isMidpoint ? initialAngle - Math.PI / sides : initialAngle;
+        for (let i = 0; i <= sides; i++) {
+          const angle = startAngle + (i * Math.PI * 2) / sides;
+          const px = center.x + drawRadius * Math.cos(angle);
+          const py = center.y + drawRadius * Math.sin(angle);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      } else if (currentCommand === 'arc' && finalPoints.length > 0) {
+        if (arcMethod === '3point') {
+          if (finalPoints.length === 1) {
+            ctx.moveTo(finalPoints[0].x, finalPoints[0].y);
+            ctx.lineTo(tempPoint.x, tempPoint.y);
+            ctx.stroke();
+          } else if (finalPoints.length === 2) {
+            const solved = solveCircle3P(finalPoints[0], finalPoints[1], tempPoint);
+            if (solved) {
+              const { center, radius } = solved;
+              const th1 = Math.atan2(finalPoints[0].y - center.y, finalPoints[0].x - center.x);
+              const th2 = Math.atan2(finalPoints[1].y - center.y, finalPoints[1].x - center.x);
+              const th3 = Math.atan2(tempPoint.y - center.y, tempPoint.x - center.x);
+              const a2 = (th2 - th1 + 2 * Math.PI) % (2 * Math.PI);
+              const a3 = (th3 - th1 + 2 * Math.PI) % (2 * Math.PI);
+              let swipeAngle = a3;
+              let isCW = false;
+              if (a2 > a3) {
+                swipeAngle = 2 * Math.PI - a3;
+                isCW = true;
+              }
+              for (let i = 0; i <= 32; i++) {
+                const ang = th1 + (isCW ? -1 : 1) * swipeAngle * (i / 32);
+                const px = center.x + radius * Math.cos(ang);
+                const py = center.y + radius * Math.sin(ang);
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+              }
+              ctx.stroke();
+            }
+          }
+        } else if (arcMethod === 'sce') {
+          if (finalPoints.length === 1) {
+            ctx.moveTo(finalPoints[0].x, finalPoints[0].y);
+            ctx.lineTo(tempPoint.x, tempPoint.y);
+            ctx.stroke();
+          } else if (finalPoints.length === 2) {
+            const s = finalPoints[0];
+            const c = finalPoints[1];
+            const r = Math.hypot(s.x - c.x, s.y - c.y);
+            const sa = Math.atan2(s.y - c.y, s.x - c.x);
+            const ea = Math.atan2(tempPoint.y - c.y, tempPoint.x - c.x);
+            const sweep = (ea - sa + Math.PI * 2) % (Math.PI * 2);
+            for (let i = 0; i <= 32; i++) {
+              const ang = sa + sweep * (i / 32);
+              const px = c.x + r * Math.cos(ang);
+              const py = c.y + r * Math.sin(ang);
+              if (i === 0) ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+          }
+        } else if (arcMethod === 'sca' && finalPoints.length === 2) {
+          const s = finalPoints[0];
+          const c = finalPoints[1];
+          const r = Math.hypot(s.x - c.x, s.y - c.y);
+          const sa = Math.atan2(s.y - c.y, s.x - c.x);
+          const userAngle = parseFloat(arcAngleInput) || 90;
+          const sweep = (userAngle * Math.PI) / 180;
+          for (let i = 0; i <= 32; i++) {
+            const ang = sa + sweep * (i / 32);
+            const px = c.x + r * Math.cos(ang);
+            const py = c.y + r * Math.sin(ang);
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+        } else if (arcMethod === 'scl' && finalPoints.length === 2) {
+          const s = finalPoints[0];
+          const c = finalPoints[1];
+          const r = Math.hypot(s.x - c.x, s.y - c.y);
+          const sa = Math.atan2(s.y - c.y, s.x - c.x);
+          let len = parseFloat(arcLengthInput) || r;
+          if (len >= 2 * r) len = 2 * r - 0.1;
+          const sweep = 2 * Math.asin(len / (2 * r));
+          for (let i = 0; i <= 32; i++) {
+            const ang = sa + sweep * (i / 32);
+            const px = c.x + r * Math.cos(ang);
+            const py = c.y + r * Math.sin(ang);
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+        } else if (arcMethod === 'sea') {
+          if (finalPoints.length === 1) {
+            ctx.moveTo(finalPoints[0].x, finalPoints[0].y);
+            ctx.lineTo(tempPoint.x, tempPoint.y);
+            ctx.stroke();
+          } else if (finalPoints.length === 2) {
+            const s = finalPoints[0];
+            const e = finalPoints[1];
+            const userAngle = parseFloat(arcAngleInput) || 90;
+            const angRad = (userAngle * Math.PI) / 180;
+            const d = Math.hypot(e.x - s.x, e.y - s.y);
+            const r = d / (2 * Math.sin(angRad / 2 || 1));
+            const mid = { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 };
+            const distToCent = Math.sqrt(Math.max(0.1, r * r - (d / 2) * (d / 2)));
+            const th = Math.atan2(e.y - s.y, e.x - s.x);
+            const cen = { x: mid.x - distToCent * Math.sin(th), y: mid.y + distToCent * Math.cos(th) };
+            const sa = Math.atan2(s.y - cen.y, s.x - cen.x);
+            for (let i = 0; i <= 32; i++) {
+              const ang = sa + angRad * (i / 32);
+              const px = cen.x + r * Math.cos(ang);
+              const py = cen.y + r * Math.sin(ang);
+              if (i === 0) ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+          }
+        } else if (arcMethod === 'ser') {
+          if (finalPoints.length === 1) {
+            ctx.moveTo(finalPoints[0].x, finalPoints[0].y);
+            ctx.lineTo(tempPoint.x, tempPoint.y);
+            ctx.stroke();
+          } else if (finalPoints.length === 2) {
+            const s = finalPoints[0];
+            const e = finalPoints[1];
+            const r = parseFloat(arcRadiusInput) || Math.hypot(tempPoint.x - s.x, tempPoint.y - s.y);
+            const d = Math.hypot(e.x - s.x, e.y - s.y);
+            if (r >= d / 2) {
+              const mid = { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 };
+              const h = Math.sqrt(r * r - (d / 2) * (d / 2));
+              const th = Math.atan2(e.y - s.y, e.x - s.x);
+              const cen = { x: mid.x - h * Math.sin(th), y: mid.y + h * Math.cos(th) };
+              const sa = Math.atan2(s.y - cen.y, s.x - cen.x);
+              const ea = Math.atan2(e.y - cen.y, e.x - cen.x);
+              const sweep = (ea - sa + Math.PI * 2) % (Math.PI * 2);
+              for (let i = 0; i <= 32; i++) {
+                const ang = sa + sweep * (i / 32);
+                const px = cen.x + r * Math.cos(ang);
+                const py = cen.y + r * Math.sin(ang);
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+              }
+              ctx.stroke();
+            }
+          }
+        } else if (arcMethod === 'cse') {
+          if (finalPoints.length === 1) {
+            ctx.moveTo(finalPoints[0].x, finalPoints[0].y);
+            ctx.lineTo(tempPoint.x, tempPoint.y);
+            ctx.stroke();
+          } else if (finalPoints.length === 2) {
+            const c = finalPoints[0];
+            const s = finalPoints[1];
+            const r = Math.hypot(s.x - c.x, s.y - c.y);
+            const sa = Math.atan2(s.y - c.y, s.x - c.x);
+            const ea = Math.atan2(tempPoint.y - c.y, tempPoint.x - c.x);
+            const sweep = (ea - sa + Math.PI * 2) % (Math.PI * 2);
+            for (let i = 0; i <= 32; i++) {
+              const ang = sa + sweep * (i / 32);
+              const px = c.x + r * Math.cos(ang);
+              const py = c.y + r * Math.sin(ang);
+              if (i === 0) ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+          }
+        } else if (arcMethod === 'csa' && finalPoints.length === 2) {
+          const c = finalPoints[0];
+          const s = finalPoints[1];
+          const r = Math.hypot(s.x - c.x, s.y - c.y);
+          const sa = Math.atan2(s.y - c.y, s.x - c.x);
+          const userAngle = parseFloat(arcAngleInput) || 90;
+          const sweep = (userAngle * Math.PI) / 180;
+          for (let i = 0; i <= 32; i++) {
+            const ang = sa + sweep * (i / 32);
+            const px = c.x + r * Math.cos(ang);
+            const py = c.y + r * Math.sin(ang);
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+        } else if (arcMethod === 'csl' && finalPoints.length === 2) {
+          const c = finalPoints[0];
+          const s = finalPoints[1];
+          const r = Math.hypot(s.x - c.x, s.y - c.y);
+          const sa = Math.atan2(s.y - c.y, s.x - c.x);
+          let len = parseFloat(arcLengthInput) || r;
+          if (len >= 2 * r) len = 2 * r - 0.1;
+          const sweep = 2 * Math.asin(len / (2 * r));
+          for (let i = 0; i <= 32; i++) {
+            const ang = sa + sweep * (i / 32);
+            const px = c.x + r * Math.cos(ang);
+            const py = c.y + r * Math.sin(ang);
             if (i === 0) ctx.moveTo(px, py);
             else ctx.lineTo(px, py);
           }
@@ -5376,41 +5761,458 @@ export default function App() {
           setFinalPoints((prev) => [...prev, { x, y }]);
         }
       } else if (currentCommand === 'rect') {
-        if (clickCount === 0) {
-          setFinalPoints([{ x, y }]);
-          setClickCount(1);
-        } else {
-          const p1 = finalPoints[0];
-          const rectId = 'rect_' + Math.random().toString(36).substring(2, 9);
-          const polyRect = [
-            { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 0 } },
-            { x: x, y: p1.y, rectData: { id: rectId, vertexIndex: 1 } },
-            { x: x, y: y, rectData: { id: rectId, vertexIndex: 2 } },
-            { x: p1.x, y: y, rectData: { id: rectId, vertexIndex: 3 } },
-            { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 4 } },
-          ];
-          saveState(polyRect, true, 0);
-          setFinalPoints(polyRect);
-          setIsClosed(true);
-          setClickCount(0);
-          setTempPoint(null);
-          setDrawMode('drag');
-          clearCommand();
-          logCommandResponse('Rectangle added to workspace.');
-          triggerOpPromptForPoints(polyRect);
+        if (rectMethod === '2point') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+          } else {
+            const p1 = finalPoints[0];
+            const rectId = 'rect_' + Math.random().toString(36).substring(2, 9);
+            const polyRect = [
+              { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 0 } },
+              { x: x, y: p1.y, rectData: { id: rectId, vertexIndex: 1 } },
+              { x: x, y: y, rectData: { id: rectId, vertexIndex: 2 } },
+              { x: p1.x, y: y, rectData: { id: rectId, vertexIndex: 3 } },
+              { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 4 } },
+            ];
+            saveState(polyRect, true, 0);
+            setFinalPoints(polyRect);
+            setIsClosed(true);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse('Rectangle (2 Nokta) eklendi.');
+            triggerOpPromptForPoints(polyRect);
+          }
+        } else if (rectMethod === 'center') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Dikdörtgen (Merkez): Merkez noktası seçildi. Şimdi köşeyi seçmek için sürükleyip tıklayın.");
+          } else {
+            const center = finalPoints[0];
+            const dx = Math.abs(x - center.x);
+            const dy = Math.abs(y - center.y);
+            const rectId = 'rect_' + Math.random().toString(36).substring(2, 9);
+            const polyRect = [
+              { x: center.x - dx, y: center.y - dy, rectData: { id: rectId, vertexIndex: 0 } },
+              { x: center.x + dx, y: center.y - dy, rectData: { id: rectId, vertexIndex: 1 } },
+              { x: center.x + dx, y: center.y + dy, rectData: { id: rectId, vertexIndex: 2 } },
+              { x: center.x - dx, y: center.y + dy, rectData: { id: rectId, vertexIndex: 3 } },
+              { x: center.x - dx, y: center.y - dy, rectData: { id: rectId, vertexIndex: 4 } },
+            ];
+            saveState(polyRect, true, 0);
+            setFinalPoints(polyRect);
+            setIsClosed(true);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse('Dikdörtgen (Merkez-Köşe) eklendi.');
+            triggerOpPromptForPoints(polyRect);
+          }
+        } else if (rectMethod === 'dimensions') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Dikdörtgen (Boyutlar): Sol alt köşe seçildi. Şimdi genişletmek istediğiniz çeyreğe doğru tıklayın.");
+          } else {
+            const p1 = finalPoints[0];
+            const dx = x >= p1.x ? 1 : -1;
+            const dy = y >= p1.y ? 1 : -1;
+            const w = parseFloat(rectWidthInput) || 100;
+            const h = parseFloat(rectHeightInput) || 60;
+            const rectId = 'rect_' + Math.random().toString(36).substring(2, 9);
+            const polyRect = [
+              { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 0 } },
+              { x: p1.x + dx * w, y: p1.y, rectData: { id: rectId, vertexIndex: 1 } },
+              { x: p1.x + dx * w, y: p1.y + dy * h, rectData: { id: rectId, vertexIndex: 2 } },
+              { x: p1.x, y: p1.y + dy * h, rectData: { id: rectId, vertexIndex: 3 } },
+              { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 4 } },
+            ];
+            saveState(polyRect, true, 0);
+            setFinalPoints(polyRect);
+            setIsClosed(true);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse(`Dikdörtgen (Boyutlu) eklendi: Genişlik: ${w} mm, Yükseklik: ${h} mm.`);
+            triggerOpPromptForPoints(polyRect);
+          }
+        } else if (rectMethod === 'rotated') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Dikdörtgen (Döndürülmüş): 1. Nokta seçildi. Alt kenarı tamamlamak için 2. Noktayı seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Dikdörtgen (Döndürülmüş): Alt kenar açısı belirlendi. Yüksekliği seçmek için boşluğa tıklayın.");
+          } else {
+            const p1 = finalPoints[0];
+            const p2 = finalPoints[1];
+            const p3 = { x, y };
+            const theta = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            const nx = -Math.sin(theta);
+            const ny = Math.cos(theta);
+            const hDist = (p3.x - p2.x) * nx + (p3.y - p2.y) * ny;
+            const rectId = 'rect_' + Math.random().toString(36).substring(2, 9);
+            const polyRect = [
+              { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 0 } },
+              { x: p2.x, y: p2.y, rectData: { id: rectId, vertexIndex: 1 } },
+              { x: p2.x + hDist * nx, y: p2.y + hDist * ny, rectData: { id: rectId, vertexIndex: 2 } },
+              { x: p1.x + hDist * nx, y: p1.y + hDist * ny, rectData: { id: rectId, vertexIndex: 3 } },
+              { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 4 } },
+            ];
+            saveState(polyRect, true, 0);
+            setFinalPoints(polyRect);
+            setIsClosed(true);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse('Döndürülmüş Dikdörtgen başarıyla eklendi.');
+            triggerOpPromptForPoints(polyRect);
+          }
         }
-      } else if (currentCommand === 'circle' || currentCommand === 'polygon') {
+      } else if (currentCommand === 'circle') {
+        const solveCircle3P = (p1: Point, p2: Point, p3: Point) => {
+          const d = 2 * (p1.x * (p2.y - p3.y) + p2.x * (p3.y - p1.y) + p3.x * (p1.y - p2.y));
+          if (Math.abs(d) < 1e-6) return null;
+          const ux = ((p1.x*p1.x + p1.y*p1.y)*(p2.y - p3.y) + (p2.x*p2.x + p2.y*p2.y)*(p3.y - p1.y) + (p3.x*p3.x + p3.y*p3.y)*(p1.y - p2.y)) / d;
+          const uy = ((p1.x*p1.x + p1.y*p1.y)*(p3.x - p2.x) + (p2.x*p2.x + p2.y*p2.y)*(p1.x - p3.x) + (p3.x*p3.x + p3.y*p3.y)*(p2.x - p1.x)) / d;
+          const cen = { x: ux, y: uy };
+          const rad = Math.hypot(p1.x - ux, p1.y - uy);
+          return { center: cen, radius: rad };
+        };
+
+        const solveTTR = (s1: {p1: Point, p2: Point}, s2: {p1: Point, p2: Point}, r: number, clickPt: Point) => {
+          const dx1 = s1.p2.x - s1.p1.x;
+          const dy1 = s1.p2.y - s1.p1.y;
+          const len1 = Math.hypot(dx1, dy1);
+          if (len1 < 1e-5) return null;
+          const nx1 = -dy1 / len1;
+          const ny1 = dx1 / len1;
+
+          const dx2 = s2.p2.x - s2.p1.x;
+          const dy2 = s2.p2.y - s2.p1.y;
+          const len2 = Math.hypot(dx2, dy2);
+          if (len2 < 1e-5) return null;
+          const nx2 = -dy2 / len2;
+          const ny2 = dx2 / len2;
+
+          const centers: Point[] = [];
+          const signs = [-1, 1];
+          for (const sgn1 of signs) {
+            for (const sgn2 of signs) {
+              const p1_off = { x: s1.p1.x + nx1 * sgn1 * r, y: s1.p1.y + ny1 * sgn1 * r };
+              const p2_off = { x: s2.p1.x + nx2 * sgn2 * r, y: s2.p1.y + ny2 * sgn2 * r };
+              const denom = dx1 * dy2 - dy1 * dx2;
+              if (Math.abs(denom) > 1e-4) {
+                const t = ((p2_off.x - p1_off.x) * dy2 - (p2_off.y - p1_off.y) * dx2) / denom;
+                centers.push({ x: p1_off.x + t * dx1, y: p1_off.y + t * dy1 });
+              }
+            }
+          }
+          if (centers.length === 0) return null;
+          let bestCenter = centers[0];
+          let minDist = Math.hypot(bestCenter.x - clickPt.x, bestCenter.y - clickPt.y);
+          for (let i = 1; i < centers.length; i++) {
+            const d = Math.hypot(centers[i].x - clickPt.x, centers[i].y - clickPt.y);
+            if (d < minDist) {
+              minDist = d;
+              bestCenter = centers[i];
+            }
+          }
+          return bestCenter;
+        };
+
+        const solveTTT = (s1: {p1: Point, p2: Point}, s2: {p1: Point, p2: Point}, s3: {p1: Point, p2: Point}) => {
+          const intersectLines = (la: {p1: Point, p2: Point}, lb: {p1: Point, p2: Point}) => {
+            const x1 = la.p1.x, y1 = la.p1.y, x2 = la.p2.x, y2 = la.p2.y;
+            const x3 = lb.p1.x, y3 = lb.p1.y, x4 = lb.p2.x, y4 = lb.p2.y;
+            const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+            if (Math.abs(denom) < 1e-4) return null;
+            const px = ((x1*y2 - y1*x2)*(x3 - x4) - (x1 - x2)*(x3*y4 - y3*x4)) / denom;
+            const py = ((x1*y2 - y1*x2)*(y3 - y4) - (y1 - y2)*(x3*y4 - y3*x4)) / denom;
+            return { x: px, y: py };
+          };
+          const A = intersectLines(s1, s2);
+          const B = intersectLines(s2, s3);
+          const C = intersectLines(s3, s1);
+          if (!A || !B || !C) return null;
+          const a = Math.hypot(B.x - C.x, B.y - C.y);
+          const b = Math.hypot(A.x - C.x, A.y - C.y);
+          const c = Math.hypot(A.x - B.x, A.y - B.y);
+          const sum = a + b + c;
+          if (sum < 1e-4) return null;
+          const incenter = {
+            x: (a * A.x + b * B.x + c * C.x) / sum,
+            y: (a * A.y + b * B.y + c * C.y) / sum
+          };
+          const s = sum / 2;
+          const r = Math.sqrt(Math.max(0, (s - a) * (s - b) * (s - c) / s));
+          return { center: incenter, radius: r };
+        };
+
+        const findClosestSegment = (pt: { x: number; y: number }, zoomVal: number) => {
+          let bestSeg: { p1: Point; p2: Point } | null = null;
+          let bestDist = Infinity;
+          const limitDist = 120 / zoomVal;
+          const activePaths = activeLayer?.paths || [];
+          for (const path of activePaths) {
+            for (let i = 0; i < path.length - 1; i++) {
+              const p1 = path[i];
+              const p2 = path[i + 1];
+              const d = getClosestPointOnSegment(pt, p1, p2).dist;
+              if (d < bestDist && d < limitDist) {
+                bestDist = d;
+                bestSeg = { p1, p2 };
+              }
+            }
+          }
+          return bestSeg;
+        };
+
+        if (circleMethod === 'center-radius') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+          } else {
+            const center = finalPoints[0];
+            const radius = Math.hypot(x - center.x, y - center.y);
+            const points: Point[] = [];
+            for (let i = 0; i <= 64; i++) {
+              const angle = (i * Math.PI * 2) / 64;
+              points.push({
+                x: center.x + radius * Math.cos(angle),
+                y: center.y + radius * Math.sin(angle),
+                isCurvePoint: true,
+                circleData: { center, radius }
+              });
+            }
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(true);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            setSelectedVertexIdx(0);
+            setSelectedPathIdx(-1);
+            logCommandResponse(`Daire (Merkez-Yarıçap) eklendi: R: ${radius.toFixed(1)} mm.`);
+            triggerOpPromptForPoints(points);
+          }
+        } else if (circleMethod === 'center-diameter') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+          } else {
+            const center = finalPoints[0];
+            const radius = Math.hypot(x - center.x, y - center.y) / 2;
+            const points: Point[] = [];
+            for (let i = 0; i <= 64; i++) {
+              const angle = (i * Math.PI * 2) / 64;
+              points.push({
+                x: center.x + radius * Math.cos(angle),
+                y: center.y + radius * Math.sin(angle),
+                isCurvePoint: true,
+                circleData: { center, radius }
+              });
+            }
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(true);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            setSelectedVertexIdx(0);
+            setSelectedPathIdx(-1);
+            logCommandResponse(`Daire (Merkez-Çap) eklendi: Çap: ${(radius * 2).toFixed(1)} mm.`);
+            triggerOpPromptForPoints(points);
+          }
+        } else if (circleMethod === '2point') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+          } else {
+            const p1 = finalPoints[0];
+            const center = { x: (p1.x + x) / 2, y: (p1.y + y) / 2 };
+            const radius = Math.hypot(x - p1.x, y - p1.y) / 2;
+            const points: Point[] = [];
+            for (let i = 0; i <= 64; i++) {
+              const angle = (i * Math.PI * 2) / 64;
+              points.push({
+                x: center.x + radius * Math.cos(angle),
+                y: center.y + radius * Math.sin(angle),
+                isCurvePoint: true,
+                circleData: { center, radius }
+              });
+            }
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(true);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            setSelectedVertexIdx(0);
+            setSelectedPathIdx(-1);
+            logCommandResponse('Daire (2 Nokta) eklendi.');
+            triggerOpPromptForPoints(points);
+          }
+        } else if (circleMethod === '3point') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Daire (3 Nokta): 1. Nokta seçildi. Çember üzerindeki 2. Noktayı seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Daire (3 Nokta): 2. Nokta seçildi. Çember üzerindeki 3. Noktayı seçin.");
+          } else {
+            const p1 = finalPoints[0];
+            const p2 = finalPoints[1];
+            const solved = solveCircle3P(p1, p2, { x, y });
+            if (solved) {
+              const { center, radius } = solved;
+              const points: Point[] = [];
+              for (let i = 0; i <= 64; i++) {
+                const angle = (i * Math.PI * 2) / 64;
+                points.push({
+                  x: center.x + radius * Math.cos(angle),
+                  y: center.y + radius * Math.sin(angle),
+                  isCurvePoint: true,
+                  circleData: { center, radius }
+                });
+              }
+              saveState(points, true, 0);
+              setFinalPoints(points);
+              setIsClosed(true);
+              setClickCount(0);
+              setTempPoint(null);
+              setDrawMode('drag');
+              clearCommand();
+              setSelectedVertexIdx(0);
+              setSelectedPathIdx(-1);
+              logCommandResponse(`Daire (3 Nokta) eklendi: R: ${radius.toFixed(1)} mm.`);
+              triggerOpPromptForPoints(points);
+            } else {
+              logCommandResponse("Hata: Seçiğer Noktalar kolineer.");
+              setClickCount(0);
+              setFinalPoints([]);
+            }
+          }
+        } else if (circleMethod === 'ttr') {
+          const closestSeg = findClosestSegment({ x, y }, viewZoom);
+          if (!closestSeg && clickCount < 2) {
+            logCommandResponse("Lütfen teğet olacak çizgilere yakın seçin.");
+            return;
+          }
+          if (clickCount === 0) {
+            setTtrSelectedLines([closestSeg]);
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Daire (TTR): 1. teğet çizildi. 2. teğeti seçin.");
+          } else if (clickCount === 1) {
+            setTtrSelectedLines(prev => [...prev, closestSeg]);
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Daire (TTR): 2 teğet de seçildi. Şimdi yarıçap değerini girip Onayla'ya tıklayın veya ekrana tıklayarak yarıçap belirleyin.");
+          } else {
+            const rVal = parseFloat(ttrRadiusInput) || Math.hypot(x - finalPoints[1].x, y - finalPoints[1].y);
+            const solvedCenter = solveTTR(ttrSelectedLines[0], ttrSelectedLines[1], rVal, { x, y });
+            if (solvedCenter) {
+              const points: Point[] = [];
+              for (let i = 0; i <= 64; i++) {
+                const angle = (i * Math.PI * 2) / 64;
+                points.push({
+                  x: solvedCenter.x + rVal * Math.cos(angle),
+                  y: solvedCenter.y + rVal * Math.sin(angle),
+                  isCurvePoint: true,
+                  circleData: { center: solvedCenter, radius: rVal }
+                });
+              }
+              saveState(points, true, 0);
+              setFinalPoints(points);
+              setIsClosed(true);
+              setClickCount(0);
+              setTempPoint(null);
+              setDrawMode('drag');
+              clearCommand();
+              setSelectedVertexIdx(0);
+              setSelectedPathIdx(-1);
+              logCommandResponse(`TTR Dairesi eklendi: Yarıçap = ${rVal.toFixed(1)} mm.`);
+              triggerOpPromptForPoints(points);
+            } else {
+              logCommandResponse("Hata: Çözüm bulunamadı.");
+              setClickCount(0);
+              setFinalPoints([]);
+            }
+          }
+        } else if (circleMethod === 'ttt') {
+          const closestSeg = findClosestSegment({ x, y }, viewZoom);
+          if (!closestSeg) {
+            logCommandResponse("Lütfen teğet olacak çizgiyi seçin.");
+            return;
+          }
+          if (clickCount === 0) {
+            setTtrSelectedLines([closestSeg]);
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Daire (TTT): 1. teğet seçildi. 2. teğeti seçin.");
+          } else if (clickCount === 1) {
+            setTtrSelectedLines(prev => [...prev, closestSeg]);
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Daire (TTT): 2. teğet seçildi. 3. teğeti seçerek oluşturun.");
+          } else {
+            const solved = solveTTT(ttrSelectedLines[0], ttrSelectedLines[1], closestSeg);
+            if (solved) {
+              const { center, radius } = solved;
+              const points: Point[] = [];
+              for (let i = 0; i <= 64; i++) {
+                const angle = (i * Math.PI * 2) / 64;
+                points.push({
+                  x: center.x + radius * Math.cos(angle),
+                  y: center.y + radius * Math.sin(angle),
+                  isCurvePoint: true,
+                  circleData: { center, radius }
+                });
+              }
+              saveState(points, true, 0);
+              setFinalPoints(points);
+              setIsClosed(true);
+              setClickCount(0);
+              setTempPoint(null);
+              setDrawMode('drag');
+              clearCommand();
+              setSelectedVertexIdx(0);
+              setSelectedPathIdx(-1);
+              logCommandResponse(`TTT (3 Teğet) Dairesi başarıyla eklendi: R: ${radius.toFixed(1)}.`);
+              triggerOpPromptForPoints(points);
+            } else {
+              logCommandResponse("Hata: Çözüm bulunamadı.");
+              setClickCount(0);
+              setFinalPoints([]);
+            }
+          }
+        }
+      } else if (currentCommand === 'polygon') {
         if (clickCount === 0) {
           setFinalPoints([{ x, y }]);
           setClickCount(1);
         } else {
           const center = finalPoints[0];
           const radius = Math.hypot(x - center.x, y - center.y);
-          const sides = currentCommand === 'circle' ? 64 : polygonSides;
+          const sides = polygonSides;
           const points: Point[] = [];
           const polyId = 'poly_' + Math.random().toString(36).substring(2, 9);
-          const initialAngle = currentCommand === 'polygon' ? Math.atan2(y - center.y, x - center.x) : 0;
-          const isMidpoint = currentCommand === 'polygon' && polygonType === 'midpoint';
+          const initialAngle = Math.atan2(y - center.y, x - center.x);
+          const isMidpoint = polygonType === 'midpoint';
           const drawRadius = isMidpoint ? radius / Math.cos(Math.PI / sides) : radius;
           const startAngle = isMidpoint ? initialAngle - Math.PI / sides : initialAngle;
 
@@ -5419,9 +6221,7 @@ export default function App() {
             points.push({
               x: center.x + drawRadius * Math.cos(angle),
               y: center.y + drawRadius * Math.sin(angle),
-              isCurvePoint: currentCommand === 'circle',
-              circleData: currentCommand === 'circle' ? { center: { x: center.x, y: center.y }, radius } : undefined,
-              polygonData: currentCommand === 'polygon' ? {
+              polygonData: {
                 id: polyId,
                 center: { x: center.x, y: center.y },
                 radius: drawRadius,
@@ -5429,7 +6229,7 @@ export default function App() {
                 sides,
                 vertexIndex: i % sides,
                 polygonType: polygonType
-              } : undefined
+              }
             });
           }
           saveState(points, true, 0);
@@ -5439,11 +6239,385 @@ export default function App() {
           setTempPoint(null);
           setDrawMode('drag');
           clearCommand();
-          // Select one of the circle points so they see circle dimension controls immediately
-          setSelectedVertexIdx(0);
-          setSelectedPathIdx(-1);
-          logCommandResponse(`${currentCommand === 'circle' ? 'Circle' : `Polygon (${polygonSides} sides)`} added to workspace.`);
+          logCommandResponse(`Çokgen (${sides} kenarlı) eklendi.`);
           triggerOpPromptForPoints(points);
+        }
+      } else if (currentCommand === 'arc') {
+        const createArcPathFromAngles = (cen: {x: number, y: number}, r: number, sa: number, sw: number, cw = false) => {
+          const pts: Point[] = [];
+          const count = 32;
+          for (let i = 0; i <= count; i++) {
+            const ang = sa + (cw ? -1 : 1) * sw * (i / count);
+            pts.push({
+              x: cen.x + r * Math.cos(ang),
+              y: cen.y + r * Math.sin(ang),
+              isCurvePoint: true
+            });
+          }
+          return pts;
+        };
+
+        const solveCircle3P = (p1: Point, p2: Point, p3: Point) => {
+          const d = 2 * (p1.x * (p2.y - p3.y) + p2.x * (p3.y - p1.y) + p3.x * (p1.y - p2.y));
+          if (Math.abs(d) < 1e-6) return null;
+          const ux = ((p1.x*p1.x + p1.y*p1.y)*(p2.y - p3.y) + (p2.x*p2.x + p2.y*p2.y)*(p3.y - p1.y) + (p3.x*p3.x + p3.y*p3.y)*(p1.y - p2.y)) / d;
+          const uy = ((p1.x*p1.x + p1.y*p1.y)*(p3.x - p2.x) + (p2.x*p2.x + p2.y*p2.y)*(p1.x - p3.x) + (p3.x*p3.x + p3.y*p3.y)*(p2.x - p1.x)) / d;
+          const cen = { x: ux, y: uy };
+          const rad = Math.hypot(p1.x - ux, p1.y - uy);
+          return { center: cen, radius: rad };
+        };
+
+        if (arcMethod === '3point') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (3 Nokta): 1. Başlangıç noktası seçildi. Yay üzerindeki 2. noktayı seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (3 Nokta): 2. Geçiş noktası seçildi. Bitiş noktasını seçin.");
+          } else {
+            const p1 = finalPoints[0];
+            const p2 = finalPoints[1];
+            const p3 = { x, y };
+
+            const solved = solveCircle3P(p1, p2, p3);
+            if (solved) {
+              const { center, radius } = solved;
+              const th1 = Math.atan2(p1.y - center.y, p1.x - center.x);
+              const th2 = Math.atan2(p2.y - center.y, p2.x - center.x);
+              const th3 = Math.atan2(p3.y - center.y, p3.x - center.x);
+
+              const a2 = (th2 - th1 + 2 * Math.PI) % (2 * Math.PI);
+              const a3 = (th3 - th1 + 2 * Math.PI) % (2 * Math.PI);
+
+              let swipeAngle = a3;
+              let isCW = false;
+              if (a2 > a3) {
+                swipeAngle = 2 * Math.PI - a3;
+                isCW = true;
+              }
+
+              const points = createArcPathFromAngles(center, radius, th1, swipeAngle, isCW);
+              saveState(points, true, 0);
+              setFinalPoints(points);
+              setIsClosed(false);
+              setClickCount(0);
+              setTempPoint(null);
+              setDrawMode('drag');
+              clearCommand();
+              logCommandResponse(`Yay (3 Nokta) başarıyla tamamlandı.`);
+              triggerOpPromptForPoints(points);
+            } else {
+              logCommandResponse("Hata: Noktalar kolineer olduğundan yay çizilemedi.");
+              setClickCount(0);
+              setFinalPoints([]);
+            }
+          }
+        } else if (arcMethod === 'sce') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (S, C, E): Başlangıç seçildi. Merkez (Center) noktasını seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (S, C, E): Merkez seçildi. Yayı bitirmek için bitiş (End) noktasını seçin.");
+          } else {
+            const s = finalPoints[0];
+            const c = finalPoints[1];
+            const e = { x, y };
+            const r = Math.hypot(s.x - c.x, s.y - c.y);
+            const sa = Math.atan2(s.y - c.y, s.x - c.x);
+            const ea = Math.atan2(e.y - c.y, e.x - c.x);
+            const sweep = (ea - sa + Math.PI * 2) % (Math.PI * 2);
+            const points = createArcPathFromAngles(c, r, sa, sweep, false);
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(false);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse("Yay (S, C, E) başarıyla eklendi.");
+            triggerOpPromptForPoints(points);
+          }
+        } else if (arcMethod === 'sca') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (S, C, A): Başlangıç seçildi. Merkez seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (S, C, A): Merkez seçildi. Açı değerini girip onaylayın ya da tıklayın.");
+          } else {
+            const s = finalPoints[0];
+            const c = finalPoints[1];
+            const r = Math.hypot(s.x - c.x, s.y - c.y);
+            const sa = Math.atan2(s.y - c.y, s.x - c.x);
+            const userAngle = parseFloat(arcAngleInput) || 90;
+            const sweep = (userAngle * Math.PI) / 180;
+            const points = createArcPathFromAngles(c, r, sa, sweep, userAngle < 0);
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(false);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse(`Yay (Başlangıç, Merkez, Açı: ${userAngle}°) eklendi.`);
+            triggerOpPromptForPoints(points);
+          }
+        } else if (arcMethod === 'scl') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (S, C, L): Başlangıç seçildi. Merkez seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (S, C, L): Merkez seçildi. Kiriş uzunluğu belirleyin veya onaylayın.");
+          } else {
+            const s = finalPoints[0];
+            const c = finalPoints[1];
+            const r = Math.hypot(s.x - c.x, s.y - c.y);
+            const sa = Math.atan2(s.y - c.y, s.x - c.x);
+            let len = parseFloat(arcLengthInput) || r;
+            if (len >= 2 * r) len = 2 * r - 0.1;
+            const sweep = 2 * Math.asin(len / (2 * r));
+            const points = createArcPathFromAngles(c, r, sa, sweep, false);
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(false);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse(`Yay (S, C, Kiriş: ${len.toFixed(1)} mm) eklendi.`);
+            triggerOpPromptForPoints(points);
+          }
+        } else if (arcMethod === 'sea') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (S, E, A): Başlangıç seçildi. Bitiş seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (S, E, A): Bitiş seçildi. Açı değeri girip onaylayın.");
+          } else {
+            const s = finalPoints[0];
+            const e = finalPoints[1];
+            const userAngle = parseFloat(arcAngleInput) || 90;
+            const angRad = (userAngle * Math.PI) / 180;
+            const d = Math.hypot(e.x - s.x, e.y - s.y);
+            const r = d / (2 * Math.sin(angRad / 2 || 1));
+            const mid = { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 };
+            const distToCent = Math.sqrt(Math.max(0.1, r * r - (d / 2) * (d / 2)));
+            const th = Math.atan2(e.y - s.y, e.x - s.x);
+            const cen = { x: mid.x - distToCent * Math.sin(th), y: mid.y + distToCent * Math.cos(th) };
+
+            const sa = Math.atan2(s.y - cen.y, s.x - cen.x);
+            const points = createArcPathFromAngles(cen, r, sa, angRad, false);
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(false);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse(`Yay (S, E, Açı: ${userAngle}°) eklendi.`);
+            triggerOpPromptForPoints(points);
+          }
+        } else if (arcMethod === 'sed') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (S, E, D): Başlangıç seçildi. Bitiş seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (S, E, D): Bitiş seçildi. Tangent yönü belirlemek için tıklatın.");
+          } else {
+            const s = finalPoints[0];
+            const e = finalPoints[1];
+            const p3 = { x, y };
+
+            const tangentAng = Math.atan2(p3.y - s.y, p3.x - s.x);
+            const chordAng = Math.atan2(e.y - s.y, e.x - s.x);
+            const swAngle = 2 * ((tangentAng - chordAng + Math.PI * 2) % Math.PI);
+            const r = Math.hypot(e.x - s.x, e.y - s.y) / (2 * Math.sin(swAngle / 2 || 1));
+            const cAngle = tangentAng - Math.PI / 2;
+            const cen = { x: s.x + r * Math.cos(cAngle), y: s.y + r * Math.sin(cAngle) };
+
+            const sa = Math.atan2(s.y - cen.y, s.x - cen.x);
+            const points = createArcPathFromAngles(cen, r, sa, swAngle, false);
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(false);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse("Yay (S, E, Yön) eklendi.");
+            triggerOpPromptForPoints(points);
+          }
+        } else if (arcMethod === 'ser') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (S, E, R): Başlangıç seçildi. Bitiş seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (S, E, R): Bitiş seçildi. Yarıçap değeri girip onaylayın veya fareyle belirleyin.");
+          } else {
+            const s = finalPoints[0];
+            const e = finalPoints[1];
+            const r = parseFloat(arcRadiusInput) || Math.hypot(x - s.x, y - s.y);
+            const d = Math.hypot(e.x - s.x, e.y - s.y);
+            if (r >= d / 2) {
+              const mid = { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 };
+              const h = Math.sqrt(r * r - (d / 2) * (d / 2));
+              const th = Math.atan2(e.y - s.y, e.x - s.x);
+              const cen = { x: mid.x - h * Math.sin(th), y: mid.y + h * Math.cos(th) };
+
+              const sa = Math.atan2(s.y - cen.y, s.x - cen.x);
+              const ea = Math.atan2(e.y - cen.y, e.x - cen.x);
+              const sweep = (ea - sa + Math.PI * 2) % (Math.PI * 2);
+              const points = createArcPathFromAngles(cen, r, sa, sweep, false);
+              saveState(points, true, 0);
+              setFinalPoints(points);
+              setIsClosed(false);
+              setClickCount(0);
+              setTempPoint(null);
+              setDrawMode('drag');
+              clearCommand();
+              logCommandResponse(`Yay (S, E, Yarıçap: ${r.toFixed(1)} mm) eklendi.`);
+              triggerOpPromptForPoints(points);
+            } else {
+              logCommandResponse("Hata: Yarıçap yetersiz.");
+              setClickCount(0);
+              setFinalPoints([]);
+            }
+          }
+        } else if (arcMethod === 'cse') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (C, S, E): Merkez seçildi. Başlangıçı seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (C, S, E): Başlangıç seçildi. Bitişi belirlemek üzere tıklatın.");
+          } else {
+            const c = finalPoints[0];
+            const s = finalPoints[1];
+            const r = Math.hypot(s.x - c.x, s.y - c.y);
+            const sa = Math.atan2(s.y - c.y, s.x - c.x);
+            const ea = Math.atan2(y - c.y, x - c.x);
+            const sweep = (ea - sa + Math.PI * 2) % (Math.PI * 2);
+            const points = createArcPathFromAngles(c, r, sa, sweep, false);
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(false);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse("Yay (C, S, E) eklendi.");
+            triggerOpPromptForPoints(points);
+          }
+        } else if (arcMethod === 'csa') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (C, S, A): Merkez seçildi. Başlangıç seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (C, S, A): Başlangıç seçildi. Açı değeri girip onaylayın.");
+          } else {
+            const c = finalPoints[0];
+            const s = finalPoints[1];
+            const r = Math.hypot(s.x - c.x, s.y - c.y);
+            const sa = Math.atan2(s.y - c.y, s.x - c.x);
+            const userAngle = parseFloat(arcAngleInput) || 90;
+            const sweep = (userAngle * Math.PI) / 180;
+            const points = createArcPathFromAngles(c, r, sa, sweep, userAngle < 0);
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(false);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse(`Yay (C, S, Açı: ${userAngle}°) eklendi.`);
+            triggerOpPromptForPoints(points);
+          }
+        } else if (arcMethod === 'csl') {
+          if (clickCount === 0) {
+            setFinalPoints([{ x, y }]);
+            setClickCount(1);
+            logCommandResponse("Yay (C, S, L): Merkez seçildi. Başlangıç seçin.");
+          } else if (clickCount === 1) {
+            setFinalPoints(prev => [...prev, { x, y }]);
+            setClickCount(2);
+            logCommandResponse("Yay (C, S, L): Başlangıç seçildi. Kiriş uzunluğu girip onaylayın.");
+          } else {
+            const c = finalPoints[0];
+            const s = finalPoints[1];
+            const r = Math.hypot(s.x - c.x, s.y - c.y);
+            const sa = Math.atan2(s.y - c.y, s.x - c.x);
+            let len = parseFloat(arcLengthInput) || r;
+            if (len >= 2 * r) len = 2 * r - 0.1;
+            const sweep = 2 * Math.asin(len / (2 * r));
+            const points = createArcPathFromAngles(c, r, sa, sweep, false);
+            saveState(points, true, 0);
+            setFinalPoints(points);
+            setIsClosed(false);
+            setClickCount(0);
+            setTempPoint(null);
+            setDrawMode('drag');
+            clearCommand();
+            logCommandResponse(`Yay (C, S, Kiriş: ${len.toFixed(1)} mm) eklendi.`);
+            triggerOpPromptForPoints(points);
+          }
+        } else if (arcMethod === 'continue') {
+          const existingPaths = activeLayer.paths || [];
+          if (existingPaths.length > 0) {
+            const lastPath = existingPaths[existingPaths.length - 1];
+            if (lastPath.length >= 2) {
+              const lastPt = lastPath[lastPath.length - 1];
+              const penultPt = lastPath[lastPath.length - 2];
+              const tangent = { x: lastPt.x - penultPt.x, y: lastPt.y - penultPt.y };
+              const len = Math.hypot(tangent.x, tangent.y);
+              if (len > 0.1) {
+                const tx = tangent.x / len;
+                const ty = tangent.y / len;
+                const rVal = 40;
+                // Center orth to last tangent
+                const cen = { x: lastPt.x - ty * rVal, y: lastPt.y + tx * rVal };
+                const sa = Math.atan2(lastPt.y - cen.y, lastPt.x - cen.x);
+                const points = createArcPathFromAngles(cen, rVal, sa, Math.PI / 2, false);
+
+                saveState(points, true, 0);
+                setFinalPoints(points);
+                setIsClosed(false);
+                setClickCount(0);
+                setTempPoint(null);
+                setDrawMode('drag');
+                clearCommand();
+                logCommandResponse("Teğet Devam Yayı eklendi.");
+                triggerOpPromptForPoints(points);
+              }
+            } else {
+              logCommandResponse("Devam yayı için aktif katmanda en az bir çizgi/şekil veya yay bulunmalı.");
+            }
+          } else {
+            logCommandResponse("Yay çizilemiyor. Önce bir çizgi çizmeyi deneyin.");
+          }
         }
       } else if (currentCommand === 'dimension') {
         const pt = snapPoint ? { x: snapPoint.x, y: snapPoint.y } : { x, y };
@@ -6707,7 +7881,7 @@ export default function App() {
       const wY = (mY - panY) / viewZoom;
 
       const scaleFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      const zoom = Math.max(0.1, Math.min(viewZoom * scaleFactor, 10.0));
+      const zoom = Math.max(0.005, Math.min(viewZoom * scaleFactor, 250.0));
 
       setViewZoom(zoom);
       setPanX(mX - wX * zoom);
@@ -8176,6 +9350,16 @@ export default function App() {
             <span>Circle</span>
           </button>
           <button
+            onClick={() => setCommand('arc')}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
+              currentCommand === 'arc' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+            }`}
+            title="Arc (Yay)"
+          >
+            <Activity className="w-3 h-3" />
+            <span>Arc</span>
+          </button>
+          <button
             onClick={() => setCommand('polygon')}
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
               currentCommand === 'polygon' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
@@ -8442,6 +9626,26 @@ export default function App() {
             <span>Sığdır</span>
           </button>
           <button
+            onClick={() => {
+              if (alignmentSelectMode) {
+                setAlignmentSelectMode(null);
+                logCommandResponse("Hizalama Görselleştirici kapatıldı.");
+              } else {
+                setAlignmentSelectMode('p1');
+                setAlignmentPt1(null);
+                setAlignmentPt2(null);
+                logCommandResponse("Hizalama Görselleştirici Aktif. Ekranda hizalamasını ölçmek istediğiniz 1. Noktayı seçin.");
+              }
+            }}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono font-bold ${
+              alignmentSelectMode ? 'bg-cyan-600 border-cyan-700 text-white shadow-sm ring-1 ring-cyan-200 animate-pulse' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+            }`}
+            title="Hizalama Görselleştirici (Alignment Visualizer)"
+          >
+            <ArrowRightLeft className="w-3 h-3 text-cyan-600" />
+            <span>Hizalama Görselleştirici</span>
+          </button>
+          <button
             onClick={handleClearAll}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-red-50 border border-red-200 text-red-650 hover:bg-red-100 transition font-mono font-bold"
             title="Wipe canvas clean"
@@ -8451,6 +9655,231 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* Dynamic Contextual Subcommand AutoCAD Options Bar */}
+      {(currentCommand === 'rect' || currentCommand === 'circle' || currentCommand === 'arc' || alignmentSelectMode) && (
+        <div className="bg-slate-50 border-b border-slate-200/80 px-4 py-1.5 flex flex-wrap items-center gap-4 text-xs select-none shadow-xs z-10 shrink-0">
+          {currentCommand === 'rect' && (
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-slate-400 font-bold uppercase text-[10px]">RECTANGLE METHODS:</span>
+              <div className="flex bg-slate-100 p-0.5 rounded border border-slate-200">
+                {[
+                  { id: '2point', label: '2 Noktalı (2-Point)' },
+                  { id: 'center', label: 'Merkez Noktalı (Center)' },
+                  { id: 'dimensions', label: 'Belirli Boyutlar (Dimensions)' },
+                  { id: 'rotated', label: 'Döndürülmüş (Rotated)' }
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      setRectMethod(m.id as any);
+                      setClickCount(0);
+                      setFinalPoints([]);
+                      logCommandResponse(`Rectangle yöntemi değiştirildi: ${m.label}`);
+                    }}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${
+                      rectMethod === m.id
+                        ? 'bg-orange-500 text-white shadow-xs'
+                        : 'text-slate-650 hover:bg-slate-200/50'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              
+              {rectMethod === 'dimensions' && (
+                <div className="flex items-center gap-1.5 ml-2 border-l border-slate-200 pl-3">
+                  <span className="font-mono text-[10px] text-slate-500">Genişlik (w):</span>
+                  <input
+                    type="number"
+                    value={rectWidthInput}
+                    onChange={(e) => setRectWidthInput(e.target.value)}
+                    className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-mono text-slate-800"
+                    placeholder="100.0"
+                  />
+                  <span className="font-mono text-[10px] text-slate-500">Yükseklik (h):</span>
+                  <input
+                    type="number"
+                    value={rectHeightInput}
+                    onChange={(e) => setRectHeightInput(e.target.value)}
+                    className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-mono text-slate-800"
+                    placeholder="60.0"
+                  />
+                  <span className="text-[10px] font-bold text-slate-505">mm</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {currentCommand === 'circle' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-slate-400 font-bold uppercase text-[10px]">CIRCLE METHODS:</span>
+              <div className="flex flex-wrap bg-slate-100 p-0.5 rounded border border-slate-200">
+                {[
+                  { id: 'center-radius', label: 'Merkez, Yarıçap (Center, Rad)' },
+                  { id: 'center-diameter', label: 'Merkez, Çap (Center, Diam)' },
+                  { id: '2point', label: '2-Point (2P)' },
+                  { id: '3point', label: '3-Point (3P)' },
+                  { id: 'ttr', label: 'Teğet Teğet Yarıçap (TTR)' },
+                  { id: 'ttt', label: '3 Teğet (TTT)' }
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      setCircleMethod(m.id as any);
+                      setClickCount(0);
+                      setFinalPoints([]);
+                      logCommandResponse(`Daire çizim yöntemi değiştirildi: ${m.label}`);
+                    }}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${
+                      circleMethod === m.id
+                        ? 'bg-orange-500 text-white shadow-xs'
+                        : 'text-slate-650 hover:bg-slate-200/50'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+              
+              {circleMethod === 'ttr' && (
+                <div className="flex items-center gap-1.5 ml-2 border-l border-slate-200 pl-3">
+                  <span className="font-mono text-[10px] text-slate-505">Daire Yarıçapı (TTR Rad):</span>
+                  <input
+                    type="number"
+                    value={ttrRadiusInput}
+                    onChange={(e) => setTtrRadiusInput(e.target.value)}
+                    className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-mono text-slate-800"
+                    placeholder="40.0"
+                  />
+                  <span className="text-[10px] font-mono text-slate-400">mm</span>
+                  {ttrSelectedLines.length > 0 && (
+                    <span className="text-[9px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">
+                      Teğetler: {ttrSelectedLines.length} / 2 seçildi
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {currentCommand === 'arc' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-slate-400 font-bold uppercase text-[10px]">ARC METHODS:</span>
+              <div className="flex flex-wrap bg-slate-100 p-0.5 rounded border border-slate-200">
+                {[
+                  { id: '3point', label: '3-Point' },
+                  { id: 'sce', label: 'Start, Center, End' },
+                  { id: 'sca', label: 'Start, Center, Angle' },
+                  { id: 'scl', label: 'Start, Center, Length' },
+                  { id: 'sea', label: 'Start, End, Angle' },
+                  { id: 'sed', label: 'Start, End, Direction' },
+                  { id: 'ser', label: 'Start, End, Radius' },
+                  { id: 'cse', label: 'Center, Start, End' },
+                  { id: 'csa', label: 'Center, Start, Angle' },
+                  { id: 'csl', label: 'Center, Start, Length' },
+                  { id: 'continue', label: 'Teğet Devam (Continue)' }
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      setArcMethod(m.id as any);
+                      setClickCount(0);
+                      setFinalPoints([]);
+                      logCommandResponse(`Yay (Arc) çizim yöntemi: ${m.label}`);
+                    }}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${
+                      arcMethod === m.id
+                        ? 'bg-orange-500 text-white shadow-xs'
+                        : 'text-slate-650 hover:bg-slate-200/50'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {(arcMethod === 'sca' || arcMethod === 'sea' || arcMethod === 'csa') && (
+                <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-3">
+                  <span className="font-mono text-[10px] text-slate-500">Açı (°):</span>
+                  <input
+                    type="number"
+                    value={arcAngleInput}
+                    onChange={(e) => setArcAngleInput(e.target.value)}
+                    className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-mono text-slate-850"
+                    placeholder="90"
+                  />
+                </div>
+              )}
+
+              {(arcMethod === 'scl' || arcMethod === 'csl') && (
+                <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-3">
+                  <span className="font-mono text-[10px] text-slate-500">Kiriş (Length):</span>
+                  <input
+                    type="number"
+                    value={arcLengthInput}
+                    onChange={(e) => setArcLengthInput(e.target.value)}
+                    className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-mono text-slate-850"
+                    placeholder="50"
+                  />
+                </div>
+              )}
+
+              {(arcMethod === 'ser') && (
+                <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-3">
+                  <span className="font-mono text-[10px] text-slate-500">Yarıçap (Rad):</span>
+                  <input
+                    type="number"
+                    value={arcRadiusInput}
+                    onChange={(e) => setArcRadiusInput(e.target.value)}
+                    className="w-16 px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-mono text-slate-850"
+                    placeholder="75"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {alignmentSelectMode && (
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-cyan-600 font-bold uppercase text-[10px] animate-pulse">HIZALAMA DURUMU:</span>
+                <span className="text-[11px] font-medium text-slate-700">
+                  {alignmentSelectMode === 'p1' 
+                    ? "📍 Lütfen ekrandan 1. Ölçü Anchor Noktası (P1) seçin." 
+                    : "🎯 Lütfen ekrandan 2. Ölçü Referans Noktası (P2) seçin."
+                  }
+                </span>
+                
+                {alignmentPt1 && (
+                  <span className="bg-cyan-50 border border-cyan-200 text-cyan-700 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                    P1: ({alignmentPt1.x.toFixed(1)}, {alignmentPt1.y.toFixed(1)})
+                  </span>
+                )}
+                {alignmentPt2 && (
+                  <span className="bg-purple-50 border border-purple-200 text-purple-700 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                    P2: ({alignmentPt2.x.toFixed(1)}, {alignmentPt2.y.toFixed(1)})
+                  </span>
+                )}
+              </div>
+              {(alignmentPt1 || alignmentPt2) && (
+                <button
+                  onClick={() => {
+                    setAlignmentPt1(null);
+                    setAlignmentPt2(null);
+                    setAlignmentSelectMode('p1');
+                    logCommandResponse("Hizalama noktaları temizlendi. Yeni 1. Noktayı seçin.");
+                  }}
+                  className="px-2 py-0.5 text-[10px] font-bold bg-white text-rose-600 rounded border border-rose-200 hover:bg-rose-50 transition cursor-pointer"
+                >
+                  Sıfırla
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main CAD Workspace Layout */}
       <div className="flex flex-1 overflow-hidden">
