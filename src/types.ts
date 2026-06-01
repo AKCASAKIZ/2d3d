@@ -50,7 +50,7 @@ export interface TrackLine {
   p2?: Point;
 }
 
-export type CommandType = 'line' | 'rect' | 'circle' | 'polygon' | 'trim' | 'extend' | 'offset' | 'stretch' | 'dimension' | '';
+export type CommandType = 'line' | 'rect' | 'circle' | 'polygon' | 'trim' | 'extend' | 'offset' | 'stretch' | 'dimension' | 'arc' | '';
 
 export type DrawModeType = 'freehand' | 'point' | 'drag';
 
