@@ -4775,7 +4775,7 @@ export default function App() {
               ctx.fillStyle = '#f43f5e';
               const fontHeightMm = autoTextHeightPx / viewZoom;
               ctx.fillText(
-                `R: ${radius.toFixed(1)} mm`,
+                `R: ${radius.toFixed(1)}`,
                 (center.x + targetX) / 2 + fontHeightMm * 0.9,
                 (center.y + targetY) / 2 - fontHeightMm * 0.45
               );
@@ -4792,7 +4792,7 @@ export default function App() {
               ctx.fillStyle = '#f43f5e'; // Rose
               const fontHeightMm = autoTextHeightPx / viewZoom;
               ctx.fillText(
-                `${d.toFixed(1)} mm`,
+                `${d.toFixed(1)}`,
                 (p1.x + p2.x) / 2,
                 (p1.y + p2.y) / 2 - fontHeightMm * 1.05
               );
@@ -4910,7 +4910,7 @@ export default function App() {
 
       // Draw extension lines (faint dashed lines)
       ctx.save();
-      ctx.strokeStyle = '#52525b'; // Zinc-600
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)'; // White extension lines with opacity as requested
       ctx.lineWidth = 1.0 / viewZoom;
       ctx.setLineDash([3 / viewZoom, 3 / viewZoom]);
       ctx.beginPath();
@@ -4936,7 +4936,7 @@ export default function App() {
       ctx.restore();
 
       // Draw dimension line (solid line)
-      ctx.strokeStyle = isHighlighted ? '#f472b6' : '#db2777'; // pink-400 vs pink-600
+      ctx.strokeStyle = '#ffffff'; // White dimension line
       ctx.lineWidth = isHighlighted ? 2.5 / viewZoom : 1.5 / viewZoom;
       ctx.beginPath();
       ctx.moveTo(dP1_offX, dP1_offY);
@@ -4945,8 +4945,8 @@ export default function App() {
 
       // Draw 1:3 ratio CAD arrowhead cones filled at endpoints
       ctx.save();
-      ctx.fillStyle = isHighlighted ? '#f472b6' : '#db2777';
-      ctx.strokeStyle = isHighlighted ? '#f472b6' : '#db2777';
+      ctx.fillStyle = '#ffffff'; // White arrowheads
+      ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = isHighlighted ? 1.5 / viewZoom : 1.0 / viewZoom;
 
       // Endpoint P1 Arrow base calculations (pointing from baseCenter towards dP1_offX/Y)
@@ -5004,34 +5004,25 @@ export default function App() {
       ctx.translate(textMidX, textMidY);
       ctx.rotate(textAngle);
 
-      const valText = customValueText || `${displayValue.toFixed(1)} mm`;
+      // Omit mm as instructed ("mm yazma")
+      let valText = customValueText || `${displayValue.toFixed(1)}`;
+      valText = valText.replace(/\s*mm/gi, '').trim();
+
       ctx.font = `bold ${Math.round(textHeightPx)}px monospace`;
-      const textWidth = ctx.measureText(valText).width;
 
-      const verticalPadding = fontHeightMm * 0.55; 
-      const horizontalPadding = fontHeightMm * 0.75; 
+      const isDarkBg = isColorDark(canvasBgColor);
+      // Light Lewis blue: #38bdf8 on dark bg, elegant #0284c7 on light bg
+      const textBlue = isDarkBg ? '#38bdf8' : '#0284c7';
 
-      // Background card mask
-      ctx.fillStyle = '#18181b'; // Zinc-900 matches app background
-      ctx.fillRect(
-        -textWidth / 2 - horizontalPadding, 
-        -fontHeightMm / 2 - verticalPadding / 2, 
-        textWidth + horizontalPadding * 2, 
-        fontHeightMm + verticalPadding
-      );
+      // Clean, seamless background masking using strokeText in canvasBgColor (perfect legibility without drawing a visible square box layout)
+      ctx.strokeStyle = canvasBgColor;
+      ctx.lineWidth = 5.0 / viewZoom;
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.strokeText(valText, 0, 0);
 
-      // Border frame around active dimension label for extra premium polish
-      ctx.strokeStyle = isHighlighted ? '#f472b6' : '#ec4899';
-      ctx.lineWidth = 1.0 / viewZoom;
-      ctx.strokeRect(
-        -textWidth / 2 - horizontalPadding, 
-        -fontHeightMm / 2 - verticalPadding / 2, 
-        textWidth + horizontalPadding * 2, 
-        fontHeightMm + verticalPadding
-      );
-
-      // Text label filled
-      ctx.fillStyle = isHighlighted ? '#fbcfe8' : '#f472b6'; // lighter pink vs dark text
+      // Text label filled with beautiful open Lewis blue
+      ctx.fillStyle = isHighlighted ? '#e0f2fe' : textBlue;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(valText, 0, 0);
@@ -5066,14 +5057,14 @@ export default function App() {
         ctx.fillRect(dimP1.x - 4/viewZoom, dimP1.y - 4/viewZoom, 8/viewZoom, 8/viewZoom);
 
         // Render length text near hover
-        ctx.fillStyle = '#f472b6';
+        ctx.fillStyle = '#38bdf8'; // Light Lewis blue for length hover
         ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
         const dist = Math.hypot(hoverCoords.x - dimP1.x, hoverCoords.y - dimP1.y);
-        ctx.fillText(`L: ${dist.toFixed(1)} mm`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
+        ctx.fillText(`L: ${dist.toFixed(1)}`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
       } else if (clickCount === 2 && dimP1 && dimP2) {
         // Both points set, previewing offset and placement of dimension line
         const details = getAutoDimensionDetails(dimP1, dimP2, hoverCoords.x, hoverCoords.y);
-        drawCustomDimension(dimP1, dimP2, details.offset, true, `📐 ${details.value.toFixed(1)} mm`, details.dimType);
+        drawCustomDimension(dimP1, dimP2, details.offset, true, `📐 ${details.value.toFixed(1)}`, details.dimType);
       }
     }
 
