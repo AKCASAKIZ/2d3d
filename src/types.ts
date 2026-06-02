@@ -73,8 +73,22 @@ export interface CADLayer {
   opType: 'extrude' | 'revolve';
   depth: number;
   revolveAxis?: 'left' | 'center' | 'right' | 'origin-y' | 'origin-x';
+  lineType?: 'main' | 'center' | 'hidden';
   paths?: Point[][];
-  dimensions?: Array<{ id: string; p1: Point; p2: Point; offset: number; value: number; dimType?: 'horizontal' | 'vertical' | 'aligned' }>;
+  dimensions?: Array<{
+    id: string;
+    p1: Point;
+    p2: Point;
+    offset: number;
+    value: number;
+    dimType?: 'horizontal' | 'vertical' | 'aligned';
+    precision?: number;
+    customLabel?: string;
+    textShiftX?: number;
+    textShiftY?: number;
+    toleranceUpper?: string;
+    toleranceLower?: string;
+  }>;
   pathSettings?: PathSettings[];
   finalPointsSettings?: PathSettings;
   zOffset?: number;
