@@ -4866,7 +4866,8 @@ export default function App() {
       textShiftX: number = 0,
       textShiftY: number = 0,
       toleranceUpper?: string,
-      toleranceLower?: string
+      toleranceLower?: string,
+      fontSizeOverride?: number
     ) => {
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
@@ -4925,7 +4926,9 @@ export default function App() {
 
       // 1. Dynamic scale of arrows and labels based on drawing's bounding box and zoom
       // Virtual arrowhead length targets ~4.2% of active layer size, clamped safely
-      const baseArrowLengthMm = Math.max(1.5, Math.min(18.0, sketchSide * 0.042));
+      const defaultFontHeight = Math.max(1.8, Math.min(10.0, sketchSide * 0.035));
+      const fontSizeRatio = fontSizeOverride ? (fontSizeOverride / defaultFontHeight) : 1.0;
+      const baseArrowLengthMm = Math.max(1.5, Math.min(18.0, sketchSide * 0.042 * fontSizeRatio));
       // Ensure arrows don't exceed 35% of the total dimension line length
       let arrowLength = Math.min(baseArrowLengthMm, len * 0.35);
 
@@ -4939,9 +4942,14 @@ export default function App() {
       const arrowWidth = arrowLength / 3;
 
       // Dynamic text sizing based on active drawing size & screen footprint
-      const baseTextHeightMm = Math.max(1.8, Math.min(10.0, sketchSide * 0.035));
+      // If fontSizeOverride is specified, we use that as the base height in mm
+      const baseTextHeightMm = fontSizeOverride || Math.max(1.8, Math.min(10.0, sketchSide * 0.035));
       let textHeightPx = baseTextHeightMm * viewZoom;
-      textHeightPx = Math.max(9.5, Math.min(30.0, textHeightPx)); // robust read bounds on screen
+      if (!fontSizeOverride) {
+        textHeightPx = Math.max(9.5, Math.min(30.0, textHeightPx)); // robust read bounds on screen
+      } else {
+        textHeightPx = Math.max(5.0, Math.min(120.0, textHeightPx)); // custom font size bounds
+      }
 
       const fontHeightMm = textHeightPx / viewZoom;
 
@@ -5108,7 +5116,8 @@ export default function App() {
         d.textShiftX || 0,
         d.textShiftY || 0,
         d.toleranceUpper,
-        d.toleranceLower
+        d.toleranceLower,
+        d.fontSize
       );
     });
 
@@ -13319,6 +13328,41 @@ export default function App() {
                           Sıfırla
                         </button>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Dimension Font Size Slider with Smart toggle */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px] text-zinc-400 font-mono mb-0.5">
+                      <span>Yazı Boyutu (Font Size):</span>
+                      <span className="text-pink-400 font-bold font-mono">
+                        {activeDim.fontSize ? `${activeDim.fontSize} mm` : "Akıllı (Auto)"}
+                      </span>
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <button
+                        onClick={() => updateDimensionField(selectedDimensionId, 'fontSize', undefined)}
+                        className={`px-1.5 py-1 rounded text-[9px] font-mono border transition ${
+                          activeDim.fontSize === undefined
+                            ? 'bg-pink-600/20 border-pink-500 text-pink-300 font-bold'
+                            : 'bg-zinc-950 border-zinc-850 hover:bg-zinc-850 text-zinc-400'
+                        }`}
+                        title="Akıllı boyutlandırma (parçanın boyutlarına göre otomatik ölçeklenir)"
+                      >
+                        Akıllı (Auto)
+                      </button>
+                      <input
+                        type="range"
+                        min="1"
+                        max="24"
+                        step="0.5"
+                        value={activeDim.fontSize || 3.5}
+                        disabled={activeDim.fontSize === undefined}
+                        onChange={(e) => updateDimensionField(selectedDimensionId, 'fontSize', parseFloat(e.target.value))}
+                        className={`flex-1 h-1 rounded cursor-ew-resize accent-pink-500 ${
+                          activeDim.fontSize === undefined ? 'opacity-30 cursor-not-allowed' : ''
+                        }`}
+                      />
                     </div>
                   </div>
 
