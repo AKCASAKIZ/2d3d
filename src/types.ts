@@ -88,6 +88,7 @@ export interface CADLayer {
     textShiftY?: number;
     toleranceUpper?: string;
     toleranceLower?: string;
+    fontSize?: number;
   }>;
   pathSettings?: PathSettings[];
   finalPointsSettings?: PathSettings;
