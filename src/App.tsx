@@ -617,9 +617,19 @@ export default function App() {
     );
   };
 
+  const updateDimensionField = (dimId: string, fieldName: string, value: any) => {
+    setDimensions(prev => prev.map(dim => dim.id === dimId ? { ...dim, [fieldName]: value } : dim));
+  };
+
   const [dimP1, setDimP1] = useState<Point | null>(null);
   const [dimP2, setDimP2] = useState<Point | null>(null);
   const [selectedDimensionId, setSelectedDimensionId] = useState<string | null>(null);
+  const [activeDimensionDrag, setActiveDimensionDrag] = useState<{
+    dimId: string;
+    startX: number;
+    startY: number;
+    startOffset: number;
+  } | null>(null);
   const [editingDimensionValueInput, setEditingDimensionValueInput] = useState<string>("");
   const [moveEntireShapeOnDimChange, setMoveEntireShapeOnDimChange] = useState<boolean>(true);
   const [moveEntireShapeOnCoordChange, setMoveEntireShapeOnCoordChange] = useState<boolean>(true);
@@ -5035,7 +5045,15 @@ export default function App() {
     // Draw already placed dimensions for current active layer
     dimensions.forEach(d => {
       const isHighlighted = selectedDimensionId === d.id;
-      drawCustomDimension(d.p1, d.p2, d.offset, isHighlighted, undefined, d.dimType || 'aligned');
+      let displayValue = Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y);
+      if (d.dimType === 'horizontal') {
+        displayValue = Math.abs(d.p2.x - d.p1.x);
+      } else if (d.dimType === 'vertical') {
+        displayValue = Math.abs(d.p2.y - d.p1.y);
+      }
+      const prec = d.precision !== undefined ? d.precision : 1;
+      const computedText = d.customLabel || displayValue.toFixed(prec);
+      drawCustomDimension(d.p1, d.p2, d.offset, isHighlighted, computedText, d.dimType || 'aligned');
     });
 
     // Draw active interactive preview if user is inserting a dimension
@@ -6726,6 +6744,7 @@ export default function App() {
       }
 
       if (clickedDim) {
+        saveState();
         setSelectedDimensionId(clickedDim.id);
         const dType = clickedDim.dimType || 'aligned';
         let actualLen = Math.hypot(clickedDim.p2.x - clickedDim.p1.x, clickedDim.p2.y - clickedDim.p1.y);
@@ -6735,7 +6754,13 @@ export default function App() {
           actualLen = Math.abs(clickedDim.p2.y - clickedDim.p1.y);
         }
         setEditingDimensionValueInput(actualLen.toFixed(1));
-        logCommandResponse(`Ölçülendirme seçildi. Değeri girerek konumlandırmayı ayarlayabilirsiniz.`);
+        logCommandResponse(`Ölçülendirme seçildi. Değeri veya konumunu (sürükleyerek) ayarlayabilirsiniz.`);
+        setActiveDimensionDrag({
+          dimId: clickedDim.id,
+          startX: x,
+          startY: y,
+          startOffset: clickedDim.offset || 0
+        });
         return;
       }
 
@@ -6978,6 +7003,45 @@ export default function App() {
     let x = rawCoords.x;
     let y = rawCoords.y;
     setHoverCoords({ x, y });
+
+    if (activeDimensionDrag) {
+      const { dimId, startX, startY, startOffset } = activeDimensionDrag;
+      setLayers(prevLayers =>
+        prevLayers.map(l => {
+          if (l.id === activeLayerId) {
+            const currentDims = l.dimensions || [];
+            const updatedDims = currentDims.map(d => {
+              if (d.id === dimId) {
+                const p1 = d.p1;
+                const p2 = d.p2;
+                let newOffset = startOffset;
+                const dimType = d.dimType || 'aligned';
+                if (dimType === 'horizontal') {
+                  newOffset = startOffset + (y - startY);
+                } else if (dimType === 'vertical') {
+                  newOffset = startOffset + (x - startX);
+                } else {
+                  const dx = p2.x - p1.x;
+                  const dy = p2.y - p1.y;
+                  const len = Math.hypot(dx, dy);
+                  if (len > 0.001) {
+                    const nx = -dy / len;
+                    const ny = dx / len;
+                    const proj = (x - startX) * nx + (y - startY) * ny;
+                    newOffset = startOffset + proj;
+                  }
+                }
+                return { ...d, offset: newOffset };
+              }
+              return d;
+            });
+            return { ...l, dimensions: updatedDims };
+          }
+          return l;
+        })
+      );
+      return;
+    }
 
     if (activeSegmentStretch) {
       const { pathIdx, segmentIdx, startX, startY, originalPoints } = activeSegmentStretch;
@@ -7668,6 +7732,12 @@ export default function App() {
     setIsPanning(false);
     setTrackedLines([]);
     setSnapPoint(null);
+
+    if (activeDimensionDrag) {
+      setActiveDimensionDrag(null);
+      logCommandResponse("Ölçülendirme konumu başarıyla güncellendi.");
+      return;
+    }
 
     if (rightClickStart && rightClickEnd) {
       const isCrossing = rightClickEnd.x < rightClickStart.x; // RTL is crossing selection
@@ -10468,6 +10538,57 @@ export default function App() {
                     )}
                   </div>
 
+                  {/* Placed Custom Dimensions Manager / Properties list */}
+                  <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-2.5 shadow-xs">
+                    <span className="text-[10px] uppercase font-mono font-bold text-pink-700 flex items-center gap-1">
+                      <Ruler className="w-3.5 h-3.5 text-pink-600 font-extrabold" />
+                      Çizimdeki Ölçülendirmeler ({dimensions.length})
+                    </span>
+                    {dimensions.length === 0 ? (
+                      <p className="text-[9.5px] text-slate-400 italic">Henüz özel ölçülendirme eklenmedi.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                        {dimensions.map((d, index) => {
+                          const isSel = selectedDimensionId === d.id;
+                          const lengthVal = Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y);
+                          const activeType = d.dimType || 'aligned';
+                          const decimals = d.precision !== undefined ? d.precision : 1;
+                          let dispLabel = d.customLabel || lengthVal.toFixed(decimals);
+                          return (
+                            <div 
+                              key={d.id}
+                              onClick={() => {
+                                setSelectedDimensionId(d.id);
+                                const currentLen = Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y);
+                                setEditingDimensionValueInput((d.dimType === 'horizontal' ? Math.abs(d.p2.x - d.p1.x) : d.dimType === 'vertical' ? Math.abs(d.p2.y - d.p1.y) : currentLen).toFixed(1));
+                              }}
+                              className={`flex items-center justify-between p-2 rounded-md border text-[10px] font-mono cursor-pointer transition ${
+                                isSel 
+                                  ? 'bg-pink-50 border-pink-300 text-pink-805 font-bold' 
+                                  : 'bg-slate-50 border-slate-150 text-slate-750 hover:bg-slate-100 hover:border-slate-200'
+                              }`}
+                            >
+                              <div className="flex flex-col gap-0.5 text-left">
+                                <span className="font-sans font-bold text-slate-800">Ölçü #{index + 1} ({activeType})</span>
+                                <span className="text-[9px] text-slate-500 font-mono">Değer: {dispLabel}</span>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteDimension(d.id);
+                                }}
+                                className="p-1 hover:bg-red-50 text-red-600 hover:text-red-700 rounded transition"
+                                title="Ölçüyü sil"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
                   {renderShapeSolidSettings()}
                 </div>
               ) : (() => {
@@ -12994,115 +13115,207 @@ export default function App() {
             )}
 
             {/* Interactive parametric measurement/dimension positioning editor popup */}
-            {selectedDimensionId !== null && (
-              <div className="absolute top-14 left-3 bg-zinc-900/95 border-2 border-pink-500 rounded-lg p-3 text-xs w-[280px] shadow-2xl z-40 space-y-3 backdrop-blur animate-fade-in text-zinc-100">
-                <div className="flex justify-between items-center pb-1.5 border-b border-zinc-850">
-                  <span className="font-bold text-pink-400 font-mono flex items-center gap-1.5 uppercase tracking-wide text-[10px]">
-                    <span className="inline-block w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
-                    {isSelectedDimAnEdge ? "📐 Edge Length & Resizing" : "📐 Smart Positioning"}
-                  </span>
-                  <button 
-                    onClick={() => {
-                      setSelectedDimensionId(null);
-                    }}
-                    className="text-zinc-500 hover:text-zinc-200 transition text-[11px] font-bold"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div>
-                  <p className="text-[10px] text-zinc-400 mb-2 font-mono leading-relaxed select-none">
-                    {isSelectedDimAnEdge 
-                      ? "Enter target edge length to resize the shape proportionally or non-proportionally." 
-                      : "Adjust distance between snap points to reposition nodes dynamically."}
-                  </p>
-                  
-                  {/* Target Distance Input */}
-                  <label className="block text-[10px] text-zinc-400 font-mono mb-1">
-                    {isSelectedDimAnEdge ? "New Edge Length:" : "Target Distance:"}
-                  </label>
-                  <div className="flex gap-1.5 items-center">
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={editingDimensionValueInput}
-                      onChange={(e) => setEditingDimensionValueInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const distVal = parseFloat(editingDimensionValueInput);
-                          if (!isNaN(distVal) && distVal > 0) {
-                            handleApplyDimensionValue(selectedDimensionId, distVal);
-                          }
-                        }
+            {selectedDimensionId !== null && (() => {
+              const activeDim = (activeLayer.dimensions || []).find(dim => dim.id === selectedDimensionId);
+              if (!activeDim) return null;
+              return (
+                <div className="absolute top-14 left-3 bg-zinc-900/95 border-2 border-pink-500 rounded-lg p-3 text-xs w-[280px] shadow-2xl z-40 space-y-3 backdrop-blur animate-fade-in text-zinc-100">
+                  <div className="flex justify-between items-center pb-1.5 border-b border-zinc-850">
+                    <span className="font-bold text-pink-400 font-mono flex items-center gap-1.5 uppercase tracking-wide text-[10px]">
+                      <span className="inline-block w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
+                      {isSelectedDimAnEdge ? "📐 Edge Length & Resizing" : "📐 Smart Positioning"}
+                    </span>
+                    <button 
+                      onClick={() => {
+                        setSelectedDimensionId(null);
                       }}
-                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-zinc-100 text-xs font-mono outline-none focus:border-pink-500 font-bold"
-                      placeholder="e.g. 150"
-                      autoFocus
-                    />
-                    <span className="text-zinc-400 font-mono font-bold">mm</span>
+                      className="text-zinc-500 hover:text-zinc-200 transition text-[11px] font-bold"
+                    >
+                      ✕
+                    </button>
                   </div>
-                </div>
-
-                {/* Positioning Options Toggles */}
-                {!isSelectedDimAnEdge && (
-                  <div className="p-2 bg-zinc-950 border border-zinc-850 rounded space-y-2">
-                    <span className="text-[9px] uppercase font-mono text-zinc-500 block">Positioning Method:</span>
-                    <div className="flex flex-col gap-1.5">
-                      <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
-                        <input
-                          type="radio"
-                          name="positioning_mode"
-                          checked={moveEntireShapeOnDimChange}
-                          onChange={() => setMoveEntireShapeOnDimChange(true)}
-                          className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
-                        />
-                        <span>Shift Entire Shape (Recommended)</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
-                        <input
-                          type="radio"
-                          name="positioning_mode"
-                          checked={!moveEntireShapeOnDimChange}
-                          onChange={() => setMoveEntireShapeOnDimChange(false)}
-                          className="rounded-full text-pink-500 focus:ring-0 cursor-pointer"
-                        />
-                        <span>Move Target Node Only</span>
-                      </label>
+                  <div>
+                    <p className="text-[10px] text-zinc-400 mb-2 font-mono leading-relaxed select-none">
+                      {isSelectedDimAnEdge 
+                        ? "Enter target edge length to resize the shape proportionally or non-proportionally." 
+                        : "Adjust distance between snap points to reposition nodes dynamically."}
+                    </p>
+                    
+                    {/* Target Distance Input */}
+                    <label className="block text-[10px] text-zinc-400 font-mono mb-1">
+                      {isSelectedDimAnEdge ? "New Edge Length:" : "Target Distance:"}
+                    </label>
+                    <div className="flex gap-1.5 items-center">
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={editingDimensionValueInput}
+                        onChange={(e) => setEditingDimensionValueInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const distVal = parseFloat(editingDimensionValueInput);
+                            if (!isNaN(distVal) && distVal > 0) {
+                              handleApplyDimensionValue(selectedDimensionId, distVal);
+                            }
+                          }
+                        }}
+                        className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-zinc-100 text-xs font-mono outline-none focus:border-pink-500 font-bold"
+                        placeholder="e.g. 150"
+                        autoFocus
+                      />
+                      <span className="text-zinc-400 font-mono font-bold">mm</span>
                     </div>
                   </div>
-                )}
 
-                {/* Apply Actions */}
-                <div className="flex gap-2 pt-1 border-t border-zinc-800/60">
-                  <button
-                    onClick={() => {
-                      const distVal = parseFloat(editingDimensionValueInput);
-                      if (!isNaN(distVal) && distVal > 0) {
-                        handleApplyDimensionValue(selectedDimensionId, distVal);
-                      }
-                    }}
-                    className="flex-1 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded font-bold transition text-center cursor-pointer text-[11px] font-mono"
-                  >
-                    {isSelectedDimAnEdge ? "Resize (Apply)" : "Reposition (Apply)"}
-                  </button>
-                  <button
-                    onClick={() => handleDeleteDimension(selectedDimensionId)}
-                    className="px-2 py-1.5 bg-red-950 hover:bg-red-900 border border-red-900 text-red-100 rounded transition text-[11px] font-mono"
-                    title="Delete this dimension label from canvas"
-                  >
-                    Delete
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelectedDimensionId(null);
-                    }}
-                    className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded transition text-[11px] font-mono"
-                  >
-                    Cancel
-                  </button>
+                  {/* Offset Slider / Position Adjustment */}
+                  <div>
+                    <label className="flex justify-between text-[10px] text-zinc-400 font-mono mb-1">
+                      <span>Ölçü Çizgisi Konumu (Offset):</span>
+                      <span className="text-pink-400 font-bold">{(activeDim.offset || 0).toFixed(1)} mm</span>
+                    </label>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="range"
+                        min="-120"
+                        max="120"
+                        step="1"
+                        value={activeDim.offset || 0}
+                        onChange={(e) => updateDimensionField(selectedDimensionId, 'offset', parseFloat(e.target.value))}
+                        className="w-full accent-pink-500 bg-zinc-950 h-1.5 rounded cursor-ew-resize"
+                      />
+                      <button
+                        onClick={() => updateDimensionField(selectedDimensionId, 'offset', 15)}
+                        className="px-1.5 py-0.5 bg-zinc-850 hover:bg-zinc-800 text-[9px] text-zinc-300 font-mono rounded"
+                        title="Varsayılan (15)"
+                      >
+                        Sıfırla
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Dimension Line Orientation Selector */}
+                  <div>
+                    <label className="block text-[10px] text-zinc-400 font-mono mb-1">Yönelim Tipi (Alignment):</label>
+                    <div className="grid grid-cols-3 gap-1">
+                      {(['aligned', 'horizontal', 'vertical'] as const).map((type) => (
+                        <button
+                          key={type}
+                          onClick={() => updateDimensionField(selectedDimensionId, 'dimType', type)}
+                          className={`py-1 rounded text-[10px] font-mono border capitalize transition ${
+                            (activeDim.dimType || 'aligned') === type
+                              ? 'bg-pink-600/20 border-pink-500 text-pink-300 font-bold'
+                              : 'bg-zinc-950 border-zinc-850 hover:bg-zinc-850 text-zinc-400'
+                          }`}
+                        >
+                          {type === 'aligned' ? 'Hizalı' : type === 'horizontal' ? 'Yatay' : 'Dikey'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Decimal precision buttons */}
+                  <div>
+                    <label className="block text-[10px] text-zinc-400 font-mono mb-1">Hassasiyet (Decimals):</label>
+                    <div className="grid grid-cols-3 gap-1">
+                      {([0, 1, 2] as const).map((prec) => (
+                        <button
+                          key={prec}
+                          onClick={() => updateDimensionField(selectedDimensionId, 'precision', prec)}
+                          className={`py-1 rounded text-[10px] font-mono border transition ${
+                            (activeDim.precision !== undefined ? activeDim.precision : 1) === prec
+                              ? 'bg-pink-600/20 border-pink-500 text-pink-300 font-bold'
+                              : 'bg-zinc-950 border-zinc-850 hover:bg-zinc-850 text-zinc-400'
+                          }`}
+                        >
+                          {prec === 0 ? 'Tam Sayı' : prec === 1 ? 'X.0' : 'X.00'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Manual / custom label text override */}
+                  <div>
+                    <label className="block text-[10px] text-zinc-400 font-mono mb-1">Özel Etiket (Label Override):</label>
+                    <div className="flex gap-1.5 items-center">
+                      <input
+                        type="text"
+                        value={activeDim.customLabel || ""}
+                        onChange={(e) => updateDimensionField(selectedDimensionId, 'customLabel', e.target.value)}
+                        className="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-100 text-xs font-mono outline-none focus:border-pink-500"
+                        placeholder="Örn: d1, Genişlik, b"
+                      />
+                      {activeDim.customLabel && (
+                        <button
+                          onClick={() => updateDimensionField(selectedDimensionId, 'customLabel', undefined)}
+                          className="px-2 py-1 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 text-[10px] font-mono rounded"
+                        >
+                          Sıfırla
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Positioning Options Toggles */}
+                  {!isSelectedDimAnEdge && (
+                    <div className="p-2 bg-zinc-950 border border-zinc-850 rounded space-y-2">
+                      <span className="text-[9px] uppercase font-mono text-zinc-400 block">Positioning Method:</span>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
+                          <input
+                            type="radio"
+                            name="positioning_mode"
+                            checked={moveEntireShapeOnDimChange}
+                            onChange={() => setMoveEntireShapeOnDimChange(true)}
+                            className="rounded-full text-pink-500 focus:ring-0 cursor-pointer text-pink-600"
+                          />
+                          <span>Shift Entire Shape (Recommended)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer text-[11px] font-mono text-zinc-300">
+                          <input
+                            type="radio"
+                            name="positioning_mode"
+                            checked={!moveEntireShapeOnDimChange}
+                            onChange={() => setMoveEntireShapeOnDimChange(false)}
+                            className="rounded-full text-pink-500 focus:ring-0 cursor-pointer text-pink-600"
+                          />
+                          <span>Move Target Node Only</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Apply Actions */}
+                  <div className="flex gap-2 pt-1 border-t border-zinc-800/60">
+                    <button
+                      onClick={() => {
+                        const distVal = parseFloat(editingDimensionValueInput);
+                        if (!isNaN(distVal) && distVal > 0) {
+                          handleApplyDimensionValue(selectedDimensionId, distVal);
+                        }
+                      }}
+                      className="flex-1 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded font-bold transition text-center cursor-pointer text-[11px] font-mono"
+                    >
+                      {isSelectedDimAnEdge ? "Resize (Apply)" : "Reposition (Apply)"}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteDimension(selectedDimensionId)}
+                      className="px-2 py-1.5 bg-red-950 hover:bg-red-900 border border-red-900 text-red-100 rounded transition text-[11px] font-mono"
+                      title="Delete this dimension label from canvas"
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSelectedDimensionId(null);
+                      }}
+                      className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 rounded transition text-[11px] font-mono"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Absolute Origin Coordinate HUD */}
             <div className="absolute bottom-3 left-3 bg-zinc-900/90 border border-zinc-850 backdrop-blur px-3 py-2 rounded text-xs font-mono text-zinc-400 pointer-events-none flex flex-col gap-1 z-10 shadow-lg min-w-[140px]">
