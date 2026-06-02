@@ -337,7 +337,7 @@ export default function App() {
     {
       id: 'default',
       name: 'main_sketch',
-      color: '#10b981', // Emerald
+      color: '#eab308', // Yellow (Sarı)
       visible: true,
       locked: false,
       finalPoints: [],
@@ -345,11 +345,12 @@ export default function App() {
       opType: 'extrude',
       depth: 100,
       zOffset: 0,
+      lineType: 'main',
     },
     {
       id: 'housing',
       name: 'Top Housing',
-      color: '#3b82f6', // Indigo Blue
+      color: '#38bdf8', // Lewis Blue (Lewis Mavisi)
       visible: true,
       locked: false,
       finalPoints: [],
@@ -357,11 +358,12 @@ export default function App() {
       opType: 'extrude',
       depth: 60,
       zOffset: 0,
+      lineType: 'center',
     },
     {
       id: 'cutouts',
       name: 'Holes & Trim',
-      color: '#ef4444', // Red
+      color: '#ef4444', // Red (Gizli Line)
       visible: true,
       locked: false,
       finalPoints: [],
@@ -369,6 +371,7 @@ export default function App() {
       opType: 'extrude',
       depth: 125,
       zOffset: 0,
+      lineType: 'hidden',
     },
   ]);
   const [activeLayerId, setActiveLayerId] = useState<string>('default');
@@ -4688,13 +4691,33 @@ export default function App() {
           }
         }
 
-        if (isPathSelected) {
-          ctx.setLineDash([6 / viewZoom, 6 / viewZoom]);
+        // Custom Line Types Style Implementation
+        const loopLineType = layer.lineType || 'main';
+        let strokeColor = layer.color || '#eab308';
+        let dashPattern: number[] = [];
+
+        if (loopLineType === 'center') {
+          // Eksen Çizgisi: Lewis mavisi (#38bdf8), long dash-dot style
+          strokeColor = '#38bdf8';
+          dashPattern = [14 / viewZoom, 4 / viewZoom, 2.5 / viewZoom, 4 / viewZoom];
+        } else if (loopLineType === 'hidden') {
+          // Hidden Line: kırmızı (#ef4444), short dashed style
+          strokeColor = '#ef4444';
+          dashPattern = [5 / viewZoom, 4 / viewZoom];
         } else {
-          ctx.setLineDash([]);
+          // Ana Çizgi: SARI (#eab308 by default, fallback to yellow/gold)
+          strokeColor = '#eab308';
+          dashPattern = [];
         }
 
-        ctx.strokeStyle = isPathSelected ? '#f97316' : layer.color; // Vibrant CAD Orange for active selections
+        if (isPathSelected) {
+          ctx.setLineDash([5 / viewZoom, 3 / viewZoom]);
+          ctx.strokeStyle = '#f97316'; // Orange for selected paths
+        } else {
+          ctx.setLineDash(dashPattern);
+          ctx.strokeStyle = strokeColor;
+        }
+
         ctx.lineWidth = isPathSelected ? 3.5 / viewZoom : (isActive ? 2.5 / viewZoom : 1.2 / viewZoom);
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
@@ -4839,7 +4862,11 @@ export default function App() {
       offset: number,
       isHighlighted: boolean,
       customValueText?: string,
-      dimType: 'horizontal' | 'vertical' | 'aligned' = 'aligned'
+      dimType: 'horizontal' | 'vertical' | 'aligned' = 'aligned',
+      textShiftX: number = 0,
+      textShiftY: number = 0,
+      toleranceUpper?: string,
+      toleranceLower?: string
     ) => {
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
@@ -4996,8 +5023,13 @@ export default function App() {
       ctx.restore();
 
       // Draw dimension textbox masked over the dimension line
-      const textMidX = (dP1_offX + dP2_offX) / 2;
-      const textMidY = (dP1_offY + dP2_offY) / 2;
+      const baseMidX = (dP1_offX + dP2_offX) / 2;
+      const baseMidY = (dP1_offY + dP2_offY) / 2;
+      
+      // Shift text along the unit parallel vector (ux, uy) and unit normal vector (nx, ny)
+      const textMidX = baseMidX + ux * (textShiftX / viewZoom) + nx * (textShiftY / viewZoom);
+      const textMidY = baseMidY + uy * (textShiftX / viewZoom) + ny * (textShiftY / viewZoom);
+
       let textAngle = 0;
       if (dimType === 'horizontal') {
         textAngle = 0;
@@ -5017,6 +5049,19 @@ export default function App() {
       // Omit mm as instructed ("mm yazma")
       let valText = customValueText || `${displayValue.toFixed(1)}`;
       valText = valText.replace(/\s*mm/gi, '').trim();
+
+      // Append tolerance text cleanly next to value if specified
+      if (toleranceUpper || toleranceLower) {
+        const up = (toleranceUpper || "").trim();
+        const lo = (toleranceLower || "").trim();
+        if (up && lo) {
+          valText += ` (+${up}/${lo})`;
+        } else if (up) {
+          valText += ` (+${up})`;
+        } else if (lo) {
+          valText += ` (${lo})`;
+        }
+      }
 
       ctx.font = `bold ${Math.round(textHeightPx)}px monospace`;
 
@@ -5053,7 +5098,18 @@ export default function App() {
       }
       const prec = d.precision !== undefined ? d.precision : 1;
       const computedText = d.customLabel || displayValue.toFixed(prec);
-      drawCustomDimension(d.p1, d.p2, d.offset, isHighlighted, computedText, d.dimType || 'aligned');
+      drawCustomDimension(
+        d.p1,
+        d.p2,
+        d.offset,
+        isHighlighted,
+        computedText,
+        d.dimType || 'aligned',
+        d.textShiftX || 0,
+        d.textShiftY || 0,
+        d.toleranceUpper,
+        d.toleranceLower
+      );
     });
 
     // Draw active interactive preview if user is inserting a dimension
@@ -10948,6 +11004,17 @@ export default function App() {
 
                     {/* Layer Action Controls Right Section */}
                     <div className="flex items-center gap-1 shrink-0">
+                      <select
+                        value={layer.lineType || 'main'}
+                        onChange={(e) => updateLayerProps(layer.id, { lineType: e.target.value as any })}
+                        className="text-[9.5px] bg-slate-100 border border-slate-200 text-slate-700 rounded px-1.5 py-0.5 outline-none font-sans font-semibold cursor-pointer hover:bg-slate-200 focus:border-orange-500 max-w-[85px] shrink-0"
+                        title="Çizgi Tipi (Line Style)"
+                      >
+                        <option value="main">Ana (Sarı)</option>
+                        <option value="center">Eksen (Mavi)</option>
+                        <option value="hidden">Hidden (Kız.)</option>
+                      </select>
+
                       {/* Color Palette Input Wrapper */}
                       <div className="relative w-4 h-4 rounded cursor-pointer shrink-0 border border-slate-300" style={{ backgroundColor: layer.color }} title="Change layer color">
                         <input
@@ -13253,6 +13320,78 @@ export default function App() {
                         </button>
                       )}
                     </div>
+                  </div>
+
+                  {/* Dimension Text Shift Sliders */}
+                  <div className="space-y-3">
+                    <div>
+                      <label className="flex justify-between text-[10px] text-zinc-400 font-mono mb-1">
+                        <span>Yazı Yatay Kaydırma (Horizontal):</span>
+                        <span className="text-pink-400 font-bold">{(activeDim.textShiftX || 0).toFixed(0)} px</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="-120"
+                        max="120"
+                        step="1"
+                        value={activeDim.textShiftX || 0}
+                        onChange={(e) => updateDimensionField(selectedDimensionId, 'textShiftX', parseFloat(e.target.value))}
+                        className="w-full accent-pink-500 bg-zinc-950 h-1 rounded cursor-ew-resize"
+                      />
+                    </div>
+                    <div>
+                      <label className="flex justify-between text-[10px] text-zinc-400 font-mono mb-1">
+                        <span>Yazı Dikey Kaydırma (Vertical):</span>
+                        <span className="text-pink-400 font-bold">{(activeDim.textShiftY || 0).toFixed(0)} px</span>
+                      </label>
+                      <input
+                        type="range"
+                        min="-80"
+                        max="80"
+                        step="1"
+                        value={activeDim.textShiftY || 0}
+                        onChange={(e) => updateDimensionField(selectedDimensionId, 'textShiftY', parseFloat(e.target.value))}
+                        className="w-full accent-pink-500 bg-zinc-950 h-1 rounded cursor-ew-resize"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Tolerances Upper & Lower */}
+                  <div className="space-y-1.5">
+                    <label className="block text-[10px] text-zinc-400 font-mono">Tolerans (Add Tolerance):</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[9px] text-zinc-500 block mb-0.5">Üst Limit (Upper):</span>
+                        <input
+                          type="text"
+                          value={activeDim.toleranceUpper || ""}
+                          onChange={(e) => updateDimensionField(selectedDimensionId, 'toleranceUpper', e.target.value)}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-100 text-[11px] font-mono outline-none focus:border-pink-500"
+                          placeholder="Örn: 0.05"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-zinc-500 block mb-0.5">Alt Limit (Lower):</span>
+                        <input
+                          type="text"
+                          value={activeDim.toleranceLower || ""}
+                          onChange={(e) => updateDimensionField(selectedDimensionId, 'toleranceLower', e.target.value)}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-100 text-[11px] font-mono outline-none focus:border-pink-500"
+                          placeholder="Örn: -0.02"
+                        />
+                      </div>
+                    </div>
+                    {(activeDim.toleranceUpper || activeDim.toleranceLower) && (
+                      <button
+                        onClick={() => {
+                          updateDimensionField(selectedDimensionId, 'toleranceUpper', undefined);
+                          updateDimensionField(selectedDimensionId, 'toleranceLower', undefined);
+                        }}
+                        className="text-[9px] text-red-400 hover:text-red-300 font-mono float-right transition"
+                      >
+                        [Toleransı Temizle]
+                      </button>
+                    )}
                   </div>
 
                   {/* Positioning Options Toggles */}
