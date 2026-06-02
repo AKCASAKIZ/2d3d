@@ -5465,9 +5465,58 @@ export default function App() {
         clearCommand();
         logCommandResponse('Boundary closed using Right-Click endpoint closure.');
       } else if (currentCommand === '') {
+        if (activeLayer.locked) {
+          logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it to edit.`);
+          return;
+        }
         const { x, y } = getVirtualCoords(e.clientX, e.clientY);
-        setRightClickStart({ x, y });
-        setRightClickEnd({ x, y });
+        
+        // Right-Click to Delete/Cancel Vertex points (Mavi bölüntüleme noktaları) on lines
+        let deletedVertex = false;
+        if (finalPoints.length > 0) {
+          for (let i = 0; i < finalPoints.length; i++) {
+            if (Math.hypot(finalPoints[i].x - x, finalPoints[i].y - y) < 15 / viewZoom) {
+              saveState();
+              const updated = [...finalPoints];
+              updated.splice(i, 1);
+              setFinalPoints(updated);
+              setSelectedVertexIdx(null);
+              deletedVertex = true;
+              logCommandResponse(`Mavi bölüntüleme noktası sağ klikle iptal edildi (Nokta #${i + 1}).`);
+              break;
+            }
+          }
+        }
+        if (!deletedVertex && activeLayer.paths) {
+          const updatedPaths = [...activeLayer.paths];
+          for (let pathIdx = 0; pathIdx < updatedPaths.length; pathIdx++) {
+            const path = updatedPaths[pathIdx];
+            for (let i = 0; i < path.length; i++) {
+              if (Math.hypot(path[i].x - x, path[i].y - y) < 15 / viewZoom) {
+                saveState();
+                const updatedPath = [...path];
+                updatedPath.splice(i, 1);
+                setSelectedVertexIdx(null);
+                if (updatedPath.length < 2) {
+                  updatedPaths.splice(pathIdx, 1);
+                  logCommandResponse(`Mavi bölüntüleme noktası silindi ve şekil çok kısa olduğu için tamamen kaldırıldı (Şekil #${pathIdx + 1}).`);
+                } else {
+                  updatedPaths[pathIdx] = updatedPath;
+                  logCommandResponse(`Mavi bölüntüleme noktası sağ klikle iptal edildi (Şekil #${pathIdx + 1}, Nokta #${i + 1}).`);
+                }
+                setPaths(updatedPaths);
+                deletedVertex = true;
+                break;
+              }
+            }
+            if (deletedVertex) break;
+          }
+        }
+
+        if (!deletedVertex) {
+          setRightClickStart({ x, y });
+          setRightClickEnd({ x, y });
+        }
       }
       return;
     }
@@ -7786,7 +7835,6 @@ export default function App() {
     const { x: mX, y: mY } = getVirtualCoords(e.clientX, e.clientY);
 
     let insertIdx = -1;
-    let optimalPt = { x: mX, y: mY };
     let pathIdxToSplit = -1; // -1 means finalPoints, >= 0 means activeLayer.paths index
 
     // 1. Try splitting active/selected sub-path first (if selected) or check finalPoints
@@ -7794,11 +7842,11 @@ export default function App() {
       let minDistance = Infinity;
       // Midpoint snap check
       if (snapPoint?.type === 'mid') {
-        optimalPt = { x: snapPoint.x, y: snapPoint.y };
+        const snapPt = { x: snapPoint.x, y: snapPoint.y };
         for (let i = 0; i < finalPoints.length - 1; i++) {
           const midX = (finalPoints[i].x + finalPoints[i + 1].x) / 2;
           const midY = (finalPoints[i].y + finalPoints[i + 1].y) / 2;
-          if (Math.abs(midX - optimalPt.x) < 2.0 && Math.abs(midY - optimalPt.y) < 2.0) {
+          if (Math.abs(midX - snapPt.x) < 2.0 && Math.abs(midY - snapPt.y) < 2.0) {
             insertIdx = i;
             break;
           }
@@ -7809,7 +7857,6 @@ export default function App() {
           if (seg.dist < 15 / viewZoom && seg.dist < minDistance) {
             minDistance = seg.dist;
             insertIdx = i;
-            optimalPt = { x: seg.x, y: seg.y };
           }
         }
       }
@@ -7822,14 +7869,13 @@ export default function App() {
         const path = activeLayer.paths[pIdx];
         if (path.length >= 2) {
           if (snapPoint?.type === 'mid') {
-            const tempPt = { x: snapPoint.x, y: snapPoint.y };
+            const snapPt = { x: snapPoint.x, y: snapPoint.y };
             for (let i = 0; i < path.length - 1; i++) {
               const midX = (path[i].x + path[i + 1].x) / 2;
               const midY = (path[i].y + path[i + 1].y) / 2;
-              if (Math.abs(midX - tempPt.x) < 2.0 && Math.abs(midY - tempPt.y) < 2.0) {
+              if (Math.abs(midX - snapPt.x) < 2.0 && Math.abs(midY - snapPt.y) < 2.0) {
                 insertIdx = i;
                 pathIdxToSplit = pIdx;
-                optimalPt = tempPt;
                 break;
               }
             }
@@ -7841,7 +7887,6 @@ export default function App() {
                 minDistance = seg.dist;
                 insertIdx = i;
                 pathIdxToSplit = pIdx;
-                optimalPt = { x: seg.x, y: seg.y };
               }
             }
           }
@@ -7851,18 +7896,32 @@ export default function App() {
 
     if (insertIdx !== -1) {
       saveState();
+      let optimalPt;
       if (pathIdxToSplit === -1) {
+        const p1 = finalPoints[insertIdx];
+        const p2 = finalPoints[insertIdx + 1];
+        optimalPt = {
+          x: (p1.x + p2.x) / 2,
+          y: (p1.y + p2.y) / 2
+        };
         const updatedChain = [...finalPoints];
-        updatedChain.splice(insertIdx + 1, 0, { ...optimalPt });
+        updatedChain.splice(insertIdx + 1, 0, optimalPt);
         setFinalPoints(updatedChain);
-        logCommandResponse(`Çizgi bölündü: Yeni nokta eklendi (Grup K-${insertIdx + 1}).`);
+        logCommandResponse(`Çizgi tam ortasından bölündü: Yeni nokta eklendi (Grup K-${insertIdx + 1}).`);
       } else if (activeLayer.paths) {
+        const path = activeLayer.paths[pathIdxToSplit];
+        const p1 = path[insertIdx];
+        const p2 = path[insertIdx + 1];
+        optimalPt = {
+          x: (p1.x + p2.x) / 2,
+          y: (p1.y + p2.y) / 2
+        };
         const updatedPaths = [...activeLayer.paths];
         const updatedPath = [...updatedPaths[pathIdxToSplit]];
-        updatedPath.splice(insertIdx + 1, 0, { ...optimalPt });
+        updatedPath.splice(insertIdx + 1, 0, optimalPt);
         updatedPaths[pathIdxToSplit] = updatedPath;
         setPaths(updatedPaths);
-        logCommandResponse(`Alt şekil çizgisi bölündü: Yeni nokta eklendi (Şekil #${pathIdxToSplit + 1}, Grup K-${insertIdx + 1}).`);
+        logCommandResponse(`Alt şekil çizgisi tam ortasından bölündü: Yeni nokta eklendi (Şekil #${pathIdxToSplit + 1}, Grup K-${insertIdx + 1}).`);
       }
     }
   };
@@ -13096,6 +13155,7 @@ export default function App() {
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
+              onContextMenu={(e) => e.preventDefault()}
               style={{
                 cursor:
                   currentCommand === 'trim'
