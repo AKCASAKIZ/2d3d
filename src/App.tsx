@@ -4395,7 +4395,7 @@ export default function App() {
 
     // Text labels for coordinates
     ctx.fillStyle = 'rgba(239, 68, 68, 0.7)';
-    ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px monospace`;
+    ctx.font = `bold ${(10 / viewZoom).toFixed(2)}px monospace`;
     ctx.fillText("+X", endX - 25 / viewZoom, -5 / viewZoom);
     ctx.fillText("-X", startX + 5 / viewZoom, -5 / viewZoom);
 
@@ -4432,7 +4432,7 @@ export default function App() {
         if (line.type === 'angle' && line.angle !== undefined && line.p1) {
           ctx.save();
           ctx.fillStyle = '#f97316';
-          ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px sans-serif`;
+          ctx.font = `bold ${(10 / viewZoom).toFixed(2)}px sans-serif`;
           const midX = (line.p1.x + tempPoint.x) / 2;
           const midY = (line.p1.y + tempPoint.y) / 2;
           ctx.fillText(` ${line.angle}°`, midX + 5 / viewZoom, midY - 5 / viewZoom);
@@ -5169,7 +5169,8 @@ export default function App() {
           const autoTextHeightPx = globalFontSize > 0 
             ? Math.max(5.0, Math.min(120.0, globalFontSize * viewZoom))
             : Math.max(9.5, Math.min(24.0, baseTextSize * viewZoom));
-          ctx.font = `bold ${Math.round(autoTextHeightPx)}px monospace`;
+          const fontHeightMm = autoTextHeightPx / viewZoom;
+          ctx.font = `bold ${fontHeightMm.toFixed(2)}px monospace`;
           ctx.textAlign = 'center';
 
           const isCirclePath = pts.some(p => p.circleData);
@@ -5460,7 +5461,7 @@ export default function App() {
         }
       }
 
-      ctx.font = `bold ${Math.round(textHeightPx)}px monospace`;
+      ctx.font = `bold ${fontHeightMm.toFixed(2)}px monospace`;
 
       const isDarkBg = isColorDark(canvasBgColor);
       // Light Lewis blue: #38bdf8 on dark bg, elegant #0284c7 on light bg
@@ -5531,7 +5532,7 @@ export default function App() {
 
         // Render length text near hover
         ctx.fillStyle = '#38bdf8'; // Light Lewis blue for length hover
-        ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+        ctx.font = `bold ${(11 / viewZoom).toFixed(2)}px monospace`;
         const dist = Math.hypot(hoverCoords.x - dimP1.x, hoverCoords.y - dimP1.y);
         ctx.fillText(`L: ${dist.toFixed(1)} mm`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
       } else if (clickCount === 2 && dimP1 && dimP2) {
@@ -5559,7 +5560,7 @@ export default function App() {
         ctx.fillRect(mirrorFirstPoint.x - 5 / viewZoom, mirrorFirstPoint.y - 5 / viewZoom, 10 / viewZoom, 10 / viewZoom);
         
         ctx.fillStyle = '#f97316';
-        ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+        ctx.font = `bold ${(11 / viewZoom).toFixed(2)}px monospace`;
         ctx.fillText("Ayna Eksen Çizgisi", hoverCoords.x + 12 / viewZoom, hoverCoords.y - 12 / viewZoom);
       } else {
         // Find if hovering over a segment
@@ -5573,11 +5574,11 @@ export default function App() {
           ctx.stroke();
 
           ctx.fillStyle = '#f97316';
-          ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+          ctx.font = `bold ${(11 / viewZoom).toFixed(2)}px monospace`;
           ctx.fillText("✨ AYNA EKSENİ OLARAK SEÇ", hoverCoords.x + 12 / viewZoom, hoverCoords.y - 12 / viewZoom);
         } else {
           ctx.fillStyle = '#f97316';
-          ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+          ctx.font = `bold ${(11 / viewZoom).toFixed(2)}px monospace`;
           ctx.fillText("Ayna ekseni belirlemek için bir çizgiye tıklayın veya 2 nokta ile çizin", hoverCoords.x + 12 / viewZoom, hoverCoords.y - 12 / viewZoom);
         }
       }
@@ -5685,7 +5686,7 @@ export default function App() {
 
       // Draw text label of the translation vector delta in mm
       ctx.fillStyle = '#f97316';
-      ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
+      ctx.font = `bold ${(11 / viewZoom).toFixed(2)}px monospace`;
       const dist = Math.hypot(dx, dy);
       ctx.fillText(`dX: ${dx.toFixed(1)} dY: ${dy.toFixed(1)} Dist: ${dist.toFixed(1)} mm`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
 
@@ -7325,7 +7326,8 @@ export default function App() {
 
       if (clickedDim) {
         saveState();
-        setSelectedDimensionId(clickedDim.id);
+        // Cancelled: Do not trigger intrusive edit popup on canvas dimension touch (can be edited/removed via sidebar list)
+        // setSelectedDimensionId(clickedDim.id);
         const dType = clickedDim.dimType || 'aligned';
         let actualLen = Math.hypot(clickedDim.p2.x - clickedDim.p1.x, clickedDim.p2.y - clickedDim.p1.y);
         if (dType === 'horizontal') {
@@ -7333,8 +7335,8 @@ export default function App() {
         } else if (dType === 'vertical') {
           actualLen = Math.abs(clickedDim.p2.y - clickedDim.p1.y);
         }
-        setEditingDimensionValueInput(actualLen.toFixed(1));
-        logCommandResponse(`Ölçülendirme seçildi. Değeri veya konumunu (sürükleyerek) ayarlayabilirsiniz.`);
+        // setEditingDimensionValueInput(actualLen.toFixed(1));
+        logCommandResponse(`Ölçülendirme çizgisi seçildi. Sürükleyerek konumunu değiştirebilirsiniz. Değerini değiştirmek için yan paneldeki listede üzerine tıklayın.`);
         setActiveDimensionDrag({
           dimId: clickedDim.id,
           startX: x,
@@ -7557,6 +7559,13 @@ export default function App() {
             found = true;
           }
         }
+      }
+      
+      if (!found) {
+        // Clicked empty canvas space in drag mode, close all active dimension popups immediately
+        setSelectedDimensionId(null);
+        setEditingSegmentIdx(null);
+        setEditingPathIdx(null);
       }
     } else {
       // Freehand drawing initialization
