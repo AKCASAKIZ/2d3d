@@ -3970,21 +3970,37 @@ export default function App() {
 
   // Reset Canvas Completely
   const handleClearAll = () => {
-    if (activeLayer.locked) {
-      logCommandResponse(`Layer "${activeLayer.name}" is locked. Cannot clear points.`);
-      return;
-    }
     saveState([], false, 0);
     setRawPoints([]);
     setFinalPoints([]);
     setIsClosed(false);
-    // Also clear completed paths!
+
+    // Clear completed paths, finalPoints, dimensions and isClosed on all layers to ensure NOTHING remains in 2D
     setLayers((prevLayers) =>
-      prevLayers.map((l) => (l.id === activeLayerId ? { ...l, finalPoints: [], paths: [], isClosed: false } : l))
+      prevLayers.map((l) => ({ 
+        ...l, 
+        finalPoints: [], 
+        paths: [], 
+        dimensions: [], 
+        isClosed: false 
+      }))
     );
+
     clearCommand();
     setTempPoint(null);
-    logCommandResponse('Cleared sketch canvas. Clean board loaded.');
+    setDimP1(null);
+    setDimP2(null);
+    setSelectedDimensionId(null);
+    setSelectedPathIndices([]);
+    setIsFinalPointsSelected(false);
+    setCopiedPaths([]);
+    setCopiedFinalPoints(null);
+    setAlignmentPt1(null);
+    setAlignmentPt2(null);
+    setAlignmentSelectMode(null);
+    setActiveSegmentStretch(null);
+    setActiveSegmentMove(null);
+    logCommandResponse('Tüm 2D çizim katmanları, ölçülendirmeler ve elemanlar tamamen temizlendi.');
   };
 
   // Direct numeric updates from Parametric side panel table
@@ -9691,454 +9707,461 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 font-sans text-slate-800 select-none">
       
-      {/* 1. Upper Ribbon Bar (Actions & Quick Toolings) */}
-      <header className="flex items-center gap-4 px-3 py-1.5 bg-white border-b border-slate-200 overflow-x-auto shrink-0 shadow-sm">
-        <div className="flex items-center gap-1.5 pr-3 border-r border-slate-200 shrink-0 select-none">
-          <Zap className="w-4 h-4 text-orange-500 fill-orange-500/10 animate-pulse" />
-          <span className="text-xs font-black tracking-wider uppercase text-slate-900">
-            WEBFORGE<span className="text-orange-500">3D</span>
-          </span>
-          <span className="text-[9px] font-mono bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded text-slate-500 font-bold">
-            PRO v15.2
-          </span>
-        </div>
+       {/* 1. Upper Ribbon Bar (Actions & Quick Toolings with 2 Layers) */}
+      <header className="flex flex-col gap-2 p-2.5 bg-white border-b border-slate-200 shrink-0 shadow-sm relative z-40 select-none">
+        {/* ROW 1: System settings, Save/Load, Layout & View Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-y-2 gap-x-4">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {/* Logo */}
+            <div className="flex items-center gap-1.5 pr-3 border-r border-slate-200 shrink-0 select-none">
+              <Zap className="w-4 h-4 text-orange-500 fill-orange-500/10 animate-pulse" />
+              <span className="text-xs font-black tracking-wider uppercase text-slate-900">
+                WEBFORGE<span className="text-orange-500">3D</span>
+              </span>
+              <span className="text-[9px] font-mono bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded text-slate-500 font-bold">
+                PRO v15.2
+              </span>
+            </div>
 
-        {/* Sidebar Toggler */}
-        <div className="flex items-center border-r border-slate-200 pr-3 shrink-0">
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 transition cursor-pointer font-bold font-mono"
-            title={sidebarCollapsed ? "Show Sidebar panel" : "Hide Sidebar panel"}
-          >
-            {sidebarCollapsed ? <ChevronRight className="w-3 h-3 text-orange-500" /> : <ChevronLeft className="w-3 h-3 text-orange-500" />}
-            <span>Sidebar</span>
-          </button>
-        </div>
+            {/* Sidebar Toggler */}
+            <div className="flex items-center border-r border-slate-200 pr-3 shrink-0">
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 transition cursor-pointer font-bold font-mono"
+                title={sidebarCollapsed ? "Show Sidebar panel" : "Hide Sidebar panel"}
+              >
+                {sidebarCollapsed ? <ChevronRight className="w-3 h-3 text-orange-500" /> : <ChevronLeft className="w-3 h-3 text-orange-500" />}
+                <span>Sidebar</span>
+              </button>
+            </div>
 
-        {/* Project Files Save & Load */}
-        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
-          <button
-            onClick={saveSketchJSON}
-            className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 hover:border-slate-300 rounded text-[11px] transition cursor-pointer font-bold font-mono"
-            title="Save sketch design to computer (.json)"
-          >
-            <Save className="w-3 h-3 text-orange-500" />
-            <span>Save</span>
-          </button>
-          <label
-            className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 hover:border-slate-300 rounded text-[11px] transition cursor-pointer font-bold font-mono"
-            title="Load previously saved sketch JSON file"
-          >
-            <Upload className="w-3 h-3 text-emerald-600" />
-            <span>Load</span>
-            <input
-              type="file"
-              accept=".json"
-              onChange={loadSketchJSON}
-              className="hidden"
-            />
-          </label>
-        </div>
+            {/* Project Save & Load */}
+            <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
+              <button
+                onClick={saveSketchJSON}
+                className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 hover:border-slate-300 rounded text-[11px] transition cursor-pointer font-bold font-mono"
+                title="Save sketch design to computer (.json)"
+              >
+                <Save className="w-3 h-3 text-orange-500" />
+                <span>Save</span>
+              </button>
+              <label
+                className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 hover:border-slate-300 rounded text-[11px] transition cursor-pointer font-bold font-mono text-center"
+                title="Load previously saved sketch JSON file"
+              >
+                <Upload className="w-3 h-3 text-emerald-600 inline" />
+                <span className="ml-1">Load</span>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={loadSketchJSON}
+                  className="hidden"
+                />
+              </label>
+            </div>
 
-        {/* Workspace Layout Selector - Unified CAD Workspace */}
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 select-none">
-          <button
-            onClick={() => setWorkspaceLayout('split')}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
-              workspaceLayout === 'split'
-                ? 'bg-white text-orange-600 shadow-sm border border-slate-200'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/40'
-            }`}
-            title="Split Mode (2D Sketch Left, 3D View Right)"
-          >
-            📊 Split View
-          </button>
-          <button
-            onClick={() => setWorkspaceLayout('2d-only')}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
-              workspaceLayout === '2d-only'
-                ? 'bg-white text-orange-600 shadow-sm border border-slate-200'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/40'
-            }`}
-            title="Show only 2D Sketch Editor"
-          >
-            📐 2D Sketch Only
-          </button>
-          <button
-            onClick={() => setWorkspaceLayout('3d-only')}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
-              workspaceLayout === '3d-only'
-                ? 'bg-white text-orange-600 shadow-sm border border-slate-200'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/40'
-            }`}
-            title="Show only 3D solid inspector"
-          >
-            📦 3D Model Only
-          </button>
-          <button
-            onClick={() => {
-              setWorkspaceLayout('drawing-sheet');
-              logCommandResponse("Technical Drawing Sheet Mode activated! Modify parameters in Side Panel or export to high-res blueprint PDF.");
-            }}
-            className={`px-3 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
-              workspaceLayout === 'drawing-sheet'
-                ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-sm font-black border border-orange-655'
-                : 'text-orange-650 font-extrabold hover:text-slate-900 hover:bg-slate-200/40'
-            }`}
-            title="Open standard engineering production/manufacturing drawing paper simulation sheet"
-          >
-            📄 2D Teknik Resim Anteti Sheet
-          </button>
-        </div>
+            {/* Workspace Layout Selector - Unified CAD Workspace */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 select-none">
+              <button
+                onClick={() => setWorkspaceLayout('split')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
+                  workspaceLayout === 'split'
+                    ? 'bg-white text-orange-600 shadow-sm border border-slate-200'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/40'
+                }`}
+                title="Split Mode (2D Sketch Left, 3D View Right)"
+              >
+                📊 Split View
+              </button>
+              <button
+                onClick={() => setWorkspaceLayout('2d-only')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
+                  workspaceLayout === '2d-only'
+                    ? 'bg-white text-orange-600 shadow-sm border border-slate-200'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/40'
+                }`}
+                title="Show only 2D Sketch Editor"
+              >
+                📐 2D Sketch Only
+              </button>
+              <button
+                onClick={() => setWorkspaceLayout('3d-only')}
+                className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
+                  workspaceLayout === '3d-only'
+                    ? 'bg-white text-orange-600 shadow-sm border border-slate-200'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/40'
+                }`}
+                title="Show only 3D solid inspector"
+              >
+                📦 3D Model Only
+              </button>
+              <button
+                onClick={() => {
+                  setWorkspaceLayout('drawing-sheet');
+                  logCommandResponse("Technical Drawing Sheet Mode activated! Modify parameters in Side Panel or export to high-res blueprint PDF.");
+                }}
+                className={`px-3 py-1 text-[11px] font-bold rounded-md transition duration-150 flex items-center gap-1 cursor-pointer ${
+                  workspaceLayout === 'drawing-sheet'
+                    ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-sm font-black border border-orange-655'
+                    : 'text-orange-650 font-extrabold hover:text-slate-900 hover:bg-slate-200/40'
+                }`}
+                title="Open standard engineering production/manufacturing drawing paper simulation sheet"
+              >
+                📄 2D Teknik Resim Anteti Sheet
+              </button>
+            </div>
+          </div>
 
-
-
-        {/* Draw Tools */}
-        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
-          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Draw:</span>
-          <button
-            onClick={() => setCommand('line')}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'line' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Line (L)"
-          >
-            <PenTool className="w-3 h-3" />
-            <span>Line</span>
-          </button>
-          <button
-            onClick={() => setCommand('rect')}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'rect' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Rectangle (R)"
-          >
-            <Square className="w-3 h-3" />
-            <span>Rect</span>
-          </button>
-          <button
-            onClick={() => setCommand('circle')}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'circle' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Circle (C)"
-          >
-            <Circle className="w-3 h-3" />
-            <span>Circle</span>
-          </button>
-          <button
-            onClick={() => setCommand('arc')}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'arc' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Arc (Yay)"
-          >
-            <Activity className="w-3 h-3" />
-            <span>Arc</span>
-          </button>
-          <button
-            onClick={() => setCommand('polygon')}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'polygon' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Polygon (POL)"
-          >
-            <Maximize className="w-3 h-3 rotate-45" />
-            <span>Poly</span>
-          </button>
-          <button
-            onClick={() => {
-              setCommand('dimension');
-              setDimP1(null);
-              setDimP2(null);
-              setClickCount(0);
-              logCommandResponse("Smart dimensioning active. Click starting point.");
-            }}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'dimension' ? 'bg-orange-600 border-orange-700 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Smart dimensioning & constraint tool"
-          >
-            <Ruler className="w-3 h-3 text-white" />
-            <span>Dimension</span>
-          </button>
-
-          <button
-            onClick={applyOneClickDimensioning}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-mono font-bold transition shadow-xs cursor-pointer"
-            title="Automatically detect boundary paths in the 2D sketch and place horizontal & vertical dimensions for the overall bounding box"
-          >
-            <Sparkles className="w-3 h-3 text-yellow-200 fill-yellow-200/20" />
-            <span>Auto Dim</span>
-          </button>
-
-          <button
-            onClick={applyConstrainAllSegments}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-mono font-bold transition shadow-xs cursor-pointer mt-0"
-            title="Automatically dimension and constrain all individual line segments in the sketch"
-          >
-            <Workflow className="w-3 h-3 text-pink-200 fill-pink-200/20" />
-            <span>Constrain All</span>
-          </button>
-
-          {finalPoints.length >= 2 && (
+          {/* View & Clear controls */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={() => {
-                if (finalPoints.length >= 3) {
-                  // Direct trigger prompt modal for 3D operations choice and depth
-                  triggerOpPromptForPoints(finalPoints);
+                setViewZoom(1.0);
+                setPanX(0);
+                setPanY(0);
+              }}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 transition font-mono font-bold"
+              title="Reset Zoom & Pan View"
+            >
+              <Maximize className="w-3 h-3 text-orange-500" />
+              <span>Sığdır</span>
+            </button>
+            <button
+              onClick={() => {
+                if (alignmentSelectMode) {
+                  setAlignmentSelectMode(null);
+                  logCommandResponse("Hizalama Görselleştirici kapatıldı.");
                 } else {
-                  // Standard direct commit for simple line segments
-                  saveState();
-                  setLayers((prevLayers) =>
-                    prevLayers.map((l) => {
-                      if (l.id === activeLayerId) {
-                        const currentPaths = l.paths || [];
-                        const ptsToCommit = [...l.finalPoints];
-                        if (l.isClosed && ptsToCommit.length >= 3 && distance(ptsToCommit[0], ptsToCommit[ptsToCommit.length - 1]) > 0.1) {
-                          ptsToCommit.push({ ...ptsToCommit[0] });
-                        }
-                        return {
-                          ...l,
-                          paths: [...currentPaths, ptsToCommit],
-                          finalPoints: [],
-                          isClosed: false
-                        };
-                      }
-                      return l;
-                    })
-                  );
-                  clearCommand();
-                  setTempPoint(null);
-                  logCommandResponse("Drafting shape completed and saved to layer paths.");
+                  setAlignmentSelectMode('p1');
+                  setAlignmentPt1(null);
+                  setAlignmentPt2(null);
+                  logCommandResponse("Hizalama Görselleştirici Aktif. Ekranda hizalamasını ölçmek istediğiniz 1. Noktayı seçin.");
                 }
               }}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100 transition font-mono font-bold animate-pulse cursor-pointer"
-              title="Save active path to layer paths database"
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono font-bold ${
+                alignmentSelectMode ? 'bg-cyan-600 border-cyan-700 text-white shadow-sm ring-1 ring-cyan-200 animate-pulse' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Hizalama Görselleştirici (Alignment Visualizer)"
             >
-              <CheckCircle className="w-3 h-3" />
-              <span>Finish Shape</span>
+              <ArrowRightLeft className="w-3 h-3 text-cyan-600" />
+              <span>Hizalama Görselleştirici</span>
             </button>
-          )}
+            <button
+              onClick={handleClearAll}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-red-10 border border-red-200 text-red-650 hover:bg-red-500 hover:text-white transition font-mono font-bold shadow-2xs active:scale-95"
+              title="Wipe canvas clean"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Temizle</span>
+            </button>
+          </div>
         </div>
 
-        {/* Dynamic Draw Mode / Operations Switcher */}
-        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0 font-sans">
-          <span className="text-[10px] uppercase font-mono text-slate-400 mr-1 font-bold">Mode:</span>
-          <button
-            onClick={() => {
-              clearCommand();
-              setDrawMode('freehand');
-            }}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              drawMode === 'freehand' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Freehand Mode"
-          >
-            <span>✏️ Freehand</span>
-          </button>
-          <button
-            onClick={() => {
-              clearCommand();
-              setDrawMode('point');
-            }}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              drawMode === 'point' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Coordinate Input Mode"
-          >
-            <span>📐 Coordinate Input</span>
-          </button>
-          <button
-            onClick={() => {
-              clearCommand();
-              setDrawMode('drag');
-            }}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              drawMode === 'drag' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Vertex Edit & Drag Mode"
-          >
-            <span>👆 Edit Vertex</span>
-          </button>
-        </div>
+        {/* ROW 2: All CAD Drawing Tool Groups, Modifiers and Snapping Anchors */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 border-t border-slate-100">
+          
+          {/* Group 2.1: Draw Tools */}
+          <div className="flex items-center gap-1 bg-slate-50/70 p-0.5 px-1.5 rounded-md border border-slate-200 shrink-0">
+            <span className="text-[9px] uppercase font-mono text-slate-400 mr-1.5 font-bold select-none">Çizim:</span>
+            <button
+              onClick={() => setCommand('line')}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11.5px] transition border font-mono ${
+                currentCommand === 'line' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Line (L)"
+            >
+              <PenTool className="w-3 h-3" />
+              <span>Line</span>
+            </button>
+            <button
+              onClick={() => setCommand('rect')}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11.5px] transition border font-mono ${
+                currentCommand === 'rect' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Rectangle (R)"
+            >
+              <Square className="w-3 h-3" />
+              <span>Rect</span>
+            </button>
+            <button
+              onClick={() => setCommand('circle')}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11.5px] transition border font-mono ${
+                currentCommand === 'circle' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Circle (C)"
+            >
+              <Circle className="w-3 h-3" />
+              <span>Circle</span>
+            </button>
+            <button
+              onClick={() => setCommand('arc')}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11.5px] transition border font-mono ${
+                currentCommand === 'arc' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Arc (Yay)"
+            >
+              <Activity className="w-3 h-3" />
+              <span>Arc</span>
+            </button>
+            <button
+              onClick={() => setCommand('polygon')}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11.5px] transition border font-mono ${
+                currentCommand === 'polygon' ? 'bg-orange-500 border-orange-600 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Polygon (POL)"
+            >
+              <Maximize className="w-3 h-3 rotate-45" />
+              <span>Poly</span>
+            </button>
+            <button
+              onClick={() => {
+                setCommand('dimension');
+                setDimP1(null);
+                setDimP2(null);
+                setClickCount(0);
+                logCommandResponse("Smart dimensioning active. Click starting point.");
+              }}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11.5px] transition border font-mono ${
+                currentCommand === 'dimension' ? 'bg-orange-650 border-orange-750 text-white font-bold shadow-sm' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Smart dimensioning & constraint tool"
+            >
+              <Ruler className="w-3 h-3" />
+              <span>Dimension</span>
+            </button>
 
-        {/* Modifiers */}
-        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0">
-          <span className="text-[10px] uppercase font-mono text-slate-405 mr-1 font-bold">Edit:</span>
-          <button
-            onClick={() => applyFillet()}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-slate-900 transition font-mono font-bold"
-            title="Apply Fillet Rounding (F)"
-          >
-            <RefreshCw className="w-3 h-3 text-orange-500" />
-            <span>Fillet</span>
-          </button>
-          <button
-            onClick={() => applyChamfer()}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-slate-900 transition font-mono font-bold"
-            title="Apply Chamfer (CH)"
-          >
-            <ListFilter className="w-3 h-3 text-orange-500" />
-            <span>Chamfer</span>
-          </button>
-          <button
-            onClick={() => {
-              clearCommand();
-              setCurrentCommand('trim');
-              logCommandResponse("TRIM mode activated. Click on any segment to trim it between intersections.");
-            }}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'trim' ? 'bg-orange-500 border-orange-600 text-white font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Trim segment (Makas Budama)"
-          >
-            <Trash2 className="w-3 h-3 text-red-500" />
-            <span>Trim</span>
-          </button>
-          <button
-            onClick={() => {
-              clearCommand();
-              setCurrentCommand('extend');
-              logCommandResponse("EXTEND mode activated. Click near an open endpoint to extend it to the next intersection.");
-            }}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
-              currentCommand === 'extend' ? 'bg-orange-500 border-orange-600 text-white font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Extend segment (Uzatma)"
-          >
-            <Maximize className="w-3 h-3 text-cyan-600" />
-            <span>Extend</span>
-          </button>
-          <button
-            onClick={handleUndo}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-105 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-orange-500 transition font-mono font-bold"
-            title="Undo (Ctrl+Z)"
-          >
-            <Undo2 className="w-3 h-3 text-orange-500" />
-            <span>Undo</span>
-          </button>
-        </div>
+            <button
+              onClick={applyOneClickDimensioning}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-mono font-bold transition shadow-xs cursor-pointer"
+              title="Automatically detect boundary paths in the 2D sketch and place horizontal & vertical dimensions for the overall bounding box"
+            >
+              <Sparkles className="w-3 h-3 text-yellow-200 fill-yellow-200/20" />
+              <span>Auto Dim</span>
+            </button>
 
-        {/* Snap Select Toggles */}
-        <div className="flex items-center gap-1 border-r border-slate-200 pr-3 shrink-0 font-mono text-[10px]">
-          <span className="text-[10px] uppercase text-slate-400 mr-1.5 font-bold">Snaps:</span>
-          <button
-            onClick={() => setSnapToggles(prev => ({ ...prev, origin: !prev.origin }))}
-            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.origin ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-            }`}
-            title="Origin Snap (Orijine Kenetlen)"
-          >
-            Origin
-          </button>
-          <button
-            onClick={() => setSnapToggles(prev => ({ ...prev, end: !prev.end }))}
-            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.end ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-            }`}
-            title="Endpoint Snap (Uç Noktası)"
-          >
-            End
-          </button>
-          <button
-            onClick={() => setSnapToggles(prev => ({ ...prev, mid: !prev.mid }))}
-            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.mid ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-            }`}
-            title="Midpoint Snap (Orta Nokta)"
-          >
-            Mid
-          </button>
-          <button
-            onClick={() => setSnapToggles(prev => ({ ...prev, int: !prev.int }))}
-            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.int ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-            }`}
-            title="Intersection Snap (Kesişim)"
-          >
-            Int
-          </button>
-          <button
-            onClick={() => setSnapToggles(prev => ({ ...prev, tan: !prev.tan }))}
-            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.tan ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-            }`}
-            title="Tangent Snap (Daire Teğetleri)"
-          >
-            Tan
-          </button>
-          <button
-            onClick={() => setSnapToggles(prev => ({ ...prev, quad: !prev.quad }))}
-            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.quad ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-            }`}
-            title="Quadrant Snap (Çeyrek Daire)"
-          >
-            Quad
-          </button>
-          <button
-            onClick={() => setSnapToggles(prev => ({ ...prev, near: !prev.near }))}
-            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.near ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-            }`}
-            title="Nearest Snap (En Yakın Çizgi Üstü Nokta)"
-          >
-            Near
-          </button>
-          <button
-            onClick={() => setSnapToggles(prev => ({ ...prev, extension: !prev.extension }))}
-            className={`px-1.5 py-0.5 rounded border text-[10px] transition font-bold ${
-              snapToggles.extension ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
-            }`}
-            title="Extension & Angle Track Alignment (Uzantı ve Eksen Hizalama)"
-          >
-            Extend & Align
-          </button>
-        </div>
+            <button
+              onClick={applyConstrainAllSegments}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-mono font-bold transition shadow-xs cursor-pointer"
+              title="Automatically dimension and constrain all individual line segments in the sketch"
+            >
+              <Workflow className="w-3 h-3 text-pink-250 fill-pink-200/20" />
+              <span>Constrain All</span>
+            </button>
 
-        {/* View settings */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={() => {
-              setViewZoom(1.0);
-              setPanX(0);
-              setPanY(0);
-            }}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 transition font-mono font-bold"
-            title="Reset Zoom & Pan View"
-          >
-            <Maximize className="w-3 h-3 text-orange-500" />
-            <span>Sığdır</span>
-          </button>
-          <button
-            onClick={() => {
-              if (alignmentSelectMode) {
-                setAlignmentSelectMode(null);
-                logCommandResponse("Hizalama Görselleştirici kapatıldı.");
-              } else {
-                setAlignmentSelectMode('p1');
-                setAlignmentPt1(null);
-                setAlignmentPt2(null);
-                logCommandResponse("Hizalama Görselleştirici Aktif. Ekranda hizalamasını ölçmek istediğiniz 1. Noktayı seçin.");
-              }
-            }}
-            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono font-bold ${
-              alignmentSelectMode ? 'bg-cyan-600 border-cyan-700 text-white shadow-sm ring-1 ring-cyan-200 animate-pulse' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
-            }`}
-            title="Hizalama Görselleştirici (Alignment Visualizer)"
-          >
-            <ArrowRightLeft className="w-3 h-3 text-cyan-600" />
-            <span>Hizalama Görselleştirici</span>
-          </button>
-          <button
-            onClick={handleClearAll}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-red-50 border border-red-200 text-red-650 hover:bg-red-100 transition font-mono font-bold"
-            title="Wipe canvas clean"
-          >
-            <Trash2 className="w-3 h-3 text-red-500" />
-            <span>Temizle</span>
-          </button>
+            {finalPoints.length >= 2 && (
+              <button
+                onClick={() => {
+                  if (finalPoints.length >= 3) {
+                    triggerOpPromptForPoints(finalPoints);
+                  } else {
+                    saveState();
+                    setLayers((prevLayers) =>
+                      prevLayers.map((l) => {
+                        if (l.id === activeLayerId) {
+                          const currentPaths = l.paths || [];
+                          const ptsToCommit = [...l.finalPoints];
+                          if (l.isClosed && ptsToCommit.length >= 3 && distance(ptsToCommit[0], ptsToCommit[ptsToCommit.length - 1]) > 0.1) {
+                            ptsToCommit.push({ ...ptsToCommit[0] });
+                          }
+                          return {
+                            ...l,
+                            paths: [...currentPaths, ptsToCommit],
+                            finalPoints: [],
+                            isClosed: false
+                          };
+                        }
+                        return l;
+                      })
+                    );
+                    clearCommand();
+                    setTempPoint(null);
+                    logCommandResponse("Drafting shape completed and saved to layer paths.");
+                  }
+                }}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11.5px] bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100 transition font-mono font-bold animate-pulse cursor-pointer"
+                title="Save active path to layer paths database"
+              >
+                <CheckCircle className="w-3 h-3" />
+                <span>Finish Shape</span>
+              </button>
+            )}
+          </div>
+
+          {/* Group 2.2: Drawing Modes */}
+          <div className="flex items-center gap-1 bg-slate-50/70 p-0.5 px-1.5 rounded-md border border-slate-200 shrink-0">
+            <span className="text-[9px] uppercase font-mono text-slate-400 mr-1.5 font-bold select-none">Mod:</span>
+            <button
+              onClick={() => {
+                clearCommand();
+                setDrawMode('freehand');
+              }}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
+                drawMode === 'freehand' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Freehand Mode"
+            >
+              <span>✏️ Freehand</span>
+            </button>
+            <button
+              onClick={() => {
+                clearCommand();
+                setDrawMode('point');
+              }}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
+                drawMode === 'point' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Coordinate Input Mode"
+            >
+              <span>📐 Coordinate Input</span>
+            </button>
+            <button
+              onClick={() => {
+                clearCommand();
+                setDrawMode('drag');
+              }}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
+                drawMode === 'drag' ? 'bg-orange-100 border-orange-400 text-orange-700 font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Vertex Edit & Drag Mode"
+            >
+              <span>👆 Edit Vertex</span>
+            </button>
+          </div>
+
+          {/* Group 2.3: Modifiers */}
+          <div className="flex items-center gap-1 bg-slate-50/70 p-0.5 px-1.5 rounded-md border border-slate-200 shrink-0">
+            <span className="text-[9px] uppercase font-mono text-slate-400 mr-1.5 font-bold select-none">Düzenle:</span>
+            <button
+              onClick={() => applyFillet()}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-slate-900 transition font-mono font-bold"
+              title="Apply Fillet Rounding (F)"
+            >
+              <RefreshCw className="w-3 h-3 text-orange-500" />
+              <span>Fillet</span>
+            </button>
+            <button
+              onClick={() => applyChamfer()}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-slate-900 transition font-mono font-bold"
+              title="Apply Chamfer (CH)"
+            >
+              <ListFilter className="w-3 h-3 text-orange-500" />
+              <span>Chamfer</span>
+            </button>
+            <button
+              onClick={() => {
+                clearCommand();
+                setCurrentCommand('trim');
+                logCommandResponse("TRIM mode activated. Click on any segment to trim it between intersections.");
+              }}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
+                currentCommand === 'trim' ? 'bg-orange-500 border-orange-600 text-white font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Trim segment (Makas Budama)"
+            >
+              <Trash2 className="w-3 h-3 text-red-500" />
+              <span>Trim</span>
+            </button>
+            <button
+              onClick={() => {
+                clearCommand();
+                setCurrentCommand('extend');
+                logCommandResponse("EXTEND mode activated. Click near an open endpoint to extend it to the next intersection.");
+              }}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
+                currentCommand === 'extend' ? 'bg-orange-500 border-orange-600 text-white font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
+              title="Extend segment (Uzatma)"
+            >
+              <Maximize className="w-3 h-3 text-cyan-600" />
+              <span>Extend</span>
+            </button>
+            <button
+              onClick={handleUndo}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-orange-500 transition font-mono font-bold"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo2 className="w-3 h-3 text-orange-500" />
+              <span>Undo</span>
+            </button>
+          </div>
+
+          {/* Group 2.4: Snaps Selection Toggle */}
+          <div className="flex items-center gap-1 bg-slate-50/70 p-0.5 px-1.5 rounded-md border border-slate-200 shrink-0 select-none">
+            <span className="text-[9px] uppercase font-mono text-slate-400 mr-1.5 font-bold select-none">Yakala:</span>
+            <button
+              onClick={() => setSnapToggles(prev => ({ ...prev, origin: !prev.origin }))}
+              className={`px-1.5 py-0.5 rounded border text-[9.5px] transition font-bold ${
+                snapToggles.origin ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
+              title="Origin Snap (Orijine Kenetlen)"
+            >
+              Origin
+            </button>
+            <button
+              onClick={() => setSnapToggles(prev => ({ ...prev, end: !prev.end }))}
+              className={`px-1.5 py-0.5 rounded border text-[9.5px] transition font-bold ${
+                snapToggles.end ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
+              title="Endpoint Snap (Uç Noktası)"
+            >
+              End
+            </button>
+            <button
+              onClick={() => setSnapToggles(prev => ({ ...prev, mid: !prev.mid }))}
+              className={`px-1.5 py-0.5 rounded border text-[9.5px] transition font-bold ${
+                snapToggles.mid ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
+              title="Midpoint Snap (Orta Nokta)"
+            >
+              Mid
+            </button>
+            <button
+              onClick={() => setSnapToggles(prev => ({ ...prev, int: !prev.int }))}
+              className={`px-1.5 py-0.5 rounded border text-[9.5px] transition font-bold ${
+                snapToggles.int ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
+              title="Intersection Snap (Kesişim)"
+            >
+              Int
+            </button>
+            <button
+              onClick={() => setSnapToggles(prev => ({ ...prev, tan: !prev.tan }))}
+              className={`px-1.5 py-0.5 rounded border text-[9.5px] transition font-bold ${
+                snapToggles.tan ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
+              title="Tangent Snap (Daire Teğetleri)"
+            >
+              Tan
+            </button>
+            <button
+              onClick={() => setSnapToggles(prev => ({ ...prev, quad: !prev.quad }))}
+              className={`px-1.5 py-0.5 rounded border text-[9.5px] transition font-bold ${
+                snapToggles.quad ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
+              title="Quadrant Snap (Çeyrek Daire)"
+            >
+              Quad
+            </button>
+            <button
+              onClick={() => setSnapToggles(prev => ({ ...prev, near: !prev.near }))}
+              className={`px-1.5 py-0.5 rounded border text-[9.5px] transition font-bold ${
+                snapToggles.near ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
+              title="Nearest Snap (En Yakın Çizgi Üstü Nokta)"
+            >
+              Near
+            </button>
+            <button
+              onClick={() => setSnapToggles(prev => ({ ...prev, extension: !prev.extension }))}
+              className={`px-1.5 py-0.5 rounded border text-[9.5px] transition font-bold ${
+                snapToggles.extension ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+              }`}
+              title="Extension & Angle Track Alignment"
+            >
+              Track Align
+            </button>
+          </div>
+
         </div>
       </header>
 
