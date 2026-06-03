@@ -704,6 +704,7 @@ export default function App() {
     setTempPoint(null);
     setSnapPoint(null);
     setTrackedLines([]);
+    setDrawMode('drag'); // Switch to Edit Vertex mode on load/select
     
     // Smooth user layout transition
     setWorkspaceLayout((prev) => (prev === '3d-only' ? 'split' : prev));
@@ -716,8 +717,10 @@ export default function App() {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      const cW = canvas.width || canvas.parentElement?.clientWidth || 800;
-      const cH = canvas.height || canvas.parentElement?.clientHeight || 600;
+      const cW = canvas.parentElement?.clientWidth || canvas.width || 800;
+      const cH = canvas.parentElement?.clientHeight || canvas.height || 600;
+      canvas.width = cW;
+      canvas.height = cH;
 
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
       const pts: Point[] = [];
@@ -792,6 +795,7 @@ export default function App() {
     setLayers((prev) => [...prev, newLayerObj]);
     setActiveLayerId(id);
     logCommandResponse(`Layer "${newLayerObj.name}" created successfully.`);
+    afterOperationCompleted();
   };
 
   const updateLayerProps = (id: string, props: Partial<CADLayer>) => {
@@ -1000,6 +1004,7 @@ export default function App() {
     } else {
       logCommandResponse("Kopyalanacak seçili bir şekil bulunamadı! Lütfen bir şekle tıklayarak veya sağ tıklama kutusuyla seçerek kopyalamayı deneyin.");
     }
+    afterOperationCompleted();
   };
 
   const applyCadEditDelete = () => {
@@ -1029,6 +1034,7 @@ export default function App() {
     } else {
       logCommandResponse("Silinecek seçili bir obje bulunamadı.");
     }
+    afterOperationCompleted();
   };
 
   const getSelectedShapeGroupStatus = (): 'joined' | 'independent' | 'none' => {
@@ -1119,6 +1125,7 @@ export default function App() {
     }
 
     logCommandResponse(`Sketçten Ayrıldı: Seçili parça(lar) ana sketç bütünlüğünden ayrıldı ve bağımsız hale getirildi. Artık bağımsız olarak hareket ettirebilirsiniz.`);
+    afterOperationCompleted();
   };
 
   const handleJoinToSketch = () => {
@@ -1181,6 +1188,7 @@ export default function App() {
     setSelectedPathIndices(resolvedGroup.selectPathIndices);
 
     logCommandResponse(`Sketçe Bağlandı: Parçalar ana sketç gövdesiyle birleştirildi. Bütünlük sağlandı.`);
+    afterOperationCompleted();
   };
 
   const handleCopy = () => {
@@ -1294,6 +1302,7 @@ export default function App() {
     } else {
       logCommandResponse("Pano boş! Kopyalanmış bir şekil bulunamadı.");
     }
+    afterOperationCompleted();
   };
 
   const handleApplyDimensionValue = (dimId: string, targetValue: number) => {
@@ -1611,6 +1620,7 @@ export default function App() {
       }));
 
       setSelectedDimensionId(null);
+      afterOperationCompleted();
       return;
     }
 
@@ -1748,6 +1758,7 @@ export default function App() {
     }));
 
     setSelectedDimensionId(null);
+    afterOperationCompleted();
   };
 
   const handleDeleteDimension = (dimId: string) => {
@@ -1823,6 +1834,7 @@ export default function App() {
     } else {
       logCommandResponse("Aynalanacak seçili çizgi veya poligon bulunamadı.");
     }
+    afterOperationCompleted();
   };
 
   const applyCadEditMirrorAcrossLine = (p1: Point, p2: Point) => {
@@ -1898,6 +1910,7 @@ export default function App() {
     } else {
       logCommandResponse("Aynalanacak seçili çizgi veya poligon bulunamadı.");
     }
+    afterOperationCompleted();
   };
 
   const findClosestSegment = (pt: Point, currentZoom: number) => {
@@ -2014,6 +2027,7 @@ export default function App() {
     } else {
       logCommandResponse("Döndürülecek seçili çizgi veya poligon bulunamadı.");
     }
+    afterOperationCompleted();
   };
 
   const applyRelativeRotation = (deltaAngle: number) => {
@@ -2116,6 +2130,7 @@ export default function App() {
     } else {
       logCommandResponse("Ölçeklenecek seçili çizgi veya poligon bulunamadı.");
     }
+    afterOperationCompleted();
   };
 
   const applyCadEditLinearArray = (xc: number, yc: number, xs: number, ys: number) => {
@@ -2182,6 +2197,7 @@ export default function App() {
 
     setPaths(newPaths);
     logCommandResponse(`Doğrusal Çoğaltma: ${addedCount} adet yeni kopya üretildi.`);
+    afterOperationCompleted();
   };
 
   const applyCadEditPolarArray = (count: number, totalAngleDeg: number) => {
@@ -2275,6 +2291,7 @@ export default function App() {
 
     setPaths(newPaths);
     logCommandResponse(`Dairesel Çoğaltma: Merkez (${center.x.toFixed(1)}, ${center.y.toFixed(1)}) etrafında ${addedCount} adet yeni kopya üretildi.`);
+    afterOperationCompleted();
   };
 
   // Global drag handler for viewport splitter
@@ -2449,6 +2466,12 @@ export default function App() {
     setTrackedLines([]);
     setSelectedVertexIdx(null);
     setSelectedPathIdx(-1);
+  };
+
+  const afterOperationCompleted = () => {
+    if (currentCommand !== 'dimension') {
+      setDrawMode('drag');
+    }
   };
 
   const handleStartPolygonDrawing = (sides: number, drawType: 'corner' | 'midpoint' = 'corner') => {
@@ -2994,6 +3017,7 @@ export default function App() {
       setIsClosed(true);
       setSelectedVertexIdx(null);
       logCommandResponse(`Fillet applied (r: ${r} mm) to selected corner.`);
+      afterOperationCompleted();
       return;
     }
 
@@ -3044,6 +3068,7 @@ export default function App() {
     setFinalPoints(roundedPts);
     setIsClosed(true);
     logCommandResponse(`Fillet applied (r: ${r} mm) to all corners.`);
+    afterOperationCompleted();
   };
 
   const applyChamfer = (d: number = chamferDistance, targetIdx: number | null = selectedVertexIdx) => {
@@ -3103,6 +3128,7 @@ export default function App() {
       setIsClosed(true);
       setSelectedVertexIdx(null);
       logCommandResponse(`Chamfer applied (d: ${d} mm) to selected corner.`);
+      afterOperationCompleted();
       return;
     }
 
@@ -3138,6 +3164,7 @@ export default function App() {
     setFinalPoints(chamferPts);
     setIsClosed(true);
     logCommandResponse(`Chamfer applied (d: ${d} mm) to all corners.`);
+    afterOperationCompleted();
   };
 
   const applyOffset = (d: number = offsetDistance) => {
@@ -3160,6 +3187,7 @@ export default function App() {
     }
 
     logCommandResponse(`Offset of ${d > 0 ? '+' : ''}${d} mm applied successfully.`);
+    afterOperationCompleted();
   };
 
   // Find current selected point, previous, next, or circle parameters
@@ -4005,6 +4033,7 @@ export default function App() {
     );
 
     logCommandResponse("Segment trimmed at intersection boundary.");
+    afterOperationCompleted();
   };
 
   const applyExtendAtPoint = (clickPt: Point) => {
@@ -4108,6 +4137,7 @@ export default function App() {
     } else {
       logCommandResponse("No intersection found ahead of segment.");
     }
+    afterOperationCompleted();
   };
 
   const runDouglasPeucker = () => {
@@ -4259,6 +4289,7 @@ export default function App() {
     }
     setEditingSegmentIdx(null);
     setEditingPathIdx(null);
+    afterOperationCompleted();
   };
 
   // Draw 2D viewport onto screen
@@ -15020,18 +15051,34 @@ export default function App() {
                   const finalName = newSketchName.trim() || `SKETCH_${layers.length + 1}`;
                   const finalLayerId = `layer_${Date.now()}`;
                   
-                  // Construct deep-linked CADLayer
+                  // Find parent layer containing the clicked 3D face to project its existing geometry
+                  const parentLayer = layers.find(l => 
+                    l.id === pendingSketchPlane.layerId || 
+                    l.name === pendingSketchPlane.layerName ||
+                    l.name === pendingSketchPlane.faceName
+                  );
+
+                  const copiedPoints = parentLayer ? JSON.parse(JSON.stringify(parentLayer.finalPoints)) : [];
+                  const copiedPaths = parentLayer && parentLayer.paths ? JSON.parse(JSON.stringify(parentLayer.paths)) : [];
+                  const copiedIsClosed = parentLayer ? parentLayer.isClosed : false;
+                  const copiedSettings = parentLayer && parentLayer.finalPointsSettings ? JSON.parse(JSON.stringify(parentLayer.finalPointsSettings)) : undefined;
+                  const copiedPathSettings = parentLayer && parentLayer.pathSettings ? JSON.parse(JSON.stringify(parentLayer.pathSettings)) : undefined;
+
+                  // Construct deep-linked CADLayer copy-projected at the new Z altitude
                   const newLayer: CADLayer = {
                     id: finalLayerId,
                     name: finalName,
                     color: newSketchColor,
                     visible: true,
                     locked: false,
-                    finalPoints: [],
-                    isClosed: false,
+                    finalPoints: copiedPoints,
+                    isClosed: copiedIsClosed,
                     opType: 'extrude',
                     depth: Number(newSketchDepth) || 30,
                     zOffset: pendingSketchPlane.zHeight,
+                    paths: copiedPaths,
+                    finalPointsSettings: copiedSettings,
+                    pathSettings: copiedPathSettings,
                   };
 
                   // 1. Put layer state inside the CADerIM document
