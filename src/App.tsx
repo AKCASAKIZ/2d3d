@@ -2524,6 +2524,177 @@ export default function App() {
     }
   };
 
+  const applyConstrainAllSegments = () => {
+    if (activeLayer.locked) {
+      logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it to add constraints.`);
+      return;
+    }
+
+    const currentFinalPoints = activeLayer.finalPoints || [];
+    const currentPaths = activeLayer.paths || [];
+
+    if (currentFinalPoints.length === 0 && currentPaths.length === 0) {
+      logCommandResponse('Sınırlandırılacak (constrain) aktif bir sketç bulunamadı.');
+      return;
+    }
+
+    const currentDims = activeLayer.dimensions || [];
+    const newDimsList: any[] = [];
+
+    // Helper to check if a segment between raw endpoints (or anchors) is already dimensioned
+    const isSegmentDimensioned = (p1: Point, p2: Point, anchor1: PointAnchor, anchor2: PointAnchor) => {
+      return [...currentDims, ...newDimsList].some((d: any) => {
+        // Direct anchor exact matching
+        if (d.p1Anchor && d.p2Anchor) {
+          const match1 = d.p1Anchor.type === anchor1.type && d.p1Anchor.pathIdx === anchor1.pathIdx && d.p1Anchor.vertexIdx === anchor1.vertexIdx;
+          const match2 = d.p2Anchor.type === anchor2.type && d.p2Anchor.pathIdx === anchor2.pathIdx && d.p2Anchor.vertexIdx === anchor2.vertexIdx;
+          const rev1 = d.p1Anchor.type === anchor2.type && d.p1Anchor.pathIdx === anchor2.pathIdx && d.p1Anchor.vertexIdx === anchor2.vertexIdx;
+          const rev2 = d.p2Anchor.type === anchor1.type && d.p2Anchor.pathIdx === anchor1.pathIdx && d.p2Anchor.vertexIdx === anchor1.vertexIdx;
+          if ((match1 && match2) || (rev1 && rev2)) return true;
+        }
+
+        // Coordinate proximity fallback match
+        const d1_p1 = Math.hypot(d.p1.x - p1.x, d.p1.y - p1.y);
+        const d2_p2 = Math.hypot(d.p2.x - p2.x, d.p2.y - p2.y);
+        const d1_p2 = Math.hypot(d.p1.x - p2.x, d.p1.y - p2.y);
+        const d2_p1 = Math.hypot(d.p2.x - p1.x, d.p2.y - p1.y);
+        return (d1_p1 < 1.0 && d2_p2 < 1.0) || (d1_p2 < 1.0 && d2_p1 < 1.0);
+      });
+    };
+
+    let segmentsAdded = 0;
+
+    // 1. Process finalPoints segments
+    const fpN = currentFinalPoints.length;
+    if (fpN >= 2) {
+      const limit = isClosed ? fpN : fpN - 1;
+      for (let i = 0; i < limit; i++) {
+        const p1 = currentFinalPoints[i];
+        const p2 = currentFinalPoints[(i + 1) % fpN];
+        if (p1.isCurvePoint || p2.isCurvePoint) continue; // skip raw fillet circle segments
+
+        // Skip circle center virtual segments of polygons
+        if (p1.circleData || p2.circleData) continue;
+
+        const anchor1: PointAnchor = { type: 'finalPoints', vertexIdx: i };
+        const anchor2: PointAnchor = { type: 'finalPoints', vertexIdx: (i + 1) % fpN };
+
+        if (!isSegmentDimensioned(p1, p2, anchor1, anchor2)) {
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const len = Math.hypot(dx, dy);
+          if (len > 0.5) {
+            let dimType: 'horizontal' | 'vertical' | 'aligned' = 'aligned';
+            if (Math.abs(dx) < 0.1) dimType = 'vertical';
+            else if (Math.abs(dy) < 0.1) dimType = 'horizontal';
+
+            // calculate offset directed outwards relative to outline normal to prevent layout slop
+            let offset = 18;
+
+            newDimsList.push({
+              id: 'constrain_' + Math.random().toString(36).substring(2, 9),
+              p1: { x: p1.x, y: p1.y },
+              p2: { x: p2.x, y: p2.y },
+              p1Anchor: anchor1,
+              p2Anchor: anchor2,
+              offset,
+              value: dimType === 'horizontal' ? Math.abs(dx) : dimType === 'vertical' ? Math.abs(dy) : len,
+              dimType
+            });
+            segmentsAdded++;
+          }
+        }
+      }
+    }
+
+    // 2. Process secondary paths
+    currentPaths.forEach((path, pathIdx) => {
+      // Check if it's a circle
+      const isCircle = path.some(p => p.circleData);
+      if (isCircle) {
+        // Handle circle radius constraint
+        const circlePtIdx = path.findIndex(p => p.circleData);
+        if (circlePtIdx !== -1) {
+          const cPt = path[circlePtIdx];
+          const center = cPt.circleData!.center;
+          const radius = cPt.circleData!.radius;
+
+          // A virtual point on the perimeter of the circle for dimensioning endpoints
+          const targetPt = {
+            x: center.x + radius * Math.cos(Math.PI / 4),
+            y: center.y + radius * Math.sin(Math.PI / 4)
+          };
+
+          const anchor1: PointAnchor = { type: 'path', pathIdx, vertexIdx: circlePtIdx, isCircleCenter: true };
+          // Bound second anchor point to first point of circle loop path
+          const anchor2: PointAnchor = { type: 'path', pathIdx, vertexIdx: 0 };
+
+          if (!isSegmentDimensioned(center, targetPt, anchor1, anchor2)) {
+            newDimsList.push({
+              id: 'constrain_' + Math.random().toString(36).substring(2, 9),
+              p1: { x: center.x, y: center.y },
+              p2: targetPt,
+              p1Anchor: anchor1,
+              p2Anchor: anchor2,
+              offset: 0,
+              value: radius,
+              dimType: 'aligned' as const,
+              customLabel: `R`
+            });
+            segmentsAdded++;
+          }
+        }
+      } else {
+        // Normal discrete line sequence
+        const pN = path.length;
+        if (pN >= 2) {
+          const closedPath = pN > 2 && Math.hypot(path[pN - 1].x - path[0].x, path[pN - 1].y - path[0].y) < 0.1;
+          const limit = closedPath ? pN - 1 : pN - 1;
+
+          for (let i = 0; i < limit; i++) {
+            const p1 = path[i];
+            const p2 = path[i + 1];
+            if (p1.isCurvePoint || p2.isCurvePoint) continue;
+
+            const anchor1: PointAnchor = { type: 'path', pathIdx, vertexIdx: i };
+            const anchor2: PointAnchor = { type: 'path', pathIdx, vertexIdx: i + 1 };
+
+            if (!isSegmentDimensioned(p1, p2, anchor1, anchor2)) {
+              const dx = p2.x - p1.x;
+              const dy = p2.y - p1.y;
+              const len = Math.hypot(dx, dy);
+              if (len > 0.5) {
+                let dimType: 'horizontal' | 'vertical' | 'aligned' = 'aligned';
+                if (Math.abs(dx) < 0.1) dimType = 'vertical';
+                else if (Math.abs(dy) < 0.1) dimType = 'horizontal';
+
+                newDimsList.push({
+                  id: 'constrain_' + Math.random().toString(36).substring(2, 9),
+                  p1: { x: p1.x, y: p1.y },
+                  p2: { x: p2.x, y: p2.y },
+                  p1Anchor: anchor1,
+                  p2Anchor: anchor2,
+                  offset: 18,
+                  value: dimType === 'horizontal' ? Math.abs(dx) : dimType === 'vertical' ? Math.abs(dy) : len,
+                  dimType
+                });
+                segmentsAdded++;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (segmentsAdded > 0) {
+      saveState();
+      setDimensions(prev => [...prev, ...newDimsList]);
+      logCommandResponse(`✨ Sınırlandırma Tamamlandı! ${segmentsAdded} adet çizgi segmenti için parametrik boyut kısıtlaması (dimension constraint) başarıyla oluşturuldu.`);
+    } else {
+      logCommandResponse('Tüm çizgi segmentleri zaten kısıtlanmış/boyutlandırılmış durumda.');
+    }
+  };
+
   const updatePointCoordinate = (oldPt: Point, newX: number, newY: number) => {
     saveState();
     
@@ -9588,6 +9759,15 @@ export default function App() {
             <span>Auto Dim</span>
           </button>
 
+          <button
+            onClick={applyConstrainAllSegments}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-mono font-bold transition shadow-xs cursor-pointer mt-0"
+            title="Automatically dimension and constrain all individual line segments in the sketch"
+          >
+            <Workflow className="w-3 h-3 text-pink-200 fill-pink-200/20" />
+            <span>Constrain All</span>
+          </button>
+
           {finalPoints.length >= 2 && (
             <button
               onClick={() => {
@@ -10483,6 +10663,24 @@ export default function App() {
                     </button>
                     <p className="text-[9px] text-slate-500 leading-relaxed">
                       Detects the entire contour boundary and active geometric paths to generate overall bounding box horizontal (width) and vertical (height) dimension annotations automatically.
+                    </p>
+                  </div>
+
+                  {/* Auto-Constrain All Lines Tool Box */}
+                  <div className="bg-gradient-to-br from-slate-50 to-pink-50/40 p-3 rounded-lg border border-pink-100 space-y-2.5 shadow-xs">
+                    <span className="text-[10px] uppercase font-mono font-bold text-pink-700 flex items-center gap-1">
+                      <Workflow className="w-3.5 h-3.5 text-pink-650 animate-pulse" />
+                      Geometric Constraints
+                    </span>
+                    <button
+                      onClick={applyConstrainAllSegments}
+                      className="w-full py-2 bg-pink-600 hover:bg-pink-500 active:bg-pink-700 text-white font-sans font-bold text-xs rounded-lg transition duration-150 flex items-center justify-center gap-2 shadow-xs cursor-pointer select-none font-bold"
+                    >
+                      <Workflow className="w-3.5 h-3.5 text-pink-200 fill-pink-200/20" />
+                      Tüm Çizgileri Sınırla (Constrain)
+                    </button>
+                    <p className="text-[9px] text-slate-500 leading-relaxed font-sans">
+                      Çizimdeki tüm bağımsız çizgi segmentlerini ve yayları otomatik olarak algılar, her birine düzenlenebilir kısıtlamalar (dimension constraints) ekler.
                     </p>
                   </div>
 
