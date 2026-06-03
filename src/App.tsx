@@ -522,6 +522,9 @@ export default function App() {
   } | null>(null);
 
   // Settings
+  const [globalFontSize, setGlobalFontSize] = useState<number>(0); // 0 = Auto (Smart sizing based on component size)
+  const [segmentDragBehavior, setSegmentDragBehavior] = useState<'stretch' | 'move'>('stretch');
+  const [hoveredSegment, setHoveredSegment] = useState<{ pathIdx: number; segmentIdx: number } | null>(null);
   const [orthoSnap, setOrthoSnap] = useState(false);
   const [smartSnap, setSmartSnap] = useState(true);
   const [gridSnap, setGridSnap] = useState(false);
@@ -4951,7 +4954,10 @@ export default function App() {
         // Draw dimension lines and text only for the active layer
         if (showDims && isActive && pts.length > 1) {
           // Dynamic segment text size is based on sketchSide (in mm) and viewZoom (zoom factor)
-          const autoTextHeightPx = Math.max(9.5, Math.min(24.0, Math.max(1.8, Math.min(10.0, sketchSide * 0.035)) * viewZoom));
+          const baseTextSize = globalFontSize > 0 ? globalFontSize : Math.max(1.8, Math.min(10.0, sketchSide * 0.035));
+          const autoTextHeightPx = globalFontSize > 0 
+            ? Math.max(5.0, Math.min(120.0, globalFontSize * viewZoom))
+            : Math.max(9.5, Math.min(24.0, baseTextSize * viewZoom));
           ctx.font = `bold ${Math.round(autoTextHeightPx)}px monospace`;
           ctx.textAlign = 'center';
 
@@ -5114,9 +5120,10 @@ export default function App() {
 
       // Dynamic text sizing based on active drawing size & screen footprint
       // If fontSizeOverride is specified, we use that as the base height in mm
-      const baseTextHeightMm = fontSizeOverride || Math.max(1.8, Math.min(10.0, sketchSide * 0.035));
+      // If globally overridden, we use globalFontSize, otherwise smart autosize
+      const baseTextHeightMm = fontSizeOverride || (globalFontSize > 0 ? globalFontSize : Math.max(1.8, Math.min(10.0, sketchSide * 0.035)));
       let textHeightPx = baseTextHeightMm * viewZoom;
-      if (!fontSizeOverride) {
+      if (!fontSizeOverride && globalFontSize === 0) {
         textHeightPx = Math.max(9.5, Math.min(30.0, textHeightPx)); // robust read bounds on screen
       } else {
         textHeightPx = Math.max(5.0, Math.min(120.0, textHeightPx)); // custom font size bounds
@@ -5677,6 +5684,59 @@ export default function App() {
       }
       
       ctx.restore();
+    }
+
+    // 9. Draw hovered segment highlight for edge stretching
+    if (hoveredSegment && currentCommand === '' && drawMode === 'drag') {
+      const { pathIdx, segmentIdx } = hoveredSegment;
+      const pts = pathIdx === -1 ? finalPoints : (activeLayer.paths ? activeLayer.paths[pathIdx] : []);
+      if (pts && pts.length > 1) {
+        const nextIdx = (segmentIdx + 1) % pts.length;
+        const p1 = pts[segmentIdx];
+        const p2 = pts[nextIdx];
+        if (p1 && p2) {
+          ctx.save();
+          // Glow effect (pink/magenta glow)
+          ctx.strokeStyle = 'rgba(236, 72, 153, 0.45)';
+          ctx.lineWidth = 14 / viewZoom;
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+
+          // Bright neon core line indicating esnetme (stretch) is ready
+          ctx.strokeStyle = '#ec4899'; // Neon pink
+          ctx.lineWidth = 3.5 / viewZoom;
+          ctx.stroke();
+
+          // Small midpoint marker
+          const midX = (p1.x + p2.x) / 2;
+          const midY = (p1.y + p2.y) / 2;
+          ctx.fillStyle = '#ec4899';
+          ctx.beginPath();
+          ctx.arc(midX, midY, 4.5 / viewZoom, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1 / viewZoom;
+          ctx.stroke();
+
+          // Text overlay
+          ctx.fillStyle = '#fdf2f8'; // very light pink/white text
+          ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          // Draw a small background pill for the "STRETCH" text label
+          const label = "ESNET (STRETCH)";
+          const labelWidth = ctx.measureText(label).width;
+          ctx.fillStyle = '#ec4899';
+          ctx.fillRect(midX - labelWidth/2 - 4/viewZoom, midY - 14/viewZoom - 6/viewZoom, labelWidth + 8/viewZoom, 13/viewZoom);
+          
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(label, midX, midY - 14/viewZoom);
+          ctx.restore();
+        }
+      }
     }
 
     ctx.restore();
@@ -7117,7 +7177,9 @@ export default function App() {
             }
           }
 
-          if (false) { // Cancel stretch - always move
+          const shouldStretch = segmentDragBehavior === 'stretch' ? !e.altKey : e.altKey;
+
+          if (shouldStretch) {
             saveState();
             setActiveSegmentStretch({
               pathIdx: clickedPathIdx,
@@ -7956,6 +8018,56 @@ export default function App() {
         const snapData = calculateSnaps(x, y, finalPoints, isClosed, -1, smartSnap, 10 / viewZoom, activeLayer.paths, gridSnap, gridSize, customAnchor, snapToggles);
         setSnapPoint(snapData.snapPoint);
         setTrackedLines(snapData.trackedLines);
+
+        // Calculate segment hover if we are not actively modifying
+        if (currentCommand === '' && dragIndexRef.current === -1 && !activeSegmentStretch && !activeSegmentMove && !dragEntirePathRef.current) {
+          let foundHoveredSeg: { pathIdx: number; segmentIdx: number } | null = null;
+          
+          if (finalPoints.length > 1) {
+            let minSegmentDist = Infinity;
+            let minSegIdx = -1;
+            for (let i = 0; i < finalPoints.length; i++) {
+              if (i === finalPoints.length - 1 && !isClosed) continue;
+              const nextIdx = (i + 1) % finalPoints.length;
+              const seg = getClosestPointOnSegment({ x, y }, finalPoints[i], finalPoints[nextIdx]);
+              if (seg.dist < minSegmentDist) {
+                minSegmentDist = seg.dist;
+                minSegIdx = i;
+              }
+            }
+            if (minSegmentDist < 12 / viewZoom) {
+              foundHoveredSeg = { pathIdx: -1, segmentIdx: minSegIdx };
+            }
+          }
+
+          if (!foundHoveredSeg && activeLayer.paths) {
+            for (let pathIdx = 0; pathIdx < activeLayer.paths.length; pathIdx++) {
+              const path = activeLayer.paths[pathIdx];
+              if (path.length > 1) {
+                let minSegmentDist = Infinity;
+                let minSegIdx = -1;
+                const closedPath = path.length > 2 && Math.hypot(path[path.length - 1].x - path[0].x, path[path.length - 1].y - path[0].y) < 0.1;
+                const limit = closedPath ? path.length : path.length - 1;
+
+                for (let i = 0; i < limit; i++) {
+                  const nextIdx = (i + 1) % path.length;
+                  const seg = getClosestPointOnSegment({ x, y }, path[i], path[nextIdx]);
+                  if (seg.dist < minSegmentDist) {
+                    minSegmentDist = seg.dist;
+                    minSegIdx = i;
+                  }
+                }
+                if (minSegmentDist < 12 / viewZoom) {
+                  foundHoveredSeg = { pathIdx, segmentIdx: minSegIdx };
+                  break;
+                }
+              }
+            }
+          }
+          setHoveredSegment(foundHoveredSeg);
+        } else {
+          setHoveredSegment(null);
+        }
       }
     }
   };
@@ -7965,6 +8077,7 @@ export default function App() {
     dragIndexRef.current = -1;
     dragPathIndexRef.current = -1;
     dragEntirePathRef.current = null;
+    setHoveredSegment(null);
     setIsPanning(false);
     setTrackedLines([]);
     setSnapPoint(null);
@@ -11927,6 +12040,108 @@ export default function App() {
                   onChange={(e) => setShowDims(e.target.checked)}
                   className="rounded text-orange-500 focus:ring-orange-500 cursor-pointer"
                 />
+              </div>
+
+              {/* Segment Stretch / Move Behavior Controller */}
+              <div className="flex flex-col bg-amber-50/50 p-2.5 rounded border border-amber-200 shadow-2xs text-left gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-amber-950 font-bold flex items-center gap-1">
+                    <span>⚡ Çizgi Sürükleme (Drag Edge)</span>
+                  </span>
+                  <div className="flex items-center bg-white border border-slate-200 rounded p-0.5 shadow-2xs">
+                    <button
+                      onClick={() => {
+                        setSegmentDragBehavior('stretch');
+                        logCommandResponse("Çizgi Sürükleme Davranışı esnetme (Stretch) olarak ayarlandı.");
+                      }}
+                      className={`px-2 py-0.5 text-[9px] font-extrabold rounded cursor-pointer transition-all ${
+                        segmentDragBehavior === 'stretch'
+                          ? 'bg-amber-500 text-white shadow-3xs'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      Stretch
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSegmentDragBehavior('move');
+                        logCommandResponse("Çizgi Sürükleme Davranışı komple taşıma (Move Shape) olarak ayarlandı.");
+                      }}
+                      className={`px-2 py-0.5 text-[9px] font-extrabold rounded cursor-pointer transition-all ${
+                        segmentDragBehavior === 'move'
+                          ? 'bg-amber-500 text-white shadow-3xs'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      Move
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[9.5px] text-slate-600 leading-normal">
+                  Sınırlanmış çizgiler üzerine gidip çekerek <strong>Stretch</strong> yapabilirsiniz. Diğer moda geçmek veya seçimi tümden taşımak için <strong>Alt tuşuna</strong> basılı tutun.
+                </p>
+              </div>
+
+              {/* Dimension Text Size Sizer */}
+              <div className="flex flex-col bg-blue-50/50 p-2.5 rounded border border-blue-200 shadow-2xs text-left gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-blue-950 font-bold flex items-center gap-1">
+                    <span>✍️ Yazı Boyutu (Text Size)</span>
+                  </span>
+                  <div className="flex items-center bg-white border border-slate-200 rounded p-0.5 shadow-2xs">
+                    <button
+                      onClick={() => {
+                        setGlobalFontSize(0);
+                        logCommandResponse("Akıllı otomatik metin boyutlandırma aktif.");
+                      }}
+                      className={`px-2 py-0.5 text-[9px] font-extrabold rounded cursor-pointer transition-all ${
+                        globalFontSize === 0
+                          ? 'bg-blue-600 text-white shadow-3xs'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      Smart Auto
+                    </button>
+                    <button
+                      onClick={() => {
+                        setGlobalFontSize(3.5);
+                        logCommandResponse("Metin boyutu 3.5mm olarak sabitlendi.");
+                      }}
+                      className={`px-2 py-0.5 text-[9px] font-extrabold rounded cursor-pointer transition-all ${
+                        globalFontSize > 0
+                          ? 'bg-blue-600 text-white shadow-3xs'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                      }`}
+                    >
+                      Custom
+                    </button>
+                  </div>
+                </div>
+                
+                {globalFontSize > 0 ? (
+                  <div className="space-y-1 pt-0.5">
+                    <div className="flex justify-between text-[9px] font-mono font-bold text-slate-500">
+                      <span>BOYUT:</span>
+                      <span className="text-blue-650 font-extrabold">{globalFontSize.toFixed(1)} mm</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1.0"
+                      max="15.0"
+                      step="0.5"
+                      value={globalFontSize}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setGlobalFontSize(val);
+                      }}
+                      className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-[9.5px] text-slate-600 leading-normal">
+                    Parçanın boyutlarına göre <strong>akıllı dinamik boyutlandırma</strong> devrededir. İstediğiniz boyuta sabitlemek için Custom seçebilirsiniz.
+                  </p>
+                )}
               </div>
 
               {/* Grid Density & Background Dynamic Color */}
