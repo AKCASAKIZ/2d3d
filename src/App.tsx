@@ -7451,17 +7451,18 @@ export default function App() {
         }
 
         if (isClickOnShape && clickedPathIdx !== null) {
-          setEditingPathIdx(clickedPathIdx);
-          setEditingSegmentIdx(clickedSegmentIdx);
-          const activeShapePoints = clickedPathIdx === -1 ? finalPoints : (activeLayer.paths ? activeLayer.paths[clickedPathIdx] : []);
-          if (activeShapePoints && activeShapePoints.length > 1) {
-            const p1 = activeShapePoints[clickedSegmentIdx];
-            const p2 = activeShapePoints[(clickedSegmentIdx + 1) % activeShapePoints.length];
-            if (p1 && p2) {
-              const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-              setEditingDimensionValue(d.toFixed(1));
-            }
-          }
+          // Cancelled: Do not trigger edit dimension popup on line segment touch/cllick
+          // setEditingPathIdx(clickedPathIdx);
+          // setEditingSegmentIdx(clickedSegmentIdx);
+          // const activeShapePoints = clickedPathIdx === -1 ? finalPoints : (activeLayer.paths ? activeLayer.paths[clickedPathIdx] : []);
+          // if (activeShapePoints && activeShapePoints.length > 1) {
+          //   const p1 = activeShapePoints[clickedSegmentIdx];
+          //   const p2 = activeShapePoints[(clickedSegmentIdx + 1) % activeShapePoints.length];
+          //   if (p1 && p2) {
+          //     const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+          //     setEditingDimensionValue(d.toFixed(1));
+          //   }
+          // }
 
           const shouldStretch = segmentDragBehavior === 'stretch' ? !e.altKey : e.altKey;
 
