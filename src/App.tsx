@@ -547,7 +547,7 @@ export default function App() {
   const [editingDimensionValue, setEditingDimensionValue] = useState<string>("");
   const [splitRatio, setSplitRatio] = useState<number>(50);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [showDims, setShowDims] = useState(true);
+  const [showDims, setShowDims] = useState(false);
   const [polygonSides, setPolygonSides] = useState(6);
   const [polygonType, setPolygonType] = useState<'corner' | 'midpoint'>('corner');
   const [showPolygonPrompt, setShowPolygonPrompt] = useState(false);
@@ -693,7 +693,7 @@ export default function App() {
   } | null>(null);
 
   // Layer and Sketch dynamic viewport loader helper
-  const selectAndLoadSketch = (id: string) => {
+  const selectAndLoadSketch = (id: string, customLayers?: CADLayer[]) => {
     setActiveLayerId(id);
     setSelectedVertexIdx(null);
     setSelectedPathIdx(-1);
@@ -708,6 +708,68 @@ export default function App() {
     // Smooth user layout transition
     setWorkspaceLayout((prev) => (prev === '3d-only' ? 'split' : prev));
     setSidebarTab('sketch');
+
+    // Run zoom-to-fit in next tick so layout transitions are finished, canvas is visible, and sizing is established
+    setTimeout(() => {
+      const currentLayers = customLayers || layers;
+      const targetLayer = currentLayers.find(l => l.id === id);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const cW = canvas.width || canvas.parentElement?.clientWidth || 800;
+      const cH = canvas.height || canvas.parentElement?.clientHeight || 600;
+
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      const pts: Point[] = [];
+      if (targetLayer) {
+        if (targetLayer.finalPoints) pts.push(...targetLayer.finalPoints);
+        if (targetLayer.paths) {
+          targetLayer.paths.forEach(p => pts.push(...p));
+        }
+      }
+
+      // If empty layout, position origin (0, 0) beautifully in the exact center of screen
+      if (pts.length === 0) {
+        setViewZoom(1.5);
+        setPanX(cW / 2);
+        setPanY(cH / 2);
+        return;
+      }
+
+      pts.forEach(p => {
+        if (p.circleData) {
+          const { center, radius } = p.circleData;
+          minX = Math.min(minX, center.x - radius);
+          maxX = Math.max(maxX, center.x + radius);
+          minY = Math.min(minY, center.y - radius);
+          maxY = Math.max(maxY, center.y + radius);
+        } else {
+          minX = Math.min(minX, p.x);
+          maxX = Math.max(maxX, p.x);
+          minY = Math.min(minY, p.y);
+          maxY = Math.max(maxY, p.y);
+        }
+      });
+
+      const w = maxX - minX;
+      const h = maxY - minY;
+      const padding = 60;
+      const usableW = Math.max(100, cW - padding * 2);
+      const usableH = Math.max(100, cH - padding * 2);
+
+      let optimalZoom = 1.5;
+      if (w > 0 && h > 0) {
+        optimalZoom = Math.min(usableW / w, usableH / h);
+      }
+      optimalZoom = Math.max(0.1, Math.min(optimalZoom, 15.0));
+
+      const midX = (minX + maxX) / 2;
+      const midY = (minY + maxY) / 2;
+
+      setPanX(cW / 2 - midX * optimalZoom);
+      setPanY(cH / 2 - midY * optimalZoom);
+      setViewZoom(optimalZoom);
+    }, 150);
   };
 
   // Layer methods helper
@@ -2397,8 +2459,8 @@ export default function App() {
     saveState();
     setCurrentCommand('polygon');
 
-    // Auto-commit previous shape to layers if it has enough vertices
-    if (finalPoints.length >= 3) {
+    // Auto-commit previous shape to layers if it has enough vertices (>= 2 points is a valid segment)
+    if (finalPoints.length >= 2) {
       setLayers((prevLayers) =>
         prevLayers.map((l) => {
           if (l.id === activeLayerId) {
@@ -2436,8 +2498,8 @@ export default function App() {
     setCurrentCommand(cmd);
     setTtrSelectedLines([]);
 
-    // Auto-commit previous shape to layers if it has enough vertices
-    if (finalPoints.length >= 3) {
+    // Auto-commit previous shape to layers if it has enough vertices (>= 2 points is a valid segment)
+    if (finalPoints.length >= 2) {
       setLayers((prevLayers) =>
         prevLayers.map((l) => {
           if (l.id === activeLayerId) {
@@ -5103,7 +5165,7 @@ export default function App() {
               ctx.fillStyle = '#f43f5e';
               const fontHeightMm = autoTextHeightPx / viewZoom;
               ctx.fillText(
-                `R: ${radius.toFixed(1)}`,
+                `R: ${radius.toFixed(1)} mm`,
                 (center.x + targetX) / 2 + fontHeightMm * 0.9,
                 (center.y + targetY) / 2 - fontHeightMm * 0.45
               );
@@ -5120,7 +5182,7 @@ export default function App() {
               ctx.fillStyle = '#f43f5e'; // Rose
               const fontHeightMm = autoTextHeightPx / viewZoom;
               ctx.fillText(
-                `${d.toFixed(1)}`,
+                `${d.toFixed(1)} mm`,
                 (p1.x + p2.x) / 2,
                 (p1.y + p2.y) / 2 - fontHeightMm * 1.05
               );
@@ -5390,32 +5452,33 @@ export default function App() {
     };
 
     // 7.5 Draw Placed and Preview Dimension Annotations
-    // Always show custom dimensions (her durumda gözüksün), independent of showDims checkbox
-    // Draw already placed dimensions for current active layer
-    dimensions.forEach(d => {
-      const isHighlighted = selectedDimensionId === d.id;
-      let displayValue = Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y);
-      if (d.dimType === 'horizontal') {
-        displayValue = Math.abs(d.p2.x - d.p1.x);
-      } else if (d.dimType === 'vertical') {
-        displayValue = Math.abs(d.p2.y - d.p1.y);
-      }
-      const prec = d.precision !== undefined ? d.precision : 1;
-      const computedText = d.customLabel || displayValue.toFixed(prec);
-      drawCustomDimension(
-        d.p1,
-        d.p2,
-        d.offset,
-        isHighlighted,
-        computedText,
-        d.dimType || 'aligned',
-        d.textShiftX || 0,
-        d.textShiftY || 0,
-        d.toleranceUpper,
-        d.toleranceLower,
-        d.fontSize
-      );
-    });
+    // Draw already placed dimensions for current active layer ONLY if showDims is checked
+    if (showDims) {
+      dimensions.forEach(d => {
+        const isHighlighted = selectedDimensionId === d.id;
+        let displayValue = Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y);
+        if (d.dimType === 'horizontal') {
+          displayValue = Math.abs(d.p2.x - d.p1.x);
+        } else if (d.dimType === 'vertical') {
+          displayValue = Math.abs(d.p2.y - d.p1.y);
+        }
+        const prec = d.precision !== undefined ? d.precision : 1;
+        const computedText = d.customLabel || displayValue.toFixed(prec);
+        drawCustomDimension(
+          d.p1,
+          d.p2,
+          d.offset,
+          isHighlighted,
+          computedText,
+          d.dimType || 'aligned',
+          d.textShiftX || 0,
+          d.textShiftY || 0,
+          d.toleranceUpper,
+          d.toleranceLower,
+          d.fontSize
+        );
+      });
+    }
 
     // Draw active interactive preview if user is inserting a dimension
     if (currentCommand === 'dimension' && hoverCoords) {
@@ -5439,7 +5502,7 @@ export default function App() {
         ctx.fillStyle = '#38bdf8'; // Light Lewis blue for length hover
         ctx.font = `bold ${Math.max(10, 11 / viewZoom)}px monospace`;
         const dist = Math.hypot(hoverCoords.x - dimP1.x, hoverCoords.y - dimP1.y);
-        ctx.fillText(`L: ${dist.toFixed(1)}`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
+        ctx.fillText(`L: ${dist.toFixed(1)} mm`, hoverCoords.x + 10 / viewZoom, hoverCoords.y - 10 / viewZoom);
       } else if (clickCount === 2 && dimP1 && dimP2) {
         // Both points set, previewing offset and placement of dimension line
         const details = getAutoDimensionDetails(dimP1, dimP2, hoverCoords.x, hoverCoords.y);
@@ -5958,6 +6021,10 @@ export default function App() {
     }
 
     let { x, y } = tempPoint ? tempPoint : getVirtualCoords(e.clientX, e.clientY);
+    if (snapPoint) {
+      x = snapPoint.x;
+      y = snapPoint.y;
+    }
 
     // Intercept Alignment Visualizer point selection
     if (alignmentSelectMode) {
@@ -6237,8 +6304,76 @@ export default function App() {
           logCommandResponse('Continuous path successfully closed.');
           triggerOpPromptForPoints(closedLinePts);
         } else {
-          saveState([...finalPoints, { x, y }]);
-          setFinalPoints((prev) => [...prev, { x, y }]);
+          // --- AUTO JOIN ENDPOINTS AND VERTICES TO PREVENT SEPARATIONS (KOPMA) ---
+          let mergedFromPath = false;
+          if (finalPoints.length === 0 && activeLayer.paths) {
+            // Check if clicking near start or end of any completed paths
+            const tolerance = 1.0; // matching tolerance in mm
+            const matchedPathIdx = activeLayer.paths.findIndex(path => {
+              const startDist = Math.hypot(path[0].x - x, path[0].y - y);
+              const endDist = Math.hypot(path[path.length - 1].x - x, path[path.length - 1].y - y);
+              return startDist < tolerance || endDist < tolerance;
+            });
+
+            if (matchedPathIdx !== -1) {
+              const matchedPath = activeLayer.paths[matchedPathIdx];
+              const startDist = Math.hypot(matchedPath[0].x - x, matchedPath[0].y - y);
+
+              let reorderedPath = [...matchedPath];
+              if (startDist < tolerance) {
+                // Clicked near the start. Reverse so it ends at the current click point (X,Y)
+                reorderedPath.reverse();
+              }
+              
+              saveState();
+              // Promote this completed path to the active finalPoints so drawing continues sequentially
+              const remPaths = activeLayer.paths.filter((_, idx) => idx !== matchedPathIdx);
+              setPaths(remPaths);
+              setFinalPoints(reorderedPath);
+              mergedFromPath = true;
+              logCommandResponse("Mavi uç noktadan yakalandı: Mevcut şekliniz aktif çizim ile birleştirildi, kesintisiz devam edebilirsiniz.");
+            }
+          }
+
+          let mergedToPath = false;
+          if (!mergedFromPath && finalPoints.length > 0 && activeLayer.paths) {
+            const tolerance = 1.0; // matching tolerance in mm
+            const matchedPathIdx = activeLayer.paths.findIndex(path => {
+              const startDist = Math.hypot(path[0].x - x, path[0].y - y);
+              const endDist = Math.hypot(path[path.length - 1].x - x, path[path.length - 1].y - y);
+              return startDist < tolerance || endDist < tolerance;
+            });
+
+            if (matchedPathIdx !== -1) {
+              const matchedPath = activeLayer.paths[matchedPathIdx];
+              const endDist = Math.hypot(matchedPath[matchedPath.length - 1].x - x, matchedPath[matchedPath.length - 1].y - y);
+
+              let appendPath = [...matchedPath];
+              if (endDist < tolerance) {
+                // Clicked near the end. Reverse so it starts at the click point (X,Y)
+                appendPath.reverse();
+              }
+              
+              saveState();
+              // Merge finalPoints and appendPath together (skipping the first node of matchedPath because it is collinear/identical)
+              const joinedPoints = [...finalPoints, ...appendPath.slice(1)];
+              
+              const remPaths = activeLayer.paths.filter((_, idx) => idx !== matchedPathIdx);
+              setPaths(remPaths);
+              setFinalPoints(joinedPoints);
+              mergedToPath = true;
+              logCommandResponse("Mavi uç noktaya bağlandı: Şekil aktif sketç ile başarılı bir şekilde kaynaştırıldı.");
+            }
+          }
+
+          if (!mergedFromPath && !mergedToPath) {
+            saveState([...finalPoints, { x, y }]);
+            setFinalPoints((prev) => [...prev, { x, y }]);
+          }
+
+          // Clear typed parametric dimensions inputs so they do not bleed into the NEXT segment
+          setLiveLengthInput('');
+          setLiveAngleInput('');
         }
       } else if (currentCommand === 'rect') {
         if (rectMethod === '2point') {
@@ -10115,12 +10250,11 @@ export default function App() {
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={() => {
-                setViewZoom(1.0);
-                setPanX(0);
-                setPanY(0);
+                selectAndLoadSketch(activeLayerId);
+                logCommandResponse("Çizim ekranı sığdırıldı ve ortalandı.");
               }}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 transition font-mono font-bold"
-              title="Reset Zoom & Pan View"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-250 text-slate-700 transition font-mono font-bold"
+              title="Reset Zoom & Pan View (Ortala ve Sığdır)"
             >
               <Maximize className="w-3 h-3 text-orange-500" />
               <span>Sığdır</span>
@@ -14901,7 +15035,12 @@ export default function App() {
                   };
 
                   // 1. Put layer state inside the CADerIM document
-                  setLayersRaw((prev) => [...prev, newLayer]);
+                  setLayersRaw((prev) => {
+                    const next = [...prev, newLayer];
+                    // 3. Coordinate activation via selectAndLoadSketch with updated layer list
+                    selectAndLoadSketch(finalLayerId, next);
+                    return next;
+                  });
 
                   // 2. Put inside user sketches list for reference tracking
                   setSketches((prev) => [
@@ -14913,9 +15052,6 @@ export default function App() {
                       parentLayerId: pendingSketchPlane.layerId,
                     },
                   ]);
-
-                  // 3. Coordinate activation via selectAndLoadSketch
-                  selectAndLoadSketch(finalLayerId);
 
                   setCmdLogs((prev) => [
                     ...prev,
