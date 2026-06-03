@@ -7424,7 +7424,7 @@ export default function App() {
         const updatedPaths = activeLayer.paths ? activeLayer.paths.map(path => {
           return path.map(pt => {
             for (const item of oldPosList) {
-              if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+              if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
                 return { ...pt, x: item.nx, y: item.ny };
               }
             }
@@ -7439,7 +7439,7 @@ export default function App() {
         // Update coincident finalPoints
         const nextFinalPoints = finalPoints.map(pt => {
           for (const item of oldPosList) {
-            if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+            if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
               return { ...pt, x: item.nx, y: item.ny };
             }
           }
@@ -7453,7 +7453,7 @@ export default function App() {
             let changed = false;
             const nextPath = path.map(pt => {
               for (const item of oldPosList) {
-                if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
                   changed = true;
                   return { ...pt, x: item.nx, y: item.ny };
                 }
@@ -7711,7 +7711,7 @@ export default function App() {
                 oldPosList.forEach((item) => {
                   for (let k = 0; k < updated.length; k++) {
                     if (updated[k].rectData?.id !== rId) {
-                      if (Math.hypot(updated[k].x - item.cx, updated[k].y - item.cy) < 0.05) {
+                      if (Math.hypot(updated[k].x - item.cx, updated[k].y - item.cy) < 1.5) {
                         updated[k] = { ...updated[k], x: item.nx, y: item.ny };
                       }
                     }
@@ -7723,7 +7723,7 @@ export default function App() {
                 const updatedPaths = activeLayer.paths ? activeLayer.paths.map((path) => {
                   return path.map((pt) => {
                     for (const item of oldPosList) {
-                      if (pt.rectData?.id !== rId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                      if (pt.rectData?.id !== rId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
                         return { ...pt, x: item.nx, y: item.ny };
                       }
                     }
@@ -7779,7 +7779,7 @@ export default function App() {
             oldPosList.forEach((item) => {
               for (let k = 0; k < updated.length; k++) {
                 if (updated[k].polygonData?.id !== polyId) {
-                  if (Math.hypot(updated[k].x - item.cx, updated[k].y - item.cy) < 0.05) {
+                  if (Math.hypot(updated[k].x - item.cx, updated[k].y - item.cy) < 1.5) {
                     updated[k] = { ...updated[k], x: item.nx, y: item.ny };
                   }
                 }
@@ -7792,7 +7792,7 @@ export default function App() {
             const updatedPaths = activeLayer.paths ? activeLayer.paths.map((path) => {
               return path.map((pt) => {
                 for (const item of oldPosList) {
-                  if (pt.polygonData?.id !== polyId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                  if (pt.polygonData?.id !== polyId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
                     return { ...pt, x: item.nx, y: item.ny };
                   }
                 }
@@ -7807,17 +7807,17 @@ export default function App() {
               if (i === dragIndexRef.current) {
                 return { ...pt, x, y };
               }
-              if (Math.hypot(pt.x - cx, pt.y - cy) < 0.05) {
+              if (Math.hypot(pt.x - cx, pt.y - cy) < 1.5) {
                 return { ...pt, x, y };
               }
               return pt;
             });
 
             // Ensure closed chain remains closed on endpoint movements
-            if (dragIndexRef.current === 0 || Math.hypot(finalPoints[0].x - cx, finalPoints[0].y - cy) < 0.05) {
+            if (dragIndexRef.current === 0 || Math.hypot(finalPoints[0].x - cx, finalPoints[0].y - cy) < 1.5) {
               updated[updated.length - 1] = { ...updated[0] };
             }
-            if (dragIndexRef.current === updated.length - 1 || Math.hypot(finalPoints[finalPoints.length - 1].x - cx, finalPoints[finalPoints.length - 1].y - cy) < 0.05) {
+            if (dragIndexRef.current === updated.length - 1 || Math.hypot(finalPoints[finalPoints.length - 1].x - cx, finalPoints[finalPoints.length - 1].y - cy) < 1.5) {
               updated[0] = { ...updated[updated.length - 1] };
             }
 
@@ -7826,7 +7826,7 @@ export default function App() {
             // Update coincident paths as well
             const updatedPaths = activeLayer.paths ? activeLayer.paths.map(path => {
               return path.map(pt => {
-                if (Math.hypot(pt.x - cx, pt.y - cy) < 0.05) {
+                if (Math.hypot(pt.x - cx, pt.y - cy) < 1.5) {
                   return { ...pt, x, y };
                 }
                 return pt;
@@ -7923,7 +7923,7 @@ export default function App() {
                   }
                   return path.map((pt) => {
                     for (const item of oldPosList) {
-                      if (pt.rectData?.id !== rId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                      if (pt.rectData?.id !== rId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
                         return { ...pt, x: item.nx, y: item.ny };
                       }
                     }
@@ -7934,7 +7934,7 @@ export default function App() {
 
                 const nextFinalPoints = finalPoints.map(pt => {
                   for (const item of oldPosList) {
-                    if (pt.rectData?.id !== rId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 0.05) {
+                    if (pt.rectData?.id !== rId && Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
                       return { ...pt, x: item.nx, y: item.ny };
                     }
                   }
@@ -7983,16 +7983,16 @@ export default function App() {
           } else {
             // Standard single vertex drag in completed paths
             const nextFinalPoints = finalPoints.map(pt => {
-              if (Math.hypot(pt.x - cx, pt.y - cy) < 0.05) {
+              if (Math.hypot(pt.x - cx, pt.y - cy) < 1.5) {
                 return { ...pt, x, y };
               }
               return pt;
             });
             if (finalPoints.length > 2 && distance(finalPoints[0], finalPoints[finalPoints.length - 1]) < 0.1) {
-              if (Math.hypot(finalPoints[0].x - cx, finalPoints[0].y - cy) < 0.05) {
+              if (Math.hypot(finalPoints[0].x - cx, finalPoints[0].y - cy) < 1.5) {
                 nextFinalPoints[nextFinalPoints.length - 1] = { ...nextFinalPoints[0] };
               }
-              if (Math.hypot(finalPoints[finalPoints.length - 1].x - cx, finalPoints[finalPoints.length - 1].y - cy) < 0.05) {
+              if (Math.hypot(finalPoints[finalPoints.length - 1].x - cx, finalPoints[finalPoints.length - 1].y - cy) < 1.5) {
                 nextFinalPoints[0] = { ...nextFinalPoints[nextFinalPoints.length - 1] };
               }
             }
@@ -8003,7 +8003,7 @@ export default function App() {
                 if (pIdx === pathIdx && i === dragIndexRef.current) {
                   return { ...pt, x, y };
                 }
-                if (Math.hypot(pt.x - cx, pt.y - cy) < 0.05) {
+                if (Math.hypot(pt.x - cx, pt.y - cy) < 1.5) {
                   return { ...pt, x, y };
                 }
                 return pt;
@@ -8011,10 +8011,10 @@ export default function App() {
 
               const isClosedLoop = distance(path[0], path[path.length - 1]) < 0.1;
               if (isClosedLoop) {
-                if (Math.hypot(path[0].x - cx, path[0].y - cy) < 0.05 || (pIdx === pathIdx && dragIndexRef.current === 0)) {
+                if (Math.hypot(path[0].x - cx, path[0].y - cy) < 1.5 || (pIdx === pathIdx && dragIndexRef.current === 0)) {
                   updatedP[updatedP.length - 1] = { ...updatedP[0] };
                 }
-                if (Math.hypot(path[path.length - 1].x - cx, path[path.length - 1].y - cy) < 0.05 || (pIdx === pathIdx && dragIndexRef.current === path.length - 1)) {
+                if (Math.hypot(path[path.length - 1].x - cx, path[path.length - 1].y - cy) < 1.5 || (pIdx === pathIdx && dragIndexRef.current === path.length - 1)) {
                   updatedP[0] = { ...updatedP[updatedP.length - 1] };
                 }
               }
