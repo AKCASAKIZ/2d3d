@@ -640,6 +640,28 @@ export default function App() {
   const [moveEntireShapeOnDimChange, setMoveEntireShapeOnDimChange] = useState<boolean>(true);
   const [moveEntireShapeOnCoordChange, setMoveEntireShapeOnCoordChange] = useState<boolean>(true);
 
+  // --- DYNAMIC INPUT STATES ---
+  const [liveLengthInput, setLiveLengthInput] = useState<string>('');
+  const [liveAngleInput, setLiveAngleInput] = useState<string>('');
+  const [liveRadiusInput, setLiveRadiusInput] = useState<string>('');
+  const [liveDiameterInput, setLiveDiameterInput] = useState<string>('');
+  const [liveWidthInput, setLiveWidthInput] = useState<string>('');
+  const [liveHeightInput, setLiveHeightInput] = useState<string>('');
+  const [activeFocusField, setActiveFocusField] = useState<string | null>(null);
+  const [dynamicOverridePt, setDynamicOverridePt] = useState<Point | null>(null);
+
+  // --- COINCIDENT VERTEX TRACKING REFS ---
+  const coincidentTrackedRefs = useRef<Array<{
+    type: 'finalPoints' | 'path';
+    pathIdx: number;
+    ptIdx: number;
+  }>>([]);
+  
+  const segmentCoincidentTrackedRefs = useRef<{
+    startRefs: Array<{ type: 'finalPoints' | 'path'; pathIdx: number; ptIdx: number }>;
+    endRefs: Array<{ type: 'finalPoints' | 'path'; pathIdx: number; ptIdx: number }>;
+  }>({ startRefs: [], endRefs: [] });
+
   // BG Image reference
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
   const [bgOpacity, setBgOpacity] = useState(0.4);
@@ -738,6 +760,86 @@ export default function App() {
       setActiveLayerId(remaining[0].id);
     }
     logCommandResponse(`Deleted layer "${layerToDelete?.name || id}".`);
+  };
+
+  // --- COINCIDENT VERTEX TRACKING POPULATORS ---
+  const populateCoincidentTrackedRefs = (cx: number, cy: number, excludePathIdx: number, excludePtIdx: number) => {
+    const refs: Array<{ type: 'finalPoints' | 'path'; pathIdx: number; ptIdx: number }> = [];
+    const threshold = Math.max(1.5, 3.0 / viewZoom);
+
+    // Scan finalPoints
+    finalPoints.forEach((pt, idx) => {
+      if (!(excludePathIdx === -1 && idx === excludePtIdx)) {
+        if (Math.hypot(pt.x - cx, pt.y - cy) < threshold) {
+          refs.push({ type: 'finalPoints', pathIdx: -1, ptIdx: idx });
+        }
+      }
+    });
+
+    // Scan paths
+    if (activeLayer && activeLayer.paths) {
+      activeLayer.paths.forEach((path, pIdx) => {
+        path.forEach((pt, idx) => {
+          if (!(excludePathIdx === pIdx && idx === excludePtIdx)) {
+            if (Math.hypot(pt.x - cx, pt.y - cy) < threshold) {
+              refs.push({ type: 'path', pathIdx: pIdx, ptIdx: idx });
+            }
+          }
+        });
+      });
+    }
+
+    coincidentTrackedRefs.current = refs;
+  };
+
+  const populateSegmentCoincidentTrackedRefs = (
+    startPt: Point,
+    endPt: Point,
+    excludePathIdx: number,
+    excludeStartPtIdx: number,
+    excludeEndPtIdx: number
+  ) => {
+    const startRefs: Array<{ type: 'finalPoints' | 'path'; pathIdx: number; ptIdx: number }> = [];
+    const endRefs: Array<{ type: 'finalPoints' | 'path'; pathIdx: number; ptIdx: number }> = [];
+    const threshold = Math.max(1.5, 3.0 / viewZoom);
+
+    // Scan finalPoints
+    finalPoints.forEach((pt, idx) => {
+      // For start point
+      if (!(excludePathIdx === -1 && idx === excludeStartPtIdx)) {
+        if (Math.hypot(pt.x - startPt.x, pt.y - startPt.y) < threshold) {
+          startRefs.push({ type: 'finalPoints', pathIdx: -1, ptIdx: idx });
+        }
+      }
+      // For end point
+      if (!(excludePathIdx === -1 && idx === excludeEndPtIdx)) {
+        if (Math.hypot(pt.x - endPt.x, pt.y - endPt.y) < threshold) {
+          endRefs.push({ type: 'finalPoints', pathIdx: -1, ptIdx: idx });
+        }
+      }
+    });
+
+    // Scan paths
+    if (activeLayer && activeLayer.paths) {
+      activeLayer.paths.forEach((path, pIdx) => {
+        path.forEach((pt, idx) => {
+          // For start point
+          if (!(excludePathIdx === pIdx && idx === excludeStartPtIdx)) {
+            if (Math.hypot(pt.x - startPt.x, pt.y - startPt.y) < threshold) {
+              startRefs.push({ type: 'path', pathIdx: pIdx, ptIdx: idx });
+            }
+          }
+          // For end point
+          if (!(excludePathIdx === pIdx && idx === excludeEndPtIdx)) {
+            if (Math.hypot(pt.x - endPt.x, pt.y - endPt.y) < threshold) {
+              endRefs.push({ type: 'path', pathIdx: pIdx, ptIdx: idx });
+            }
+          }
+        });
+      });
+    }
+
+    segmentCoincidentTrackedRefs.current = { startRefs, endRefs };
   };
 
   // Save state helper
@@ -7086,6 +7188,7 @@ export default function App() {
             setSelectedVertexIdx(i);
             setSelectedPathIdx(-1);
             found = true;
+            populateCoincidentTrackedRefs(finalPoints[i].x, finalPoints[i].y, -1, i);
             break;
           }
         }
@@ -7101,6 +7204,7 @@ export default function App() {
               setSelectedVertexIdx(i);
               setSelectedPathIdx(pathIdx);
               found = true;
+              populateCoincidentTrackedRefs(path[i].x, path[i].y, pathIdx, i);
               break;
             }
           }
@@ -7204,6 +7308,15 @@ export default function App() {
               startY: y,
               originalPoints: originalPointsToSave
             });
+            const p1 = originalPointsToSave[clickedSegmentIdx];
+            const p2 = originalPointsToSave[(clickedSegmentIdx + 1) % originalPointsToSave.length];
+            populateSegmentCoincidentTrackedRefs(
+              p1,
+              p2,
+              clickedPathIdx,
+              clickedSegmentIdx,
+              (clickedSegmentIdx + 1) % originalPointsToSave.length
+            );
             logCommandResponse("Kenar Esnetme (Stretch) Aktif: Kenarı gerip uzatmak için imlecinizi hareket ettirin.");
             found = true;
           } else {
@@ -7285,6 +7398,167 @@ export default function App() {
       setIsClosed(false);
       isDrawingRef.current = true;
       setRawPoints([{ x, y }]);
+    }
+  };
+
+  // --- PARAMETRIC DYNAMIC INPUTS OVERRIDE ENGINE ---
+  const getDynamicInputOverride = (mouseX: number, mouseY: number): Point => {
+    if (clickCount > 0 && finalPoints.length > 0) {
+      const p1 = finalPoints[finalPoints.length - 1];
+
+      if (currentCommand === 'line') {
+        const len = parseFloat(liveLengthInput);
+        const ang = parseFloat(liveAngleInput);
+
+        const hasLen = !isNaN(len) && len > 0;
+        const hasAng = !isNaN(ang);
+
+        if (hasLen && hasAng) {
+          const rad = (ang * Math.PI) / 180;
+          return {
+            x: p1.x + len * Math.cos(rad),
+            y: p1.y + len * Math.sin(rad)
+          };
+        } else if (hasLen) {
+          const dx = mouseX - p1.x;
+          const dy = mouseY - p1.y;
+          const d = Math.hypot(dx, dy);
+          if (d > 0.001) {
+            return {
+              x: p1.x + (dx / d) * len,
+              y: p1.y + (dy / d) * len
+            };
+          }
+        } else if (hasAng) {
+          const rad = (ang * Math.PI) / 180;
+          const dx = mouseX - p1.x;
+          const dy = mouseY - p1.y;
+          const projLen = dx * Math.cos(rad) + dy * Math.sin(rad);
+          return {
+            x: p1.x + projLen * Math.cos(rad),
+            y: p1.y + projLen * Math.sin(rad)
+          };
+        }
+      } else if (currentCommand === 'circle') {
+        const center = p1;
+        const radiusVal = parseFloat(liveRadiusInput);
+        const diameterVal = parseFloat(liveDiameterInput);
+
+        const r = !isNaN(radiusVal) && radiusVal > 0 
+          ? radiusVal 
+          : (!isNaN(diameterVal) && diameterVal > 0 ? diameterVal / 2 : null);
+
+        if (r !== null) {
+          const dx = mouseX - center.x;
+          const dy = mouseY - center.y;
+          const d = Math.hypot(dx, dy);
+          if (d > 0.001) {
+            return {
+              x: center.x + (dx / d) * r,
+              y: center.y + (dy / d) * r
+            };
+          } else {
+            return {
+              x: center.x + r,
+              y: center.y
+            };
+          }
+        }
+      } else if (currentCommand === 'rect') {
+        const widthVal = parseFloat(liveWidthInput);
+        const heightVal = parseFloat(liveHeightInput);
+
+        const hasW = !isNaN(widthVal) && widthVal > 0;
+        const hasH = !isNaN(heightVal) && heightVal > 0;
+
+        const signX = mouseX >= p1.x ? 1 : -1;
+        const signY = mouseY >= p1.y ? 1 : -1;
+
+        let rx = mouseX;
+        let ry = mouseY;
+
+        if (hasW) {
+          rx = p1.x + signX * widthVal;
+        }
+        if (hasH) {
+          ry = p1.y + signY * heightVal;
+        }
+        return { x: rx, y: ry };
+      }
+    }
+    return { x: mouseX, y: mouseY };
+  };
+
+  useEffect(() => {
+    setLiveLengthInput('');
+    setLiveAngleInput('');
+    setLiveRadiusInput('');
+    setLiveDiameterInput('');
+    setLiveWidthInput('');
+    setLiveHeightInput('');
+  }, [currentCommand, clickCount]);
+
+  const handleCommitParametricPoint = () => {
+    if (!tempPoint) return;
+    const { x, y } = tempPoint;
+
+    if (currentCommand === 'line') {
+      saveState([...finalPoints, { x, y }]);
+      setFinalPoints((prev) => [...prev, { x, y }]);
+      setLiveLengthInput('');
+      setLiveAngleInput('');
+      logCommandResponse(`Nokta eklendi: X=${x.toFixed(1)} mm, Y=${y.toFixed(1)} mm`);
+    } else if (currentCommand === 'circle') {
+      if (clickCount === 0) {
+        setFinalPoints([{ x, y }]);
+        setClickCount(1);
+        logCommandResponse("Daire: Merkez seçildi. Yarıçap veya çap girin.");
+      } else {
+        const center = finalPoints[0];
+        const radius = Math.hypot(x - center.x, y - center.y);
+        const points: Point[] = [];
+        for (let i = 0; i <= 64; i++) {
+          const angle = (i * Math.PI * 2) / 64;
+          points.push({
+            x: center.x + radius * Math.cos(angle),
+            y: center.y + radius * Math.sin(angle),
+            isCurvePoint: true,
+            circleData: { center, radius }
+          });
+        }
+        saveState(points, true, 0);
+        setFinalPoints(points);
+        setIsClosed(true);
+        setClickCount(0);
+        setTempPoint(null);
+        setDrawMode('drag');
+        clearCommand();
+        logCommandResponse(`Daire başarıyla oluşturuldu: R = ${radius.toFixed(1)} mm.`);
+      }
+    } else if (currentCommand === 'rect') {
+      if (clickCount === 0) {
+        setFinalPoints([{ x, y }]);
+        setClickCount(1);
+        logCommandResponse("Dikdörtgen: Köşe seçildi. Genişlik ve yükseklik girin.");
+      } else {
+        const p1 = finalPoints[0];
+        const rectId = 'rect_' + Math.random().toString(36).substring(2, 9);
+        const polyRect = [
+          { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 0 } },
+          { x: x, y: p1.y, rectData: { id: rectId, vertexIndex: 1 } },
+          { x: x, y: y, rectData: { id: rectId, vertexIndex: 2 } },
+          { x: p1.x, y: y, rectData: { id: rectId, vertexIndex: 3 } },
+          { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 4 } },
+        ];
+        saveState(polyRect, true, 0);
+        setFinalPoints(polyRect);
+        setIsClosed(true);
+        setClickCount(0);
+        setTempPoint(null);
+        setDrawMode('drag');
+        clearCommand();
+        logCommandResponse(`Dikdörtgen başarıyla oluşturuldu.`);
+      }
     }
   };
 
@@ -7394,21 +7668,48 @@ export default function App() {
         ? (segmentIdx + 1) % originalPoints.length 
         : segmentIdx + 1;
 
-      const oldPosList: { cx: number; cy: number; nx: number; ny: number }[] = [];
+      const nextFinalPoints = [...finalPoints];
+      const nextPaths = activeLayer.paths ? activeLayer.paths.map(p => [...p]) : [];
+
+      // Helper to update ref coordinates
+      const updateRef = (ref: { type: 'finalPoints' | 'path'; pathIdx: number; ptIdx: number }, newX: number, newY: number) => {
+        if (ref.type === 'finalPoints') {
+          if (nextFinalPoints[ref.ptIdx]) {
+            nextFinalPoints[ref.ptIdx] = { ...nextFinalPoints[ref.ptIdx], x: newX, y: newY };
+          }
+        } else {
+          const path = nextPaths[ref.pathIdx];
+          if (path && path[ref.ptIdx]) {
+            path[ref.ptIdx] = { ...path[ref.ptIdx], x: newX, y: newY };
+          }
+        }
+      };
+
+      // Apply updates to stretched segment endpoints
+      const orgStartPt = originalPoints[i];
+      const orgEndPt = originalPoints[j];
+      const newStartX = orgStartPt.x + dx;
+      const newStartY = orgStartPt.y + dy;
+      const newEndX = orgEndPt ? orgEndPt.x + dx : newStartX;
+      const newEndY = orgEndPt ? orgEndPt.y + dy : newStartY;
+
+      // Update the stretched path itself
       const updated = originalPoints.map((p, idx) => {
-        if (idx === i || (idx === j && j < originalPoints.length)) {
-          const updatedPt: Point = {
-            ...p,
-            x: p.x + dx,
-            y: p.y + dy,
-          };
-          oldPosList.push({ cx: p.x, cy: p.y, nx: p.x + dx, ny: p.y + dy });
+        if (idx === i) {
+          const updatedPt = { ...p, x: newStartX, y: newStartY };
           if (p.circleData) {
             updatedPt.circleData = {
-              center: {
-                x: p.circleData.center.x + dx,
-                y: p.circleData.center.y + dy
-              },
+              center: { x: p.circleData.center.x + dx, y: p.circleData.center.y + dy },
+              radius: p.circleData.radius
+            };
+          }
+          return updatedPt;
+        }
+        if (idx === j && j < originalPoints.length) {
+          const updatedPt = { ...p, x: newEndX, y: newEndY };
+          if (p.circleData) {
+            updatedPt.circleData = {
+              center: { x: p.circleData.center.x + dx, y: p.circleData.center.y + dy },
               radius: p.circleData.radius
             };
           }
@@ -7418,55 +7719,39 @@ export default function App() {
       });
 
       if (pathIdx === -1) {
-        setFinalPoints(updated);
-
-        // Update coincident paths
-        const updatedPaths = activeLayer.paths ? activeLayer.paths.map(path => {
-          return path.map(pt => {
-            for (const item of oldPosList) {
-              if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
-                return { ...pt, x: item.nx, y: item.ny };
-              }
-            }
-            return pt;
-          });
-        }) : [];
-        setPaths(updatedPaths);
+        updated.forEach((p, idx) => {
+          if (idx < nextFinalPoints.length) {
+            nextFinalPoints[idx] = p;
+          }
+        });
       } else {
-        const nextPaths = activeLayer.paths ? [...activeLayer.paths] : [];
         nextPaths[pathIdx] = updated;
-
-        // Update coincident finalPoints
-        const nextFinalPoints = finalPoints.map(pt => {
-          for (const item of oldPosList) {
-            if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
-              return { ...pt, x: item.nx, y: item.ny };
-            }
-          }
-          return pt;
-        });
-        setFinalPoints(nextFinalPoints);
-
-        // Update other paths
-        nextPaths.forEach((path, pIdx) => {
-          if (pIdx !== pathIdx) {
-            let changed = false;
-            const nextPath = path.map(pt => {
-              for (const item of oldPosList) {
-                if (Math.hypot(pt.x - item.cx, pt.y - item.cy) < 1.5) {
-                  changed = true;
-                  return { ...pt, x: item.nx, y: item.ny };
-                }
-              }
-              return pt;
-            });
-            if (changed) {
-              nextPaths[pIdx] = nextPath;
-            }
-          }
-        });
-        setPaths(nextPaths);
       }
+
+      // Update all pre-recorded coincident vertices
+      segmentCoincidentTrackedRefs.current.startRefs.forEach(ref => {
+        updateRef(ref, newStartX, newStartY);
+      });
+      segmentCoincidentTrackedRefs.current.endRefs.forEach(ref => {
+        updateRef(ref, newEndX, newEndY);
+      });
+
+      // Special endpoint closure handling
+      if (nextFinalPoints.length > 2 && Math.hypot(nextFinalPoints[0].x - nextFinalPoints[nextFinalPoints.length - 1].x, nextFinalPoints[0].y - nextFinalPoints[nextFinalPoints.length - 1].y) < 2.0) {
+        if (pathIdx === -1 && (i === 0 || i === nextFinalPoints.length - 1 || j === 0 || j === nextFinalPoints.length - 1)) {
+          nextFinalPoints[nextFinalPoints.length - 1] = { ...nextFinalPoints[0] };
+        }
+      }
+      nextPaths.forEach((path, pIdx) => {
+        if (path.length > 2 && Math.hypot(path[0].x - path[path.length - 1].x, path[0].y - path[path.length - 1].y) < 2.0) {
+          if (pIdx === pathIdx && (i === 0 || i === path.length - 1 || j === 0 || j === path.length - 1)) {
+            nextPaths[pIdx][path.length - 1] = { ...nextPaths[pIdx][0] };
+          }
+        }
+      });
+
+      setFinalPoints(nextFinalPoints);
+      setPaths(nextPaths);
       return;
     }
 
@@ -7610,6 +7895,10 @@ export default function App() {
       const snapData = calculateSnaps(x, y, finalPoints, isClosed, -1, smartSnap, 10 / viewZoom, activeLayer.paths, gridSnap, gridSize, customAnchor, snapToggles);
       x = snapData.x;
       y = snapData.y;
+
+      const overriddenPt = getDynamicInputOverride(x, y);
+      x = overriddenPt.x;
+      y = overriddenPt.y;
 
       if (currentCommand === 'dimension') {
         const axisSnapTol = 12 / viewZoom;
@@ -7803,36 +8092,42 @@ export default function App() {
 
           } else {
             // Standard single vertex drag in finalPoints
-            const updated = finalPoints.map((pt, i) => {
-              if (i === dragIndexRef.current) {
-                return { ...pt, x, y };
+            const nextFinalPoints = [...finalPoints];
+            const nextPaths = activeLayer.paths ? activeLayer.paths.map(p => [...p]) : [];
+
+            const updateRef = (ref: { type: 'finalPoints' | 'path'; pathIdx: number; ptIdx: number }, newX: number, newY: number) => {
+              if (ref.type === 'finalPoints') {
+                if (nextFinalPoints[ref.ptIdx]) {
+                  nextFinalPoints[ref.ptIdx] = { ...nextFinalPoints[ref.ptIdx], x: newX, y: newY };
+                }
+              } else {
+                const path = nextPaths[ref.pathIdx];
+                if (path && path[ref.ptIdx]) {
+                  path[ref.ptIdx] = { ...path[ref.ptIdx], x: newX, y: newY };
+                }
               }
-              if (Math.hypot(pt.x - cx, pt.y - cy) < 1.5) {
-                return { ...pt, x, y };
-              }
-              return pt;
+            };
+
+            // Update dragged vertex
+            if (nextFinalPoints[dragIndexRef.current]) {
+              nextFinalPoints[dragIndexRef.current] = { ...nextFinalPoints[dragIndexRef.current], x, y };
+            }
+
+            // Update coincident vertices
+            coincidentTrackedRefs.current.forEach(ref => {
+              updateRef(ref, x, y);
             });
 
             // Ensure closed chain remains closed on endpoint movements
             if (dragIndexRef.current === 0 || Math.hypot(finalPoints[0].x - cx, finalPoints[0].y - cy) < 1.5) {
-              updated[updated.length - 1] = { ...updated[0] };
+              nextFinalPoints[nextFinalPoints.length - 1] = { ...nextFinalPoints[0] };
             }
-            if (dragIndexRef.current === updated.length - 1 || Math.hypot(finalPoints[finalPoints.length - 1].x - cx, finalPoints[finalPoints.length - 1].y - cy) < 1.5) {
-              updated[0] = { ...updated[updated.length - 1] };
+            if (dragIndexRef.current === nextFinalPoints.length - 1 || Math.hypot(finalPoints[finalPoints.length - 1].x - cx, finalPoints[finalPoints.length - 1].y - cy) < 1.5) {
+              nextFinalPoints[0] = { ...nextFinalPoints[nextFinalPoints.length - 1] };
             }
 
-            setFinalPoints(updated);
-
-            // Update coincident paths as well
-            const updatedPaths = activeLayer.paths ? activeLayer.paths.map(path => {
-              return path.map(pt => {
-                if (Math.hypot(pt.x - cx, pt.y - cy) < 1.5) {
-                  return { ...pt, x, y };
-                }
-                return pt;
-              });
-            }) : [];
-            setPaths(updatedPaths);
+            setFinalPoints(nextFinalPoints);
+            setPaths(nextPaths);
           }
         } else {
           // Dragging a completed path vertex
@@ -7982,45 +8277,49 @@ export default function App() {
             }
           } else {
             // Standard single vertex drag in completed paths
-            const nextFinalPoints = finalPoints.map(pt => {
-              if (Math.hypot(pt.x - cx, pt.y - cy) < 1.5) {
-                return { ...pt, x, y };
+            const nextFinalPoints = [...finalPoints];
+            const nextPaths = updatedPaths.map(p => [...p]);
+
+            const updateRef = (ref: { type: 'finalPoints' | 'path'; pathIdx: number; ptIdx: number }, newX: number, newY: number) => {
+              if (ref.type === 'finalPoints') {
+                if (nextFinalPoints[ref.ptIdx]) {
+                  nextFinalPoints[ref.ptIdx] = { ...nextFinalPoints[ref.ptIdx], x: newX, y: newY };
+                }
+              } else {
+                const path = nextPaths[ref.pathIdx];
+                if (path && path[ref.ptIdx]) {
+                  path[ref.ptIdx] = { ...path[ref.ptIdx], x: newX, y: newY };
+                }
               }
-              return pt;
-            });
-            if (finalPoints.length > 2 && distance(finalPoints[0], finalPoints[finalPoints.length - 1]) < 0.1) {
-              if (Math.hypot(finalPoints[0].x - cx, finalPoints[0].y - cy) < 1.5) {
-                nextFinalPoints[nextFinalPoints.length - 1] = { ...nextFinalPoints[0] };
-              }
-              if (Math.hypot(finalPoints[finalPoints.length - 1].x - cx, finalPoints[finalPoints.length - 1].y - cy) < 1.5) {
-                nextFinalPoints[0] = { ...nextFinalPoints[nextFinalPoints.length - 1] };
-              }
+            };
+
+            // Update dragged vertex
+            if (nextPaths[pathIdx] && nextPaths[pathIdx][dragIndexRef.current]) {
+              nextPaths[pathIdx][dragIndexRef.current] = { ...nextPaths[pathIdx][dragIndexRef.current], x, y };
             }
-            setFinalPoints(nextFinalPoints);
 
-            const nextPaths = updatedPaths.map((path, pIdx) => {
-              const updatedP = path.map((pt, i) => {
-                if (pIdx === pathIdx && i === dragIndexRef.current) {
-                  return { ...pt, x, y };
-                }
-                if (Math.hypot(pt.x - cx, pt.y - cy) < 1.5) {
-                  return { ...pt, x, y };
-                }
-                return pt;
-              });
-
-              const isClosedLoop = distance(path[0], path[path.length - 1]) < 0.1;
-              if (isClosedLoop) {
-                if (Math.hypot(path[0].x - cx, path[0].y - cy) < 1.5 || (pIdx === pathIdx && dragIndexRef.current === 0)) {
-                  updatedP[updatedP.length - 1] = { ...updatedP[0] };
-                }
-                if (Math.hypot(path[path.length - 1].x - cx, path[path.length - 1].y - cy) < 1.5 || (pIdx === pathIdx && dragIndexRef.current === path.length - 1)) {
-                  updatedP[0] = { ...updatedP[updatedP.length - 1] };
-                }
-              }
-              return updatedP;
+            // Update coincident vertices
+            coincidentTrackedRefs.current.forEach(ref => {
+              updateRef(ref, x, y);
             });
 
+            // Handle loop closures
+            nextPaths.forEach((path, pIdx) => {
+              const isClosedLoop = distance(path[0], path[path.length - 1]) < 2.0;
+              if (isClosedLoop) {
+                if (pIdx === pathIdx && dragIndexRef.current === 0) {
+                  path[path.length - 1] = { ...path[0] };
+                } else if (pIdx === pathIdx && dragIndexRef.current === path.length - 1) {
+                  path[0] = { ...path[path.length - 1] };
+                } else if (Math.hypot(path[0].x - cx, path[0].y - cy) < 1.5) {
+                  path[path.length - 1] = { ...path[0] };
+                } else if (Math.hypot(path[path.length - 1].x - cx, path[path.length - 1].y - cy) < 1.5) {
+                  path[0] = { ...path[path.length - 1] };
+                }
+              }
+            });
+
+            setFinalPoints(nextFinalPoints);
             setPaths(nextPaths);
           }
         }
@@ -13935,6 +14234,156 @@ export default function App() {
                 </div>
               );
             })()}
+
+            {/* Dynamic Parametric Coordinate Input HUD */}
+            {['line', 'circle', 'rect'].includes(currentCommand) && (
+              <div className="absolute bottom-3 left-1/2 transform -translate-x-1/2 bg-zinc-900/95 border-2 border-emerald-500/80 backdrop-blur rounded-xl p-3 shadow-2xl z-20 flex flex-col gap-2 min-w-[280px] sm:min-w-[340px] max-w-[450px]">
+                <div className="flex justify-between items-center pb-1 border-b border-zinc-800">
+                  <span className="font-bold text-emerald-400 font-mono flex items-center gap-1.5 uppercase tracking-wide text-[10px]">
+                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    PARAMETRIC ENTRY: {currentCommand}
+                  </span>
+                  <span className="text-[9px] text-zinc-500 font-mono">Step: {clickCount === 0 ? "1. Select Center/Start" : "2. Set Size"}</span>
+                </div>
+
+                {clickCount === 0 ? (
+                  <div className="text-[10.5px] text-zinc-400 py-1.5 px-1 font-mono leading-relaxed select-none text-center">
+                    🖱️ Click on canvas to place the <span className="text-emerald-300 font-extrabold">{currentCommand === 'line' ? 'start point' : currentCommand === 'circle' ? 'center point' : 'first corner'}</span> first, then enter dimensions.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 py-1">
+                    {currentCommand === 'line' && (
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <label className="block text-[9px] text-zinc-400 uppercase font-mono mb-1">Segment Length (mm):</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={liveLengthInput}
+                            onChange={(e) => setLiveLengthInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleCommitParametricPoint();
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-500 rounded px-2 py-1 text-zinc-100 font-mono outline-none font-bold"
+                            placeholder="e.g. 100"
+                            autoFocus
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-zinc-400 uppercase font-mono mb-1">Angle (Degrees °):</label>
+                          <input
+                            type="number"
+                            step="1"
+                            value={liveAngleInput}
+                            onChange={(e) => setLiveAngleInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleCommitParametricPoint();
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-500 rounded px-2 py-1 text-zinc-100 font-mono outline-none font-bold"
+                            placeholder="0 to 360"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {currentCommand === 'circle' && (
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <label className="block text-[9px] text-zinc-400 uppercase font-mono mb-1">Radius (R - mm):</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={liveRadiusInput}
+                            onChange={(e) => {
+                              setLiveRadiusInput(e.target.value);
+                              const val = parseFloat(e.target.value);
+                              setLiveDiameterInput(!isNaN(val) ? (val * 2).toString() : '');
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleCommitParametricPoint();
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-500 rounded px-2 py-1 text-zinc-100 font-mono outline-none font-bold"
+                            placeholder="e.g. 50"
+                            autoFocus
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-zinc-400 uppercase font-mono mb-1">Diameter (Ø - mm):</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={liveDiameterInput}
+                            onChange={(e) => {
+                              setLiveDiameterInput(e.target.value);
+                              const val = parseFloat(e.target.value);
+                              setLiveRadiusInput(!isNaN(val) ? (val / 2).toString() : '');
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleCommitParametricPoint();
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-500 rounded px-2 py-1 text-zinc-100 font-mono outline-none font-bold"
+                            placeholder="e.g. 100"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {currentCommand === 'rect' && (
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <label className="block text-[9px] text-zinc-400 uppercase font-mono mb-1">Width (X - mm):</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={liveWidthInput}
+                            onChange={(e) => setLiveWidthInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleCommitParametricPoint();
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-500 rounded px-2 py-1 text-zinc-100 font-mono outline-none font-bold"
+                            placeholder="e.g. 120"
+                            autoFocus
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] text-zinc-400 uppercase font-mono mb-1">Height (Y - mm):</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={liveHeightInput}
+                            onChange={(e) => setLiveHeightInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleCommitParametricPoint();
+                            }}
+                            className="w-full bg-zinc-950 border border-zinc-800 focus:border-emerald-500 rounded px-2 py-1 text-zinc-100 font-mono outline-none font-bold"
+                            placeholder="e.g. 80"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={handleCommitParametricPoint}
+                        className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold transition text-center cursor-pointer text-[10.5px] font-mono shadow-md uppercase tracking-wider"
+                      >
+                        {currentCommand === 'line' ? 'Commit Vertex (Enter)' : 'Create Shape (Enter)'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          clearCommand();
+                          setTempPoint(null);
+                          setClickCount(0);
+                        }}
+                        className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-zinc-400 hover:text-white rounded transition text-[10.5px] font-mono uppercase tracking-wider"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Absolute Origin Coordinate HUD */}
             <div className="absolute bottom-3 left-3 bg-zinc-900/90 border border-zinc-850 backdrop-blur px-3 py-2 rounded text-xs font-mono text-zinc-400 pointer-events-none flex flex-col gap-1 z-10 shadow-lg min-w-[140px]">
