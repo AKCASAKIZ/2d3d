@@ -38,6 +38,7 @@ import {
   Grid,
   Zap,
   ArrowRightLeft,
+  Magnet,
 } from 'lucide-react';
 
 import { Point, CommandType, DrawModeType, HistoryItem, SnapPoint, TrackLine, CADLayer, PathSettings, SnapToggles } from './types';
@@ -687,6 +688,7 @@ export default function App() {
   const [editingDimensionValue, setEditingDimensionValue] = useState<string>("");
   const [splitRatio, setSplitRatio] = useState<number>(50);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [isSnapPanelExpanded, setIsSnapPanelExpanded] = useState<boolean>(true);
   const [showDims, setShowDims] = useState(false);
   const [polygonSides, setPolygonSides] = useState(6);
   const [polygonType, setPolygonType] = useState<'corner' | 'midpoint'>('corner');
@@ -2525,6 +2527,25 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT') return;
+      if (e.key === 'F3') {
+        e.preventDefault();
+        setSnapToggles(prev => {
+          const allActive = Object.values(prev).every(Boolean);
+          const nextVal = !allActive;
+          logCommandResponse(`O-SNAP Kenetlenme ${nextVal ? 'AKTİF EDİLDİ' : 'DEVRE DIŞI BIRAKILDI'} (F3)`);
+          return {
+            origin: nextVal,
+            end: nextVal,
+            mid: nextVal,
+            int: nextVal,
+            tan: nextVal,
+            quad: nextVal,
+            near: nextVal,
+            extension: nextVal
+          };
+        });
+        return;
+      }
       if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
         handleUndo();
@@ -10318,11 +10339,23 @@ export default function App() {
     if (loops.length === 0) return 0;
 
     const sortedLoops = loops
-      .map(points => ({
-        points,
-        area: getPointsArea(points),
-        center: getPointsCentroid(points)
-      }))
+      .map(points => {
+        let booleanType = 'union';
+        if (points === finalPoints) {
+          booleanType = activeLayer.finalPointsSettings?.booleanType || 'union';
+        } else if (activeLayer.paths) {
+          const pathIdx = activeLayer.paths.indexOf(points);
+          if (pathIdx !== -1 && activeLayer.pathSettings?.[pathIdx]) {
+            booleanType = activeLayer.pathSettings[pathIdx].booleanType || 'union';
+          }
+        }
+        return {
+          points,
+          area: getPointsArea(points),
+          center: getPointsCentroid(points),
+          booleanType
+        };
+      })
       .sort((a, b) => b.area - a.area);
 
     const unions: { outer: any; holes: any[] }[] = [];
@@ -10334,17 +10367,46 @@ export default function App() {
           break;
         }
       }
+
+      // If it's a cut but nestedIndex is -1, perform generalized overlap checking
+      if (nestedIndex === -1 && loop.booleanType === 'cut') {
+        for (let i = 0; i < unions.length; i++) {
+          const anyPtInUnion = loop.points.some(p => isPointInPolygon(p, unions[i].outer.points));
+          const anyUnionPtInHole = unions[i].outer.points.some(p => isPointInPolygon(p, loop.points));
+          if (anyPtInUnion || anyUnionPtInHole) {
+            nestedIndex = i;
+            break;
+          }
+        }
+      }
+
       if (nestedIndex !== -1) {
         unions[nestedIndex].holes.push(loop);
       } else {
-        unions.push({ outer: loop, holes: [] });
+        if (loop.booleanType !== 'cut') {
+          unions.push({ outer: loop, holes: [] });
+        }
       }
     });
+
+    const getHoleIntersectionArea = (holePoints: Point[], outerPoints: Point[], totalHoleArea: number): number => {
+      let insideCount = 0;
+      holePoints.forEach(p => {
+        if (isPointInPolygon(p, outerPoints)) {
+          insideCount++;
+        }
+      });
+      const ratio = insideCount / (holePoints.length || 1);
+      return totalHoleArea * ratio;
+    };
 
     let totalVolume = 0;
 
     unions.forEach(({ outer, holes }) => {
-      const activeArea = Math.max(0, outer.area - holes.reduce((acc, h) => acc + h.area, 0));
+      const activeArea = Math.max(0, outer.area - holes.reduce((acc, h) => {
+        const intersectArea = getHoleIntersectionArea(h.points, outer.points, h.area);
+        return acc + intersectArea;
+      }, 0));
       if (opType === 'extrude') {
         totalVolume += activeArea * depth;
       } else if (opType === 'revolve') {
@@ -11505,6 +11567,69 @@ export default function App() {
                         </button>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* 1.2 Object Snapping (O-SNAP) Control Panel */}
+                <div className="mt-3 bg-white p-3 rounded-lg border border-slate-200 space-y-2.5 shadow-xs">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1.55">
+                    <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono flex items-center gap-1">
+                      <Magnet className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                      <span>Object Snapping (O-SNAP)</span>
+                    </span>
+                    <button
+                      onClick={() => {
+                        const allActive = Object.values(snapToggles).every(Boolean);
+                        setSnapToggles({
+                          origin: !allActive,
+                          end: !allActive,
+                          mid: !allActive,
+                          int: !allActive,
+                          tan: !allActive,
+                          quad: !allActive,
+                          near: !allActive,
+                          extension: !allActive
+                        });
+                      }}
+                      className="text-[9.5px] text-orange-600 hover:text-orange-700 font-bold hover:underline transition"
+                    >
+                      {Object.values(snapToggles).every(Boolean) ? "All Off" : "All On"}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { key: 'end', label: 'Endpoint', title: 'Line/Arc Endpoints (Uç Nokta)' },
+                      { key: 'mid', label: 'Midpoint', title: 'Line Segment centerpoint (Orta Nokta)' },
+                      { key: 'int', label: 'Intersection', title: 'Intersections between segments (Kesişim)' },
+                      { key: 'tan', label: 'Tangent', title: 'Circle and Arc Tangents (Teğet)' },
+                      { key: 'quad', label: 'Quadrant', title: 'Circle 0, 90, 180, 270 angles (Çeyrek Nokta)' },
+                      { key: 'near', label: 'Nearest', title: 'Closest point on any line (Çizgi Üstü)' },
+                      { key: 'origin', label: 'Origin', title: 'CAD Coordinate Reference (Orijin 0,0)' },
+                      { key: 'extension', label: 'Track Align', title: 'Alignment helper tracks (Hizalama İzleme)' },
+                    ].map((snap) => {
+                      const active = snapToggles[snap.key as keyof typeof snapToggles];
+                      return (
+                        <button
+                          key={snap.key}
+                          onClick={() => setSnapToggles(prev => ({ ...prev, [snap.key]: !prev[snap.key] }))}
+                          className={`flex flex-col text-left px-2 py-1.5 rounded-lg border transition cursor-pointer select-none leading-tight ${
+                            active
+                              ? 'bg-orange-50/50 border-orange-300 text-orange-800 ring-1 ring-orange-200/50 animate-fade-in'
+                              : 'bg-slate-50/50 border-slate-150 text-slate-500 hover:bg-slate-100/50 hover:border-slate-200'
+                          }`}
+                          title={snap.title}
+                        >
+                          <span className="text-[10px] font-bold block truncate">{snap.label}</span>
+                          <span className="text-[8.5px] font-mono text-slate-400 capitalize pt-0.5">
+                            {active ? '● ON (aktif)' : '○ OFF'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="text-[8.5px] text-slate-400 font-mono flex items-center justify-between px-1">
+                    <span>Press <kbd className="bg-slate-100 px-1.5 py-0.5 border border-slate-200 text-[9px] rounded font-bold font-mono">F3</kbd> to toggle all</span>
                   </div>
                 </div>
 
@@ -14182,6 +14307,119 @@ export default function App() {
             <div className="absolute top-3 left-3 bg-zinc-900/85 border border-zinc-850 backdrop-blur px-3 py-1.5 rounded text-xs font-mono text-zinc-300 pointer-events-none flex items-center gap-2 z-10 font-bold">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               2D Schematic Sketcher
+            </div>
+
+            {/* Floating Object Snapping Mini Panel of Draw Tools */}
+            <div className="absolute top-12 left-3 z-30 flex flex-col items-start gap-1">
+              {!isSnapPanelExpanded ? (
+                <button
+                  onClick={() => setIsSnapPanelExpanded(true)}
+                  className="bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white p-2 rounded-lg shadow-lg flex items-center gap-1.5 transition duration-150 relative cursor-pointer"
+                  title="Objektleri Yakala (F3) - Kenetlenme Menüsünü Aç"
+                >
+                  <Magnet className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider pr-1">Snap Toolbar</span>
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full border border-zinc-950" />
+                </button>
+              ) : (
+                <div className="bg-zinc-900/95 border border-zinc-800 backdrop-blur rounded-xl p-2.5 shadow-2xl flex flex-col gap-2 min-w-[210px] max-w-[240px] text-zinc-300 border-t-2 border-t-orange-500 select-none animate-fade-in">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800/80">
+                    <span className="font-extrabold text-zinc-200 font-sans flex items-center gap-1 uppercase tracking-wide text-[9.5px]">
+                      <Magnet className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
+                      <span>O-SNAP CONTROL</span>
+                    </span>
+                    <button
+                      onClick={() => setIsSnapPanelExpanded(false)}
+                      className="text-zinc-500 hover:text-zinc-200 transition text-[10px] font-bold p-0.5 rounded hover:bg-zinc-850 font-sans"
+                      title="Hide Toolbar"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="space-y-1 max-h-[220px] overflow-y-auto pr-0.5 select-none text-[10px] font-mono">
+                    {[
+                      { key: 'end', label: 'Endpoint (Corner)', shortcut: 'Uç Nokta' },
+                      { key: 'mid', label: 'Midpoint (Center)', shortcut: 'Orta Nokta' },
+                      { key: 'int', label: 'Intersection', shortcut: 'Kesişim' },
+                      { key: 'tan', label: 'Tangent (Circ)', shortcut: 'Teğet' },
+                      { key: 'quad', label: 'Quadrant (90°)', shortcut: 'Çeyrek' },
+                      { key: 'near', label: 'Nearest (OnLine)', shortcut: 'En Yakın' },
+                      { key: 'origin', label: 'Origin (0,0)', shortcut: 'Orijin' },
+                      { key: 'extension', label: 'Track Align', shortcut: 'Kılavuz' },
+                    ].map((snap) => {
+                      const active = snapToggles[snap.key as keyof typeof snapToggles];
+                      return (
+                        <label
+                          key={snap.key}
+                          className="flex items-center justify-between gap-2 p-1 px-1.5 rounded hover:bg-zinc-800/50 cursor-pointer transition"
+                        >
+                          <div className="flex items-center gap-1.5 font-bold">
+                            <input
+                              type="checkbox"
+                              checked={active}
+                              onChange={() => setSnapToggles(prev => ({ ...prev, [snap.key]: !prev[snap.key] }))}
+                              className="rounded bg-zinc-950 border-zinc-800 text-orange-500 focus:ring-orange-500/50 cursor-pointer w-3.5 h-3.5 scale-90"
+                            />
+                            <span className={active ? "text-zinc-100" : "text-zinc-400"}>
+                              {snap.key === 'end' ? 'Endpoint' : 
+                               snap.key === 'mid' ? 'Midpoint' : 
+                               snap.key === 'int' ? 'Intersection' : 
+                               snap.key === 'tan' ? 'Tangent' : 
+                               snap.key === 'quad' ? 'Quadrant' : 
+                               snap.key === 'near' ? 'Nearest' : 
+                               snap.key === 'origin' ? 'Origin' : 'Track Align'}
+                            </span>
+                          </div>
+                          <span className="text-[8.5px] text-zinc-500 leading-none">
+                            {snap.shortcut}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex gap-1 pt-1.5 border-t border-zinc-800 text-[8.5px] font-mono">
+                    <button
+                      onClick={() => {
+                        setSnapToggles({
+                          origin: true,
+                          end: true,
+                          mid: true,
+                          int: true,
+                          tan: true,
+                          quad: true,
+                          near: true,
+                          extension: true
+                        });
+                      }}
+                      className="flex-1 py-1 bg-zinc-800 hover:bg-zinc-750 active:bg-zinc-700 text-zinc-300 rounded font-bold transition text-center cursor-pointer uppercase"
+                    >
+                      All On
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSnapToggles({
+                          origin: false,
+                          end: false,
+                          mid: false,
+                          int: false,
+                          tan: false,
+                          quad: false,
+                          near: false,
+                          extension: false
+                        });
+                      }}
+                      className="flex-1 py-1 bg-zinc-800 hover:bg-zinc-750 active:bg-zinc-700 text-zinc-300 rounded font-bold transition text-center cursor-pointer uppercase"
+                    >
+                      All Off
+                    </button>
+                  </div>
+                  <div className="text-[8px] text-zinc-500 font-mono text-center select-none bg-zinc-950/25 py-0.5 rounded border border-zinc-850">
+                    Toggle Snapping: Press F3
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Stretch / Move Active Placement Banner Overlay */}
