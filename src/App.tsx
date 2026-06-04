@@ -248,6 +248,79 @@ const resolveAnchorInLayer = (
   return null;
 };
 
+const adjustRectangleVertices = (pts: Point[], targetPtIdx: number, newX: number, newY: number): Point[] => {
+  const draggedPt = pts[targetPtIdx];
+  if (!draggedPt || !draggedPt.rectData) return pts;
+
+  const rId = draggedPt.rectData.id;
+  const dragVIdx = draggedPt.rectData.vertexIndex;
+
+  const rectIndices: number[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    if (pts[i].rectData?.id === rId) {
+      rectIndices.push(i);
+    }
+  }
+
+  if (rectIndices.length === 5) {
+    const idxMap: { [key: number]: number } = {};
+    rectIndices.forEach(idx => {
+      idxMap[pts[idx].rectData!.vertexIndex] = idx;
+    });
+
+    if (idxMap[0] !== undefined && idxMap[1] !== undefined && idxMap[2] !== undefined && idxMap[3] !== undefined && idxMap[4] !== undefined) {
+      const dragIndexMapped = dragVIdx === 4 ? 0 : dragVIdx;
+
+      const origIdxMap: { [key: number]: Point } = {};
+      rectIndices.forEach(idx => {
+        origIdxMap[pts[idx].rectData!.vertexIndex] = pts[idx];
+      });
+
+      const oppVIdx = (dragIndexMapped + 2) % 4;
+      const prevVIdx = (dragIndexMapped + 3) % 4;
+      const nextVIdx = (dragIndexMapped + 1) % 4;
+
+      const P_opp = origIdxMap[oppVIdx];
+      const P_prev = origIdxMap[prevVIdx];
+      const P_next = origIdxMap[nextVIdx];
+
+      const vec_u = { x: P_prev.x - P_opp.x, y: P_prev.y - P_opp.y };
+      const vec_v = { x: P_next.x - P_opp.x, y: P_next.y - P_opp.y };
+
+      const len_u = Math.hypot(vec_u.x, vec_u.y);
+      const len_v = Math.hypot(vec_v.x, vec_v.y);
+
+      const u = len_u > 0.0001 ? { x: vec_u.x / len_u, y: vec_u.y / len_u } : { x: 1, y: 0 };
+      const v = len_v > 0.0001 ? { x: vec_v.x / len_v, y: vec_v.y / len_v } : { x: 0, y: 1 };
+
+      const d = { x: newX - P_opp.x, y: newY - P_opp.y };
+
+      const proj_u = d.x * u.x + d.y * u.y;
+      const proj_v = d.x * v.x + d.y * v.y;
+
+      const P_drag_new = { x: newX, y: newY };
+      const P_prev_new = { x: P_opp.x + proj_u * u.x, y: P_opp.y + proj_u * u.y };
+      const P_next_new = { x: P_opp.x + proj_v * v.x, y: P_opp.y + proj_v * v.y };
+
+      const updated = [...pts];
+      
+      const updateV = (vIdx: number, newPt: { x: number; y: number }) => {
+        const idx = idxMap[vIdx];
+        updated[idx] = { ...updated[idx], x: newPt.x, y: newPt.y };
+      };
+
+      updateV(dragIndexMapped, P_drag_new);
+      updateV(prevVIdx, P_prev_new);
+      updateV(nextVIdx, P_next_new);
+
+      updated[idxMap[4]] = { ...updated[idxMap[4]], x: updated[idxMap[0]].x, y: updated[idxMap[0]].y };
+
+      return updated;
+    }
+  }
+  return pts;
+};
+
 const syncLayerDimensions = (layer: CADLayer): CADLayer => {
   const currentFinalPoints = layer.finalPoints || [];
   const currentPaths = layer.paths || [];
@@ -1545,9 +1618,55 @@ export default function App() {
           setPaths(prev => prev.map((path, idx) => idx === targetPathIdx ? updatePoints(path) : path));
         }
         logCommandResponse(`Kenar Boyutlandırma: Çember boyutu ${targetValue.toFixed(1)} mm olarak ayarlandı.`);
+      } else if (v1?.rectData && v2?.rectData && v1.rectData.id === v2.rectData.id) {
+        // Rectangle edge being dimensioned!
+        const rId = v1.rectData.id;
+        const v_movable_vidx_raw = shapePoints[closestNodeInfo.ptIdx]?.rectData?.vertexIndex;
+        const v_movable_vidx = v_movable_vidx_raw === 4 ? 0 : v_movable_vidx_raw;
+        const v_fixed_ptIdx = (closestNodeInfo.ptIdx === closestP1.ptIdx) ? closestP2.ptIdx : closestP1.ptIdx;
+        const v_fixed_vidx_raw = shapePoints[v_fixed_ptIdx]?.rectData?.vertexIndex;
+        const v_fixed_vidx = v_fixed_vidx_raw === 4 ? 0 : v_fixed_vidx_raw;
+
+        const v_other_movable_vidx = ((v_movable_vidx + 1) % 4 === v_fixed_vidx) ? (v_movable_vidx + 3) % 4 : (v_movable_vidx + 1) % 4;
+        const idxMap: { [key: number]: number } = {};
+        shapePoints.forEach((pt, idx) => {
+          if (pt.rectData?.id === rId) {
+            idxMap[pt.rectData.vertexIndex] = idx;
+          }
+        });
+
+        const updateRectPoints = (prev: Point[]) => {
+          const updated = prev.map((pt, idx) => {
+            if (pt.rectData?.id === rId) {
+              const vidx = pt.rectData.vertexIndex === 4 ? 0 : pt.rectData.vertexIndex;
+              if (vidx === v_movable_vidx || vidx === v_other_movable_vidx) {
+                return { ...pt, x: pt.x + shiftX, y: pt.y + shiftY };
+              }
+            }
+            return pt;
+          });
+          const i0 = idxMap[0];
+          const i4 = idxMap[4];
+          if (i0 !== undefined && i4 !== undefined) {
+            updated[i4] = { ...updated[i4], x: updated[i0].x, y: updated[i0].y };
+          }
+          return updated;
+        };
+
+        if (closestP1.type === 'finalPoints') {
+          setFinalPoints(updateRectPoints);
+        } else {
+          const targetPathIdx = closestP1.pathIdx;
+          setPaths(prev => prev.map((path, idx) => idx === targetPathIdx ? updateRectPoints(path) : path));
+        }
+        logCommandResponse(`Kenar Boyutlandırma: Dikdörtgen kenarı ${targetValue.toFixed(1)} mm olarak ayarlandı, karşı kenar paralel korundu.`);
       } else {
         // Generic segment/vector stretch: move only targetPt to finalTargetX, finalTargetY
         const updateSinglePoint = (prev: Point[]) => {
+          const targetPt = prev[closestNodeInfo.ptIdx];
+          if (targetPt?.rectData) {
+            return adjustRectangleVertices(prev, closestNodeInfo.ptIdx, finalTargetX, finalTargetY);
+          }
           const updated = prev.map((pt, i) => {
             if (i === closestNodeInfo.ptIdx) {
               return { ...pt, x: finalTargetX, y: finalTargetY };
@@ -1677,9 +1796,24 @@ export default function App() {
       // Move single point only
       const node: any = closestNodeInfo;
       if (node.type === 'finalPoints') {
-        setFinalPoints(prev => prev.map((pt, i) => i === node.ptIdx ? { ...pt, x: finalTargetX, y: finalTargetY } : pt));
+        setFinalPoints(prev => {
+          const targetPt = prev[node.ptIdx];
+          if (targetPt?.rectData) {
+            return adjustRectangleVertices(prev, node.ptIdx, finalTargetX, finalTargetY);
+          }
+          return prev.map((pt, i) => i === node.ptIdx ? { ...pt, x: finalTargetX, y: finalTargetY } : pt);
+        });
       } else if (node.type === 'paths' && activeLayer.paths) {
-        setPaths(prev => prev.map((path, pIdx) => pIdx === node.pathIdx ? path.map((pt, i) => i === node.ptIdx ? { ...pt, x: finalTargetX, y: finalTargetY } : pt) : path));
+        setPaths(prev => prev.map((path, pIdx) => {
+          if (pIdx === node.pathIdx) {
+            const targetPt = path[node.ptIdx];
+            if (targetPt?.rectData) {
+              return adjustRectangleVertices(path, node.ptIdx, finalTargetX, finalTargetY);
+            }
+            return path.map((pt, i) => i === node.ptIdx ? { ...pt, x: finalTargetX, y: finalTargetY } : pt);
+          }
+          return path;
+        }));
       }
       logCommandResponse(`Konumlandırma: Tek nokta ${targetValue.toFixed(1)} mm olarak ayarlandı.`);
     } else {
@@ -7850,13 +7984,83 @@ export default function App() {
       // Apply updates to stretched segment endpoints
       const orgStartPt = originalPoints[i];
       const orgEndPt = originalPoints[j];
-      const newStartX = orgStartPt.x + dx;
-      const newStartY = orgStartPt.y + dy;
-      const newEndX = orgEndPt ? orgEndPt.x + dx : newStartX;
-      const newEndY = orgEndPt ? orgEndPt.y + dy : newStartY;
+      
+      let isRectStretch = false;
+      let rectUpdatedPoints = originalPoints;
+      let newStartX = orgStartPt.x + dx;
+      let newStartY = orgStartPt.y + dy;
+      let newEndX = orgEndPt ? orgEndPt.x + dx : newStartX;
+      let newEndY = orgEndPt ? orgEndPt.y + dy : newStartY;
+
+      if (orgStartPt?.rectData && orgEndPt?.rectData && orgStartPt.rectData.id === orgEndPt.rectData.id) {
+        // Yes, this stretched segment belongs to a rectangle!
+        const rId = orgStartPt.rectData.id;
+        const idxMap: { [key: number]: number } = {};
+        originalPoints.forEach((pt, idx) => {
+          if (pt.rectData?.id === rId) {
+            idxMap[pt.rectData.vertexIndex] = idx;
+          }
+        });
+
+        // Let's verify we have a complete rectangle representation (all 5 indices 0..4)
+        if (
+          idxMap[0] !== undefined &&
+          idxMap[1] !== undefined &&
+          idxMap[2] !== undefined &&
+          idxMap[3] !== undefined &&
+          idxMap[4] !== undefined
+        ) {
+          isRectStretch = true;
+          
+          const v1Idx = orgStartPt.rectData.vertexIndex === 4 ? 0 : orgStartPt.rectData.vertexIndex;
+          const v2Idx = orgEndPt.rectData.vertexIndex === 4 ? 0 : orgEndPt.rectData.vertexIndex;
+
+          const P_v1 = originalPoints[idxMap[v1Idx]];
+          const P_v2 = originalPoints[idxMap[v2Idx]];
+
+          const edx = P_v2.x - P_v1.x;
+          const edy = P_v2.y - P_v1.y;
+          const elen = Math.hypot(edx, edy);
+
+          const tx = elen > 0.0001 ? edx / elen : 1;
+          const ty = elen > 0.0001 ? edy / elen : 0;
+          const nx = -ty;
+          const ny = tx;
+
+          // Project the mouse drag vector onto the normal of this edge
+          const proj = dx * nx + dy * ny;
+          const shiftX = proj * nx;
+          const shiftY = proj * ny;
+
+          newStartX = P_v1.x + shiftX;
+          newStartY = P_v1.y + shiftY;
+          newEndX = P_v2.x + shiftX;
+          newEndY = P_v2.y + shiftY;
+
+          rectUpdatedPoints = originalPoints.map((p, idx) => {
+            if (p.rectData?.id === rId) {
+              const vidx = p.rectData.vertexIndex === 4 ? 0 : p.rectData.vertexIndex;
+              if (vidx === v1Idx) {
+                return { ...p, x: newStartX, y: newStartY };
+              }
+              if (vidx === v2Idx) {
+                return { ...p, x: newEndX, y: newEndY };
+              }
+            }
+            return p;
+          });
+
+          // Sync vertex 4 with vertex 0
+          const i0 = idxMap[0];
+          const i4 = idxMap[4];
+          if (i0 !== undefined && i4 !== undefined) {
+            rectUpdatedPoints[i4] = { ...rectUpdatedPoints[idxMap[4]], x: rectUpdatedPoints[i0].x, y: rectUpdatedPoints[i0].y };
+          }
+        }
+      }
 
       // Update the stretched path itself
-      const updated = originalPoints.map((p, idx) => {
+      const updated = isRectStretch ? rectUpdatedPoints : originalPoints.map((p, idx) => {
         if (idx === i) {
           const updatedPt = { ...p, x: newStartX, y: newStartY };
           if (p.circleData) {
