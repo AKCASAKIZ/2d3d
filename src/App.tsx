@@ -321,6 +321,73 @@ const adjustRectangleVertices = (pts: Point[], targetPtIdx: number, newX: number
   return pts;
 };
 
+const weldToExistingSketchPoints = (newPts: Point[], activeLayer: CADLayer): Point[] => {
+  const tolerance = 2.5; // matching tolerance in mm
+  const existingPts: Point[] = [];
+  
+  if (activeLayer.finalPoints && activeLayer.finalPoints.length > 0) {
+    existingPts.push(...activeLayer.finalPoints);
+  }
+  if (activeLayer.paths) {
+    activeLayer.paths.forEach(p => {
+      p.forEach(pt => {
+        existingPts.push(pt);
+      });
+    });
+  }
+
+  if (existingPts.length === 0) return newPts;
+
+  let modified = false;
+  const updated = newPts.map((pt) => {
+    // Do not distort individual circle curve approximation points to preserve pure circular geometries
+    if (pt.isCurvePoint && pt.circleData) {
+      return pt;
+    }
+
+    let closest: Point | null = null;
+    let minDist = tolerance;
+
+    for (const exp of existingPts) {
+      if (exp.isCurvePoint && exp.circleData) {
+        continue;
+      }
+      const d = Math.hypot(pt.x - exp.x, pt.y - exp.y);
+      if (d < minDist) {
+        minDist = d;
+        closest = exp;
+      }
+    }
+
+    if (closest) {
+      modified = true;
+      return { ...pt, x: closest.x, y: closest.y };
+    }
+    return pt;
+  });
+
+  if (modified && updated.length > 0) {
+    if (updated[0].rectData && updated[updated.length - 1].rectData && updated[0].rectData.id === updated[updated.length - 1].rectData.id) {
+      const idx4 = updated.length - 1;
+      updated[idx4] = { ...updated[idx4], x: updated[0].x, y: updated[0].y };
+    } else if (distance(updated[0], updated[updated.length - 1]) < 0.1) {
+      updated[updated.length - 1] = { ...updated[updated.length - 1], x: updated[0].x, y: updated[0].y };
+    }
+  }
+
+  return updated;
+};
+
+const weldArcEndpoints = (arcPts: Point[], activeLayer: CADLayer): Point[] => {
+  if (arcPts.length < 2) return arcPts;
+  const first = weldToExistingSketchPoints([arcPts[0]], activeLayer)[0];
+  const last = weldToExistingSketchPoints([arcPts[arcPts.length - 1]], activeLayer)[0];
+  const updated = [...arcPts];
+  updated[0] = { ...updated[0], x: first.x, y: first.y };
+  updated[updated.length - 1] = { ...updated[updated.length - 1], x: last.x, y: last.y };
+  return updated;
+};
+
 const syncLayerDimensions = (layer: CADLayer): CADLayer => {
   const currentFinalPoints = layer.finalPoints || [];
   const currentPaths = layer.paths || [];
@@ -6447,24 +6514,25 @@ export default function App() {
       if (currentCommand === 'line') {
         if (finalPoints.length > 2 && snapPoint?.type === 'end' && snapPoint.x === finalPoints[0].x) {
           const closedLinePts = [...finalPoints, { x: snapPoint.x, y: snapPoint.y }];
-          saveState(closedLinePts, true, 0);
-          setFinalPoints(closedLinePts);
+          const weldedClosedPts = weldToExistingSketchPoints(closedLinePts, activeLayer);
+          saveState(weldedClosedPts, true, 0);
+          setFinalPoints(weldedClosedPts);
           setIsClosed(true);
           setTempPoint(null);
           setDrawMode('drag');
           clearCommand();
           logCommandResponse('Continuous path successfully closed.');
-          triggerOpPromptForPoints(closedLinePts);
+          triggerOpPromptForPoints(weldedClosedPts);
         } else {
           // --- AUTO JOIN ENDPOINTS AND VERTICES TO PREVENT SEPARATIONS (KOPMA) ---
+          const matchingTolerance = Math.max(3.0, 15.0 / viewZoom); // dynamic matching tolerance in mm based on zoom
           let mergedFromPath = false;
           if (finalPoints.length === 0 && activeLayer.paths) {
             // Check if clicking near start or end of any completed paths
-            const tolerance = 1.0; // matching tolerance in mm
             const matchedPathIdx = activeLayer.paths.findIndex(path => {
               const startDist = Math.hypot(path[0].x - x, path[0].y - y);
               const endDist = Math.hypot(path[path.length - 1].x - x, path[path.length - 1].y - y);
-              return startDist < tolerance || endDist < tolerance;
+              return startDist < matchingTolerance || endDist < matchingTolerance;
             });
 
             if (matchedPathIdx !== -1) {
@@ -6472,7 +6540,7 @@ export default function App() {
               const startDist = Math.hypot(matchedPath[0].x - x, matchedPath[0].y - y);
 
               let reorderedPath = [...matchedPath];
-              if (startDist < tolerance) {
+              if (startDist < matchingTolerance) {
                 // Clicked near the start. Reverse so it ends at the current click point (X,Y)
                 reorderedPath.reverse();
               }
@@ -6489,11 +6557,10 @@ export default function App() {
 
           let mergedToPath = false;
           if (!mergedFromPath && finalPoints.length > 0 && activeLayer.paths) {
-            const tolerance = 1.0; // matching tolerance in mm
             const matchedPathIdx = activeLayer.paths.findIndex(path => {
               const startDist = Math.hypot(path[0].x - x, path[0].y - y);
               const endDist = Math.hypot(path[path.length - 1].x - x, path[path.length - 1].y - y);
-              return startDist < tolerance || endDist < tolerance;
+              return startDist < matchingTolerance || endDist < matchingTolerance;
             });
 
             if (matchedPathIdx !== -1) {
@@ -6501,7 +6568,7 @@ export default function App() {
               const endDist = Math.hypot(matchedPath[matchedPath.length - 1].x - x, matchedPath[matchedPath.length - 1].y - y);
 
               let appendPath = [...matchedPath];
-              if (endDist < tolerance) {
+              if (endDist < matchingTolerance) {
                 // Clicked near the end. Reverse so it starts at the click point (X,Y)
                 appendPath.reverse();
               }
@@ -6542,15 +6609,16 @@ export default function App() {
               { x: p1.x, y: y, rectData: { id: rectId, vertexIndex: 3 } },
               { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 4 } },
             ];
-            saveState(polyRect, true, 0);
-            setFinalPoints(polyRect);
+            const weldedRect = weldToExistingSketchPoints(polyRect, activeLayer);
+            saveState(weldedRect, true, 0);
+            setFinalPoints(weldedRect);
             setIsClosed(true);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse('Rectangle (2 Nokta) eklendi.');
-            triggerOpPromptForPoints(polyRect);
+            triggerOpPromptForPoints(weldedRect);
           }
         } else if (rectMethod === 'center') {
           if (clickCount === 0) {
@@ -6569,15 +6637,16 @@ export default function App() {
               { x: center.x - dx, y: center.y + dy, rectData: { id: rectId, vertexIndex: 3 } },
               { x: center.x - dx, y: center.y - dy, rectData: { id: rectId, vertexIndex: 4 } },
             ];
-            saveState(polyRect, true, 0);
-            setFinalPoints(polyRect);
+            const weldedRect = weldToExistingSketchPoints(polyRect, activeLayer);
+            saveState(weldedRect, true, 0);
+            setFinalPoints(weldedRect);
             setIsClosed(true);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse('Dikdörtgen (Merkez-Köşe) eklendi.');
-            triggerOpPromptForPoints(polyRect);
+            triggerOpPromptForPoints(weldedRect);
           }
         } else if (rectMethod === 'dimensions') {
           if (clickCount === 0) {
@@ -6598,15 +6667,16 @@ export default function App() {
               { x: p1.x, y: p1.y + dy * h, rectData: { id: rectId, vertexIndex: 3 } },
               { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 4 } },
             ];
-            saveState(polyRect, true, 0);
-            setFinalPoints(polyRect);
+            const weldedRect = weldToExistingSketchPoints(polyRect, activeLayer);
+            saveState(weldedRect, true, 0);
+            setFinalPoints(weldedRect);
             setIsClosed(true);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse(`Dikdörtgen (Boyutlu) eklendi: Genişlik: ${w} mm, Yükseklik: ${h} mm.`);
-            triggerOpPromptForPoints(polyRect);
+            triggerOpPromptForPoints(weldedRect);
           }
         } else if (rectMethod === 'rotated') {
           if (clickCount === 0) {
@@ -6633,15 +6703,16 @@ export default function App() {
               { x: p1.x + hDist * nx, y: p1.y + hDist * ny, rectData: { id: rectId, vertexIndex: 3 } },
               { x: p1.x, y: p1.y, rectData: { id: rectId, vertexIndex: 4 } },
             ];
-            saveState(polyRect, true, 0);
-            setFinalPoints(polyRect);
+            const weldedRect = weldToExistingSketchPoints(polyRect, activeLayer);
+            saveState(weldedRect, true, 0);
+            setFinalPoints(weldedRect);
             setIsClosed(true);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse('Döndürülmüş Dikdörtgen başarıyla eklendi.');
-            triggerOpPromptForPoints(polyRect);
+            triggerOpPromptForPoints(weldedRect);
           }
         }
       } else if (currentCommand === 'circle') {
@@ -6999,15 +7070,16 @@ export default function App() {
               }
             });
           }
-          saveState(points, true, 0);
-          setFinalPoints(points);
+          const weldedPoints = weldToExistingSketchPoints(points, activeLayer);
+          saveState(weldedPoints, true, 0);
+          setFinalPoints(weldedPoints);
           setIsClosed(true);
           setClickCount(0);
           setTempPoint(null);
           setDrawMode('drag');
           clearCommand();
           logCommandResponse(`Çokgen (${sides} kenarlı) eklendi.`);
-          triggerOpPromptForPoints(points);
+          triggerOpPromptForPoints(weldedPoints);
         }
       } else if (currentCommand === 'arc') {
         const createArcPathFromAngles = (cen: {x: number, y: number}, r: number, sa: number, sw: number, cw = false) => {
@@ -7066,15 +7138,16 @@ export default function App() {
               }
 
               const points = createArcPathFromAngles(center, radius, th1, swipeAngle, isCW);
-              saveState(points, true, 0);
-              setFinalPoints(points);
+              const weldedArc = weldArcEndpoints(points, activeLayer);
+              saveState(weldedArc, true, 0);
+              setFinalPoints(weldedArc);
               setIsClosed(false);
               setClickCount(0);
               setTempPoint(null);
               setDrawMode('drag');
               clearCommand();
               logCommandResponse(`Yay (3 Nokta) başarıyla tamamlandı.`);
-              triggerOpPromptForPoints(points);
+              triggerOpPromptForPoints(weldedArc);
             } else {
               logCommandResponse("Hata: Noktalar kolineer olduğundan yay çizilemedi.");
               setClickCount(0);
@@ -7099,15 +7172,16 @@ export default function App() {
             const ea = Math.atan2(e.y - c.y, e.x - c.x);
             const sweep = (ea - sa + Math.PI * 2) % (Math.PI * 2);
             const points = createArcPathFromAngles(c, r, sa, sweep, false);
-            saveState(points, true, 0);
-            setFinalPoints(points);
+            const weldedArc = weldArcEndpoints(points, activeLayer);
+            saveState(weldedArc, true, 0);
+            setFinalPoints(weldedArc);
             setIsClosed(false);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse("Yay (S, C, E) başarıyla eklendi.");
-            triggerOpPromptForPoints(points);
+            triggerOpPromptForPoints(weldedArc);
           }
         } else if (arcMethod === 'sca') {
           if (clickCount === 0) {
@@ -7126,15 +7200,16 @@ export default function App() {
             const userAngle = parseFloat(arcAngleInput) || 90;
             const sweep = (userAngle * Math.PI) / 180;
             const points = createArcPathFromAngles(c, r, sa, sweep, userAngle < 0);
-            saveState(points, true, 0);
-            setFinalPoints(points);
+            const weldedArc = weldArcEndpoints(points, activeLayer);
+            saveState(weldedArc, true, 0);
+            setFinalPoints(weldedArc);
             setIsClosed(false);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse(`Yay (Başlangıç, Merkez, Açı: ${userAngle}°) eklendi.`);
-            triggerOpPromptForPoints(points);
+            triggerOpPromptForPoints(weldedArc);
           }
         } else if (arcMethod === 'scl') {
           if (clickCount === 0) {
@@ -7154,15 +7229,16 @@ export default function App() {
             if (len >= 2 * r) len = 2 * r - 0.1;
             const sweep = 2 * Math.asin(len / (2 * r));
             const points = createArcPathFromAngles(c, r, sa, sweep, false);
-            saveState(points, true, 0);
-            setFinalPoints(points);
+            const weldedArc = weldArcEndpoints(points, activeLayer);
+            saveState(weldedArc, true, 0);
+            setFinalPoints(weldedArc);
             setIsClosed(false);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse(`Yay (S, C, Kiriş: ${len.toFixed(1)} mm) eklendi.`);
-            triggerOpPromptForPoints(points);
+            triggerOpPromptForPoints(weldedArc);
           }
         } else if (arcMethod === 'sea') {
           if (clickCount === 0) {
@@ -7187,15 +7263,16 @@ export default function App() {
 
             const sa = Math.atan2(s.y - cen.y, s.x - cen.x);
             const points = createArcPathFromAngles(cen, r, sa, angRad, false);
-            saveState(points, true, 0);
-            setFinalPoints(points);
+            const weldedArc = weldArcEndpoints(points, activeLayer);
+            saveState(weldedArc, true, 0);
+            setFinalPoints(weldedArc);
             setIsClosed(false);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse(`Yay (S, E, Açı: ${userAngle}°) eklendi.`);
-            triggerOpPromptForPoints(points);
+            triggerOpPromptForPoints(weldedArc);
           }
         } else if (arcMethod === 'sed') {
           if (clickCount === 0) {
@@ -7220,15 +7297,16 @@ export default function App() {
 
             const sa = Math.atan2(s.y - cen.y, s.x - cen.x);
             const points = createArcPathFromAngles(cen, r, sa, swAngle, false);
-            saveState(points, true, 0);
-            setFinalPoints(points);
+            const weldedArc = weldArcEndpoints(points, activeLayer);
+            saveState(weldedArc, true, 0);
+            setFinalPoints(weldedArc);
             setIsClosed(false);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse("Yay (S, E, Yön) eklendi.");
-            triggerOpPromptForPoints(points);
+            triggerOpPromptForPoints(weldedArc);
           }
         } else if (arcMethod === 'ser') {
           if (clickCount === 0) {
@@ -7254,15 +7332,16 @@ export default function App() {
               const ea = Math.atan2(e.y - cen.y, e.x - cen.x);
               const sweep = (ea - sa + Math.PI * 2) % (Math.PI * 2);
               const points = createArcPathFromAngles(cen, r, sa, sweep, false);
-              saveState(points, true, 0);
-              setFinalPoints(points);
+              const weldedArc = weldArcEndpoints(points, activeLayer);
+              saveState(weldedArc, true, 0);
+              setFinalPoints(weldedArc);
               setIsClosed(false);
               setClickCount(0);
               setTempPoint(null);
               setDrawMode('drag');
               clearCommand();
               logCommandResponse(`Yay (S, E, Yarıçap: ${r.toFixed(1)} mm) eklendi.`);
-              triggerOpPromptForPoints(points);
+              triggerOpPromptForPoints(weldedArc);
             } else {
               logCommandResponse("Hata: Yarıçap yetersiz.");
               setClickCount(0);
@@ -7286,15 +7365,16 @@ export default function App() {
             const ea = Math.atan2(y - c.y, x - c.x);
             const sweep = (ea - sa + Math.PI * 2) % (Math.PI * 2);
             const points = createArcPathFromAngles(c, r, sa, sweep, false);
-            saveState(points, true, 0);
-            setFinalPoints(points);
+            const weldedArc = weldArcEndpoints(points, activeLayer);
+            saveState(weldedArc, true, 0);
+            setFinalPoints(weldedArc);
             setIsClosed(false);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse("Yay (C, S, E) eklendi.");
-            triggerOpPromptForPoints(points);
+            triggerOpPromptForPoints(weldedArc);
           }
         } else if (arcMethod === 'csa') {
           if (clickCount === 0) {
@@ -7313,15 +7393,16 @@ export default function App() {
             const userAngle = parseFloat(arcAngleInput) || 90;
             const sweep = (userAngle * Math.PI) / 180;
             const points = createArcPathFromAngles(c, r, sa, sweep, userAngle < 0);
-            saveState(points, true, 0);
-            setFinalPoints(points);
+            const weldedArc = weldArcEndpoints(points, activeLayer);
+            saveState(weldedArc, true, 0);
+            setFinalPoints(weldedArc);
             setIsClosed(false);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse(`Yay (C, S, Açı: ${userAngle}°) eklendi.`);
-            triggerOpPromptForPoints(points);
+            triggerOpPromptForPoints(weldedArc);
           }
         } else if (arcMethod === 'csl') {
           if (clickCount === 0) {
@@ -7341,15 +7422,16 @@ export default function App() {
             if (len >= 2 * r) len = 2 * r - 0.1;
             const sweep = 2 * Math.asin(len / (2 * r));
             const points = createArcPathFromAngles(c, r, sa, sweep, false);
-            saveState(points, true, 0);
-            setFinalPoints(points);
+            const weldedArc = weldArcEndpoints(points, activeLayer);
+            saveState(weldedArc, true, 0);
+            setFinalPoints(weldedArc);
             setIsClosed(false);
             setClickCount(0);
             setTempPoint(null);
             setDrawMode('drag');
             clearCommand();
             logCommandResponse(`Yay (C, S, Kiriş: ${len.toFixed(1)} mm) eklendi.`);
-            triggerOpPromptForPoints(points);
+            triggerOpPromptForPoints(weldedArc);
           }
         } else if (arcMethod === 'continue') {
           const existingPaths = activeLayer.paths || [];
@@ -7368,16 +7450,17 @@ export default function App() {
                 const cen = { x: lastPt.x - ty * rVal, y: lastPt.y + tx * rVal };
                 const sa = Math.atan2(lastPt.y - cen.y, lastPt.x - cen.x);
                 const points = createArcPathFromAngles(cen, rVal, sa, Math.PI / 2, false);
+                const weldedArc = weldArcEndpoints(points, activeLayer);
 
-                saveState(points, true, 0);
-                setFinalPoints(points);
+                saveState(weldedArc, true, 0);
+                setFinalPoints(weldedArc);
                 setIsClosed(false);
                 setClickCount(0);
                 setTempPoint(null);
                 setDrawMode('drag');
                 clearCommand();
                 logCommandResponse("Teğet Devam Yayı eklendi.");
-                triggerOpPromptForPoints(points);
+                triggerOpPromptForPoints(weldedArc);
               }
             } else {
               logCommandResponse("Devam yayı için aktif katmanda en az bir çizgi/şekil veya yay bulunmalı.");
