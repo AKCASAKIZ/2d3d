@@ -5164,12 +5164,8 @@ export default function App() {
 
         // Draw dimension lines and text only for the active layer
         if (showDims && isActive && pts.length > 1) {
-          // Dynamic segment text size is based on sketchSide (in mm) and viewZoom (zoom factor)
-          const baseTextSize = globalFontSize > 0 ? globalFontSize : Math.max(1.8, Math.min(10.0, sketchSide * 0.035));
-          const autoTextHeightPx = globalFontSize > 0 
-            ? Math.max(5.0, Math.min(120.0, globalFontSize * viewZoom))
-            : Math.max(9.5, Math.min(24.0, baseTextSize * viewZoom));
-          const fontHeightMm = autoTextHeightPx / viewZoom;
+          // Dynamic segment text size is based on sketchSide (in mm)
+          const fontHeightMm = globalFontSize > 0 ? globalFontSize : Math.max(1.2, Math.min(3.5, sketchSide * 0.022));
           ctx.font = `bold ${fontHeightMm.toFixed(2)}px monospace`;
           ctx.textAlign = 'center';
 
@@ -5195,7 +5191,6 @@ export default function App() {
               
               // Draw dimension text
               ctx.fillStyle = '#f43f5e';
-              const fontHeightMm = autoTextHeightPx / viewZoom;
               ctx.fillText(
                 `R: ${radius.toFixed(1)} mm`,
                 (center.x + targetX) / 2 + fontHeightMm * 0.9,
@@ -5212,7 +5207,6 @@ export default function App() {
 
               // Dimension Text
               ctx.fillStyle = '#f43f5e'; // Rose
-              const fontHeightMm = autoTextHeightPx / viewZoom;
               ctx.fillText(
                 `${d.toFixed(1)} mm`,
                 (p1.x + p2.x) / 2,
@@ -5333,15 +5327,7 @@ export default function App() {
       // Dynamic text sizing based on active drawing size & screen footprint
       // If fontSizeOverride is specified, we use that as the base height in mm
       // If globally overridden, we use globalFontSize, otherwise smart autosize
-      const baseTextHeightMm = fontSizeOverride || (globalFontSize > 0 ? globalFontSize : Math.max(1.8, Math.min(10.0, sketchSide * 0.035)));
-      let textHeightPx = baseTextHeightMm * viewZoom;
-      if (!fontSizeOverride && globalFontSize === 0) {
-        textHeightPx = Math.max(9.5, Math.min(30.0, textHeightPx)); // robust read bounds on screen
-      } else {
-        textHeightPx = Math.max(5.0, Math.min(120.0, textHeightPx)); // custom font size bounds
-      }
-
-      const fontHeightMm = textHeightPx / viewZoom;
+      const fontHeightMm = fontSizeOverride || (globalFontSize > 0 ? globalFontSize : Math.max(1.2, Math.min(3.5, sketchSide * 0.022)));
 
       // Draw extension lines (faint dashed lines)
       ctx.save();
@@ -7326,8 +7312,8 @@ export default function App() {
 
       if (clickedDim) {
         saveState();
-        // Cancelled: Do not trigger intrusive edit popup on canvas dimension touch (can be edited/removed via sidebar list)
-        // setSelectedDimensionId(clickedDim.id);
+        // Restore properties/edit popup when user clicks a dimension annotation on the canvas
+        setSelectedDimensionId(clickedDim.id);
         const dType = clickedDim.dimType || 'aligned';
         let actualLen = Math.hypot(clickedDim.p2.x - clickedDim.p1.x, clickedDim.p2.y - clickedDim.p1.y);
         if (dType === 'horizontal') {
@@ -7335,8 +7321,8 @@ export default function App() {
         } else if (dType === 'vertical') {
           actualLen = Math.abs(clickedDim.p2.y - clickedDim.p1.y);
         }
-        // setEditingDimensionValueInput(actualLen.toFixed(1));
-        logCommandResponse(`Ölçülendirme çizgisi seçildi. Sürükleyerek konumunu değiştirebilirsiniz. Değerini değiştirmek için yan paneldeki listede üzerine tıklayın.`);
+        setEditingDimensionValueInput(actualLen.toFixed(1));
+        logCommandResponse(`Ölçülendirme çizgisi seçildi. Sürükleyerek konumunu değiştirebilir veya açılan kutudan değeri düzenleyebilirsiniz.`);
         setActiveDimensionDrag({
           dimId: clickedDim.id,
           startX: x,
