@@ -6140,21 +6140,6 @@ export default function App() {
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 1 / viewZoom;
           ctx.stroke();
-
-          // Text overlay
-          ctx.fillStyle = '#fdf2f8'; // very light pink/white text
-          ctx.font = `bold ${Math.max(9, 10 / viewZoom)}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          
-          // Draw a small background pill for the "STRETCH" text label
-          const label = "ESNET (STRETCH)";
-          const labelWidth = ctx.measureText(label).width;
-          ctx.fillStyle = '#ec4899';
-          ctx.fillRect(midX - labelWidth/2 - 4/viewZoom, midY - 14/viewZoom - 6/viewZoom, labelWidth + 8/viewZoom, 13/viewZoom);
-          
-          ctx.fillStyle = '#ffffff';
-          ctx.fillText(label, midX, midY - 14/viewZoom);
           ctx.restore();
         }
       }
