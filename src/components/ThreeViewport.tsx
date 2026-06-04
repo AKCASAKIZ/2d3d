@@ -76,9 +76,19 @@ export function ThreeViewport({
   const [autoRotateSpeed, setAutoRotateSpeed] = useState(2.0);
   const [showCoMVisual, setShowCoMVisual] = useState(true);
 
+  // OrbitControls enabled/disabled state
+  const [orbitEnabled, setOrbitEnabled] = useState(true);
+
   // ThreeJS Plane objects reference
   const clipPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0));
   const planeHelperRef = useRef<THREE.PlaneHelper | null>(null);
+
+  // Synchronize dynamic OrbitControls enabled status
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    controls.enabled = orbitEnabled;
+  }, [orbitEnabled]);
 
   // Synchronize auto rotation settings with OrbitControls in real-time
   useEffect(() => {
@@ -132,6 +142,9 @@ export function ThreeViewport({
     const startTarget = controls.target.clone();
     const endTarget = new THREE.Vector3(0, 0, 0);
 
+    // Keep track of orbitEnabled state to restore it upon completion
+    const targetEnabled = orbitEnabled;
+
     // Adjust up vector to handle top-down extreme poles smoothly without flip locking
     const targetUp = new THREE.Vector3(0, 1, 0);
     if (Math.abs(targetPos.x) < 1 && Math.abs(targetPos.z) < 1) {
@@ -158,7 +171,7 @@ export function ThreeViewport({
       if (progress < 1) {
         requestAnimationFrame(animateGliding);
       } else {
-        controls.enabled = true;
+        controls.enabled = targetEnabled;
       }
     };
 
@@ -559,6 +572,18 @@ export function ThreeViewport({
           }
         }
 
+        // If it's a cut but nestedIndex is -1, perform generalized overlap checking
+        if (nestedIndex === -1 && cfg.booleanType === 'cut') {
+          for (let i = 0; i < unions.length; i++) {
+            const anyPtInUnion = cfg.points.some(p => isPointInPolygon(p, unions[i].outer.points));
+            const anyUnionPtInHole = unions[i].outer.points.some(p => isPointInPolygon(p, cfg.points));
+            if (anyPtInUnion || anyUnionPtInHole) {
+              nestedIndex = i;
+              break;
+            }
+          }
+        }
+
         // Check if there is an explicit user specification for union/cut
         const hasExplicitBoolean = cfg.index === -1
           ? !!ly.finalPointsSettings?.booleanType
@@ -569,8 +594,6 @@ export function ThreeViewport({
         if (isCut) {
           if (nestedIndex !== -1) {
             unions[nestedIndex].holes.push(cfg);
-          } else {
-            unions.push({ outer: cfg, holes: [] });
           }
         } else {
           unions.push({ outer: cfg, holes: [] });
@@ -1138,7 +1161,17 @@ export function ThreeViewport({
             <Compass className="w-4 h-4 text-orange-500 animate-pulse" />
             <span>3D Orbit Controls</span>
           </div>
-          <span className="text-[8px] px-1 py-0.5 bg-orange-950/40 text-orange-400 border border-orange-900/40 rounded uppercase font-bold text-right">Interactive</span>
+          <button
+            onClick={() => setOrbitEnabled(!orbitEnabled)}
+            className={`text-[8px] px-1 py-0.5 rounded uppercase font-bold text-right border cursor-pointer transition-all ${
+              orbitEnabled
+                ? 'bg-orange-950/40 text-orange-400 border-orange-900/40 hover:bg-orange-900/30'
+                : 'bg-red-950/40 text-red-400 border-red-900/40 hover:bg-red-900/30'
+            }`}
+            title="Click to enable or disable OrbitControls interaction in the 3D scene"
+          >
+            {orbitEnabled ? 'Interactive' : 'Locked'}
+          </button>
         </div>
 
         {/* Incremental Manual Orbit Section & Buttons Grid */}
@@ -1252,6 +1285,28 @@ export function ThreeViewport({
               }`}
             >
               {showCoMVisual ? 'VISIBLE' : 'HIDDEN'}
+            </button>
+          </div>
+        </div>
+
+        {/* Orbit Controls (Enable/Disable OrbitControls) */}
+        <div className="border-t border-zinc-800/80 pt-2 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-mono font-bold text-zinc-450 uppercase flex items-center gap-1.5 cursor-pointer" onClick={() => setOrbitEnabled(!orbitEnabled)}>
+              <span className={`w-1.5 h-1.5 rounded-full ${orbitEnabled ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+              Mouse Orbit Gestures:
+            </span>
+            <button
+              id="btn-toggle-orbit-controls"
+              onClick={() => setOrbitEnabled(!orbitEnabled)}
+              className={`px-2 py-0.5 rounded text-[9px] font-bold font-mono border transition-all cursor-pointer ${
+                orbitEnabled
+                  ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400'
+                  : 'bg-red-650/40 border-red-500 text-red-400 hover:bg-red-600/30 font-bold'
+              }`}
+              title="Enable or disable standard mouse/touch gestures (drag, pan, zoom) on the 3D canvas"
+            >
+              {orbitEnabled ? 'ENABLED' : 'DISABLED'}
             </button>
           </div>
         </div>
