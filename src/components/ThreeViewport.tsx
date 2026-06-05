@@ -39,6 +39,9 @@ interface ThreeViewportProps {
     activeLayerStats: SolidPhysicsProperties | null;
     assemblyStats: SolidPhysicsProperties | null;
   }) => void;
+  ghostDepth?: number | null;
+  ghostBooleanType?: 'union' | 'cut' | null;
+  ghostPathIdx?: number;
 }
 
 export function ThreeViewport({
@@ -47,7 +50,10 @@ export function ThreeViewport({
   triggerStlExportRef,
   onSelectFace,
   sheetMaterial = 'Steel',
-  onPhysicsCalculated
+  onPhysicsCalculated,
+  ghostDepth = null,
+  ghostBooleanType = null,
+  ghostPathIdx = -1,
 }: ThreeViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -529,12 +535,13 @@ export function ThreeViewport({
 
       if (ly.finalPoints.length >= 3 && ly.isClosed) {
         const s = ly.finalPointsSettings;
+        const isGhostOverride = ly.id === activeLayerId && ghostPathIdx === -1 && ghostDepth !== null;
         configs.push({
           points: ly.finalPoints,
           opType: s?.opType || ly.opType || 'extrude',
-          depth: s?.depth !== undefined ? s.depth : (ly.depth !== undefined ? ly.depth : 30),
+          depth: isGhostOverride ? ghostDepth! : (s?.depth !== undefined ? s.depth : (ly.depth !== undefined ? ly.depth : 30)),
           revolveAxis: s?.revolveAxis || ly.revolveAxis || 'center',
-          booleanType: s?.booleanType || 'union',
+          booleanType: (ly.id === activeLayerId && ghostPathIdx === -1 && ghostBooleanType !== null) ? ghostBooleanType : (s?.booleanType || 'union'),
           name: 'Active Sketch',
           index: -1
         });
@@ -544,12 +551,13 @@ export function ThreeViewport({
         ly.paths.forEach((p, idx) => {
           if (p.length >= 3) {
             const s = ly.pathSettings?.[idx];
+            const isGhostOverride = ly.id === activeLayerId && ghostPathIdx === idx && ghostDepth !== null;
             configs.push({
               points: p,
               opType: s?.opType || ly.opType || 'extrude',
-              depth: s?.depth !== undefined ? s.depth : (ly.depth !== undefined ? ly.depth : 30),
+              depth: isGhostOverride ? ghostDepth! : (s?.depth !== undefined ? s.depth : (ly.depth !== undefined ? ly.depth : 30)),
               revolveAxis: s?.revolveAxis || ly.revolveAxis || 'center',
-              booleanType: s?.booleanType || 'union',
+              booleanType: (ly.id === activeLayerId && ghostPathIdx === idx && ghostBooleanType !== null) ? ghostBooleanType : (s?.booleanType || 'union'),
               name: `Shape #${idx + 1}`,
               index: idx
             });
@@ -759,6 +767,77 @@ export function ThreeViewport({
       }
     });
 
+    // Render 3D Ghost Preview overlay for active slider adjustment
+    if (ghostDepth !== null && ghostBooleanType !== null) {
+      const activeLayerObj = layers.find((l) => l.id === activeLayerId);
+      if (activeLayerObj) {
+        let ghostPoints: Point[] = [];
+        if (ghostPathIdx === -1) {
+          ghostPoints = activeLayerObj.finalPoints;
+        } else if (activeLayerObj.paths && activeLayerObj.paths[ghostPathIdx]) {
+          ghostPoints = activeLayerObj.paths[ghostPathIdx];
+        }
+
+        if (ghostPoints.length >= 3) {
+          try {
+            // Reconstruct shape of shape being dynamically previewed
+            const ghostShape = new THREE.Shape();
+            ghostShape.moveTo(ghostPoints[0].x - cx, cy - ghostPoints[0].y);
+            for (let i = 1; i < ghostPoints.length; i++) {
+              ghostShape.lineTo(ghostPoints[i].x - cx, cy - ghostPoints[i].y);
+            }
+
+            // Create preview ExtrudeGeometry
+            const ghostGeometry = new THREE.ExtrudeGeometry(ghostShape, {
+              depth: ghostDepth,
+              bevelEnabled: true,
+              bevelThickness: 1.2,
+              bevelSize: 0.6,
+              bevelOffset: 0,
+              bevelSegments: 2,
+            });
+            ghostGeometry.computeVertexNormals();
+
+            // GREEN for Union (Add), ROSE/RED for Cut (Remove) with gentle glow
+            const isCutMode = ghostBooleanType === 'cut';
+            const ghostColor = isCutMode ? new THREE.Color('#f43f5e') : new THREE.Color('#10b981');
+
+            const ghostMeshMaterial = new THREE.MeshStandardMaterial({
+              color: ghostColor,
+              roughness: 0.2,
+              metalness: 0.8,
+              transparent: true,
+              opacity: 0.45,
+              side: THREE.DoubleSide,
+              depthWrite: false, // Prevents depth fighting with underlying layer
+            });
+
+            const ghostOverlayMesh = new THREE.Mesh(ghostGeometry, ghostMeshMaterial);
+            ghostOverlayMesh.position.z = activeLayerObj.zOffset || 0;
+            ghostOverlayMesh.renderOrder = 1500;
+
+            // Glowing outline guide
+            const ghostWireframeMat = new THREE.LineBasicMaterial({
+              color: ghostColor.clone().multiplyScalar(1.5),
+              linewidth: 2.5,
+              transparent: true,
+              opacity: 0.85,
+              depthWrite: false,
+            });
+
+            const ghostEdges = new THREE.EdgesGeometry(ghostGeometry, 25);
+            const ghostLines = new THREE.LineSegments(ghostEdges, ghostWireframeMat);
+            ghostLines.renderOrder = 1501;
+            ghostOverlayMesh.add(ghostLines);
+
+            group.add(ghostOverlayMesh);
+          } catch (err) {
+            console.error("3D Ghost rendering failed:", err);
+          }
+        }
+      }
+    }
+
     // Calculate exact Center of Mass and Moments of Inertia dynamically
     const densityList = {
       "Steel": 7.85, "Aluminum": 2.70, "Brass": 8.40, "Copper": 8.96, "Acrylic": 1.18, "PLA (3D Print)": 1.24, "Oak Wood": 0.75
@@ -845,7 +924,7 @@ export function ThreeViewport({
 
     scene.add(group);
     activeGroupRef.current = group;
-  }, [layers, clipEnabled, activeLayerId, sheetMaterial, onPhysicsCalculated, showCoMVisual]);
+  }, [layers, clipEnabled, activeLayerId, sheetMaterial, onPhysicsCalculated, showCoMVisual, ghostDepth, ghostBooleanType, ghostPathIdx]);
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-zinc-950">
