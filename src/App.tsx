@@ -612,6 +612,10 @@ export default function App() {
   const [selectedVertexIdx, setSelectedVertexIdx] = useState<number | null>(null);
   const [selectedPathIdx, setSelectedPathIdx] = useState<number>(-1); // -1 is finalPoints, otherwise path Index
   
+  // Ghost preview states for real-time 3D boolean preview adjustments
+  const [ghostDepth, setGhostDepth] = useState<number | null>(null);
+  const [ghostBooleanType, setGhostBooleanType] = useState<'union' | 'cut' | null>(null);
+  
   // Coordinate Reference Positioning state
   const [alignTargetX, setAlignTargetX] = useState<number>(0);
   const [alignTargetY, setAlignTargetY] = useState<number>(0);
@@ -3518,6 +3522,12 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    const s = getSelectedPathSettings();
+    setGhostDepth(s.depth !== undefined ? s.depth : 30);
+    setGhostBooleanType(s.booleanType || 'union');
+  }, [selectedPathIdx, activeLayerId]);
+
   const updateSelectedPathSettings = (updates: Partial<PathSettings>) => {
     saveState();
     setLayers(prev => prev.map(l => {
@@ -3652,6 +3662,12 @@ export default function App() {
     const label = selectedPathIdx === -1 ? "Aktif Çizim (Active)" : `Şekil #${selectedPathIdx + 1}`;
     const settings = getSelectedPathSettings();
 
+    const actualDepth = settings.depth !== undefined ? settings.depth : 30;
+    const actualBooleanType = settings.booleanType || 'union';
+    const activePreviewDepth = ghostDepth !== null ? ghostDepth : actualDepth;
+    const activePreviewBool = ghostBooleanType !== null ? ghostBooleanType : actualBooleanType;
+    const isGhostDirty = (ghostDepth !== null && ghostDepth !== actualDepth) || (ghostBooleanType !== null && ghostBooleanType !== actualBooleanType);
+
     return (
       <div className="bg-zinc-900 border border-zinc-800/80 p-3 rounded-lg space-y-3 font-sans mt-2">
         <div className="flex items-center justify-between text-[10px] font-mono text-orange-400 border-b border-zinc-800 pb-1.5 font-bold">
@@ -3663,13 +3679,13 @@ export default function App() {
         
         {/* Boolean Operation Type */}
         <div className="space-y-1">
-          <span className="text-[9px] text-zinc-400 block font-mono font-semibold">Solid Boolean İşlemi:</span>
+          <span className="text-[9px] text-zinc-400 block font-mono font-semibold">Solid Boolean İşlemi (3D Interaction):</span>
           <div className="grid grid-cols-2 gap-1.5">
             <button
-              onClick={() => updateSelectedPathSettings({ booleanType: 'union' })}
+              onClick={() => setGhostBooleanType('union')}
               className={`py-1 rounded text-[9px] font-bold font-mono transition text-center border cursor-pointer ${
-                settings.booleanType === 'union' || !settings.booleanType
-                  ? 'bg-orange-600/20 border-orange-500 text-orange-200'
+                activePreviewBool === 'union'
+                  ? 'bg-orange-600/25 border-orange-500 text-orange-200'
                   : 'bg-zinc-950/40 border-zinc-850 text-zinc-400 hover:text-white'
               }`}
               title="Union (Birleşim): Bu şekli katı dolgulu bir parça olarak ekler."
@@ -3677,10 +3693,10 @@ export default function App() {
               UNION (Katı Ekle)
             </button>
             <button
-              onClick={() => updateSelectedPathSettings({ booleanType: 'cut' })}
+              onClick={() => setGhostBooleanType('cut')}
               className={`py-1 rounded text-[9px] font-bold font-mono transition text-center border cursor-pointer ${
-                settings.booleanType === 'cut'
-                  ? 'bg-rose-600/20 border-rose-500 text-rose-200'
+                activePreviewBool === 'cut'
+                  ? 'bg-rose-600/25 border-rose-500 text-rose-200'
                   : 'bg-zinc-950/40 border-zinc-850 text-zinc-400 hover:text-white'
               }`}
               title="Cut (Kesim): Bu şekli ana katıdan oyan bir boşluk/delik yapar."
@@ -3735,19 +3751,58 @@ export default function App() {
             </select>
           </div>
         ) : (
-          <div className="space-y-1">
-            <span className="text-[9px] text-zinc-400 font-mono block">Yükseklik / Derinlik (Z-Depth):</span>
-            <div className="flex gap-2">
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[9px] text-zinc-400 font-mono block">Yükseklik / Derinlik (Z-Depth Preview):</span>
+              <span className="text-xs font-mono font-bold text-orange-400">{activePreviewDepth} mm</span>
+            </div>
+            
+            <div className="flex gap-2 items-center">
+              <input
+                type="range"
+                min="5"
+                max="300"
+                step="1"
+                value={activePreviewDepth}
+                onChange={(e) => setGhostDepth(parseInt(e.target.value) || 5)}
+                className="flex-1 accent-orange-500 bg-zinc-950 rounded-lg appearance-none h-1.5 cursor-pointer"
+              />
               <input
                 type="number"
-                value={settings.depth !== undefined ? settings.depth : 30}
-                onChange={(e) => updateSelectedPathSettings({ depth: Math.max(5, parseInt(e.target.value) || 5) })}
-                className="flex-1 min-w-0 bg-zinc-955 border border-zinc-850 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-orange-500 font-mono text-center font-bold"
+                value={activePreviewDepth}
+                onChange={(e) => setGhostDepth(Math.max(5, parseInt(e.target.value) || 5))}
+                className="w-16 bg-zinc-955 border border-zinc-850 text-xs px-2 py-1 rounded text-zinc-200 outline-none focus:border-orange-500 font-mono text-center font-bold"
                 min="5"
                 max="1000"
               />
-              <span className="text-[9px] font-mono self-center text-zinc-500 font-bold">mm</span>
             </div>
+          </div>
+        )}
+
+        {/* Ghost Commit Block inside secondary settings too */}
+        {isGhostDirty && (
+          <div className="pt-2 flex gap-2 animate-fade-in border-t border-zinc-800">
+            <button
+              onClick={() => {
+                updateSelectedPathSettings({
+                  depth: activePreviewDepth,
+                  booleanType: activePreviewBool
+                });
+                logCommandResponse(`Boolean işlem kaydedildi: Z-Derinlik: ${activePreviewDepth}mm, Mod: ${activePreviewBool}`);
+              }}
+              className="flex-1 py-1.5 bg-gradient-to-r from-orange-600 to-amber-650 hover:from-orange-500 hover:to-amber-550 text-white font-mono font-bold text-[10px] rounded border border-orange-500 shadow-lg cursor-pointer transition uppercase text-center animate-pulse"
+            >
+              Uygula (Commit)
+            </button>
+            <button
+              onClick={() => {
+                setGhostDepth(actualDepth);
+                setGhostBooleanType(actualBooleanType);
+              }}
+              className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-mono rounded cursor-pointer transition"
+            >
+              Reset
+            </button>
           </div>
         )}
       </div>
@@ -11469,6 +11524,140 @@ export default function App() {
                   </label>
                 </div>
 
+                {/* 1.1 Solid Interaction (Boolean Mode) Control Panel */}
+                <div id="solid-boolean-panel" className="mt-3 bg-white p-3 rounded-lg border border-slate-200 space-y-2.5 shadow-xs">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                    <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono flex items-center gap-1">
+                      <Scissors className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                      <span>Solid Boolean (3D Interaction)</span>
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase font-bold">
+                      {selectedPathIdx === -1 ? 'Main Contour' : `Shape #${selectedPathIdx + 1}`}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      id="boolean-union-btn"
+                      onClick={() => {
+                        setGhostBooleanType('union');
+                      }}
+                      className={`flex flex-col text-left px-2 py-2 rounded-lg border transition cursor-pointer select-none leading-tight ${
+                        (ghostBooleanType === 'union')
+                          ? 'bg-orange-50/50 border-orange-300 text-orange-850 ring-1 ring-orange-200/50'
+                          : 'bg-slate-50/50 border-slate-150 text-slate-500 hover:bg-slate-100/50 hover:border-slate-200'
+                      }`}
+                      title="Union (Birleşim): Seçili şekil, parça gövdesine katı malzeme olarak eklenir."
+                    >
+                      <span className="text-[10px] font-bold block truncate flex items-center gap-1">
+                        <Plus className="w-3" /> UNION (Ekle)
+                      </span>
+                      <span className="text-[8.5px] font-mono text-slate-400 pt-0.5">
+                        {ghostBooleanType === 'union' ? '● ACTIVE PREVIEW' : '○ Disabled'}
+                      </span>
+                    </button>
+
+                    <button
+                      id="boolean-cut-btn"
+                      onClick={() => {
+                        setGhostBooleanType('cut');
+                      }}
+                      className={`flex flex-col text-left px-2 py-2 rounded-lg border transition cursor-pointer select-none leading-tight ${
+                        ghostBooleanType === 'cut'
+                          ? 'bg-rose-50/50 border-rose-300 text-rose-850 ring-1 ring-rose-200/50'
+                          : 'bg-slate-50/50 border-slate-150 text-slate-500 hover:bg-slate-100/50 hover:border-slate-200'
+                      }`}
+                      title="Cut (Kesim): Seçili şekil, parça gövdesini oyan boşluk/delik olarak kesilir."
+                    >
+                      <span className="text-[10px] font-bold block truncate flex items-center gap-1">
+                        <Scissors className="w-3 rotate-90" /> CUT (Oyuk Kes)
+                      </span>
+                      <span className="text-[8.5px] font-mono text-slate-400 pt-0.5">
+                        {ghostBooleanType === 'cut' ? '● ACTIVE PREVIEW' : '○ Disabled'}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Dynamic Parameter: Extrude Thickness Slider with Real-time Ghost Preview */}
+                  <div className="space-y-1.5 pt-1.5 border-t border-slate-100">
+                    <div className="flex justify-between items-center text-[10px] font-semibold text-slate-500 font-mono">
+                      <span>Preview Z-Depth:</span>
+                      <span className="text-orange-600 font-bold bg-orange-50 px-1.5 py-0.5 rounded font-mono">
+                        {ghostDepth !== null ? ghostDepth : (getSelectedPathSettings().depth !== undefined ? getSelectedPathSettings().depth : 30)} mm
+                      </span>
+                    </div>
+
+                    <div className="flex gap-2.5 items-center">
+                      <input
+                        id="ghost-depth-slider"
+                        type="range"
+                        min="5"
+                        max="300"
+                        step="1"
+                        value={ghostDepth !== null ? ghostDepth : (getSelectedPathSettings().depth !== undefined ? getSelectedPathSettings().depth : 30)}
+                        onChange={(e) => {
+                          setGhostDepth(parseInt(e.target.value) || 5);
+                        }}
+                        className="flex-1 accent-orange-500 bg-slate-100 rounded-lg appearance-none h-1.5 cursor-pointer"
+                      />
+                      <input
+                        id="ghost-depth-num"
+                        type="number"
+                        min="5"
+                        max="1000"
+                        value={ghostDepth !== null ? ghostDepth : (getSelectedPathSettings().depth !== undefined ? getSelectedPathSettings().depth : 30)}
+                        onChange={(e) => {
+                          setGhostDepth(Math.max(5, parseInt(e.target.value) || 5));
+                        }}
+                        className="w-14 bg-slate-50 border border-slate-200 text-slate-800 text-xs px-1.5 py-0.5 rounded text-center font-mono focus:border-orange-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Ghost Preview Commit / Actions panel */}
+                  {((ghostDepth !== null && ghostDepth !== (getSelectedPathSettings().depth !== undefined ? getSelectedPathSettings().depth : 30)) ||
+                    (ghostBooleanType !== null && ghostBooleanType !== (getSelectedPathSettings().booleanType || 'union'))) && (
+                    <div className="pt-2 flex gap-2 animate-bounce-short">
+                      <button
+                        id="ghost-commit-btn"
+                        onClick={() => {
+                          const actualSettings = getSelectedPathSettings();
+                          const actualDepth = actualSettings.depth !== undefined ? actualSettings.depth : 30;
+                          const actualBooleanType = actualSettings.booleanType || 'union';
+                          const targetDepth = ghostDepth !== null ? ghostDepth : actualDepth;
+                          const targetBool = ghostBooleanType !== null ? ghostBooleanType : actualBooleanType;
+                          updateSelectedPathSettings({
+                            depth: targetDepth,
+                            booleanType: targetBool
+                          });
+                          logCommandResponse(`Boolean işlem kaydedildi: Z-Derinlik: ${targetDepth}mm, Mod: ${targetBool}`);
+                        }}
+                        className="flex-1 py-1.5 px-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-mono font-bold text-[10.5px] rounded border border-orange-400 shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer uppercase animate-pulse"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-white animate-spin" style={{ animationDuration: '4s' }} />
+                        <span>Commit Boolean</span>
+                      </button>
+                      <button
+                        id="ghost-cancel-btn"
+                        onClick={() => {
+                          const actualSettings = getSelectedPathSettings();
+                          const actualDepth = actualSettings.depth !== undefined ? actualSettings.depth : 30;
+                          const actualBooleanType = actualSettings.booleanType || 'union';
+                          setGhostDepth(actualDepth);
+                          setGhostBooleanType(actualBooleanType);
+                        }}
+                        className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 text-[10px] font-mono rounded transition cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  )}
+
+                  <p className="text-[8.5px] text-slate-400 font-mono italic leading-normal">
+                    * Sürgüyü kaydırarak 3D ekranında gerçek-zamanlı "ghost" kesim/ekleme sonucunu izleyebilir, ardından "Commit" butonuna basarak kaydedebilirsiniz.
+                  </p>
+                </div>
+
                 {/* Fillet & Chamfer Controls */}
                 <div className="mt-3 bg-white p-2.5 rounded-lg border border-slate-200 space-y-2.5 shadow-xs">
                   <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono block">Geometry Modifiers</span>
@@ -15149,6 +15338,9 @@ export default function App() {
               }}
               sheetMaterial={sheetMaterial}
               onPhysicsCalculated={setPhysicsData}
+              ghostDepth={ghostDepth}
+              ghostBooleanType={ghostBooleanType}
+              ghostPathIdx={selectedPathIdx}
             />
           </div>
             </>
