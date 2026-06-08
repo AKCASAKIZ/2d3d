@@ -718,6 +718,7 @@ export default function App() {
   const [draftOpDepth, setDraftOpDepth] = useState<number>(30);
   const [filletRadius, setFilletRadius] = useState<number>(24);
   const [autoFilletRadius, setAutoFilletRadius] = useState<number>(10);
+  const [modifierSelectedCorners, setModifierSelectedCorners] = useState<Array<{ pathIdx: number; vertexIdx: number }>>([]);
   const [chamferDistance, setChamferDistance] = useState<number>(20);
   const [offsetDistance, setOffsetDistance] = useState<number>(15);
   const [cadRotateAngle, setCadRotateAngle] = useState<string>("45");
@@ -3726,6 +3727,208 @@ export default function App() {
 
     logCommandResponse(`Oto-Fillet Tamamlandı: Tüm keskin köşelere ${r} mm yarıçapında uniform yuvarlatma uygulandı.`);
     afterOperationCompleted();
+  };
+
+  const getActiveSharpCorners = () => {
+    const list: Array<{ pathIdx: number; vertexIdx: number; x: number; y: number }> = [];
+    
+    // Check finalPoints
+    if (finalPoints && finalPoints.length >= 4) {
+      const N = finalPoints.length - 1;
+      for (let i = 0; i < N; i++) {
+        const p1 = finalPoints[i];
+        if (p1.isCurvePoint) continue;
+
+        const p0 = finalPoints[i === 0 ? N - 1 : i - 1];
+        const p2 = finalPoints[i === N - 1 ? 0 : i + 1];
+
+        const dx1 = p0.x - p1.x;
+        const dy1 = p0.y - p1.y;
+        const len1 = Math.hypot(dx1, dy1);
+
+        const dx2 = p2.x - p1.x;
+        const dy2 = p2.y - p1.y;
+        const len2 = Math.hypot(dx2, dy2);
+
+        let isSharp = false;
+        if (len1 > 0.1 && len2 > 0.1) {
+          const cosTheta = (dx1 * dx2 + dy1 * dy2) / (len1 * len2);
+          isSharp = cosTheta > -0.999 && cosTheta < 0.999;
+        }
+        if (isSharp) {
+          list.push({ pathIdx: -1, vertexIdx: i, x: p1.x, y: p1.y });
+        }
+      }
+    }
+
+    // Check activeLayer path segments
+    if (activeLayer.paths && activeLayer.paths.length > 0) {
+      activeLayer.paths.forEach((path, pathIdx) => {
+        if (path.length >= 4) {
+          const N = path.length - 1;
+          for (let i = 0; i < N; i++) {
+            const p1 = path[i];
+            if (p1.isCurvePoint) continue;
+
+            const p0 = path[i === 0 ? N - 1 : i - 1];
+            const p2 = path[i === N - 1 ? 0 : i + 1];
+
+            const dx1 = p0.x - p1.x;
+            const dy1 = p0.y - p1.y;
+            const len1 = Math.hypot(dx1, dy1);
+
+            const dx2 = p2.x - p1.x;
+            const dy2 = p2.y - p1.y;
+            const len2 = Math.hypot(dx2, dy2);
+
+            let isSharp = false;
+            if (len1 > 0.1 && len2 > 0.1) {
+              const cosTheta = (dx1 * dx2 + dy1 * dy2) / (len1 * len2);
+              isSharp = cosTheta > -0.999 && cosTheta < 0.999;
+            }
+            if (isSharp) {
+              list.push({ pathIdx, vertexIdx: i, x: p1.x, y: p1.y });
+            }
+          }
+        }
+      });
+    }
+
+    return list;
+  };
+
+  const applyFilletToMultipleCorners = (corners: Array<{ pathIdx: number; vertexIdx: number }>, r: number) => {
+    if (activeLayer.locked) {
+      logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Fillet.`);
+      return;
+    }
+    if (corners.length === 0) {
+      logCommandResponse('Lütfen en az bir köşe seçin.');
+      return;
+    }
+
+    saveState();
+
+    // Group corners by pathIdx
+    const grouped: { [key: number]: number[] } = {};
+    corners.forEach(c => {
+      if (!grouped[c.pathIdx]) {
+        grouped[c.pathIdx] = [];
+      }
+      grouped[c.pathIdx].push(c.vertexIdx);
+    });
+
+    // We will update layers and/or finalPoints
+    let updatedFinalPoints = [...finalPoints];
+    let updatedPaths = activeLayer.paths ? JSON.parse(JSON.stringify(activeLayer.paths)) as Point[][] : [];
+
+    let successCount = 0;
+
+    // Helper to fillet a single array of points at vertexIdx
+    const filletSinglePath = (pts: Point[], idx: number): Point[] | null => {
+      if (pts.length < 4) return null;
+      if (idx < 0 || idx >= pts.length) return null;
+
+      let targetIdx = idx;
+      if (targetIdx === pts.length - 1) {
+        targetIdx = 0;
+      }
+
+      const roundedPts: Point[] = [];
+      for (let jIter = 0; jIter < pts.length - 1; jIter++) {
+        const p1 = pts[jIter];
+        if (jIter === targetIdx) {
+          const p0 = pts[jIter === 0 ? pts.length - 2 : jIter - 1];
+          const p2 = pts[jIter + 1];
+
+          const dx1 = p0.x - p1.x;
+          const dy1 = p0.y - p1.y;
+          const len1 = Math.hypot(dx1, dy1);
+
+          const dx2 = p2.x - p1.x;
+          const dy2 = p2.y - p1.y;
+          const len2 = Math.hypot(dx2, dy2);
+
+          if (len1 > r && len2 > r) {
+            roundedPts.push({
+              x: p1.x + (dx1 / len1) * r,
+              y: p1.y + (dy1 / len1) * r,
+              isCurvePoint: false,
+            });
+            roundedPts.push({
+              x: p1.x + (dx1 / len1) * r * 0.5 + (dx2 / len2) * r * 0.1,
+              y: p1.y + (dy1 / len1) * r * 0.5 + (dy2 / len2) * r * 0.1,
+              isCurvePoint: true,
+            });
+            roundedPts.push({
+              x: p1.x + (dx1 / len1) * r * 0.1 + (dx2 / len2) * r * 0.5,
+              y: p1.y + (dy1 / len1) * r * 0.1 + (dy2 / len2) * r * 0.5,
+              isCurvePoint: true,
+            });
+            roundedPts.push({
+              x: p1.x + (dx2 / len2) * r,
+              y: p1.y + (dy2 / len2) * r,
+              isCurvePoint: false,
+            });
+          } else {
+            roundedPts.push(p1);
+          }
+        } else {
+          roundedPts.push(p1);
+        }
+      }
+      roundedPts.push({ ...roundedPts[0] });
+      return roundedPts;
+    };
+
+    // 1. Process active contour finalPoints (pathIdx === -1)
+    if (grouped[-1]) {
+      // Sort indices descending to avoid shifting issues!
+      const sortedIdx = [...grouped[-1]].sort((a, b) => b - a);
+      for (const idx of sortedIdx) {
+        const nextFP = filletSinglePath(updatedFinalPoints, idx);
+        if (nextFP) {
+          updatedFinalPoints = nextFP;
+          successCount++;
+        }
+      }
+    }
+
+    // 2. Process other paths
+    Object.keys(grouped).forEach(pathIdxKey => {
+      const pIdx = parseInt(pathIdxKey);
+      if (pIdx !== -1 && updatedPaths[pIdx]) {
+        const sortedIdx = [...grouped[pIdx]].sort((a, b) => b - a);
+        let currentPathPoints = updatedPaths[pIdx];
+        for (const idx of sortedIdx) {
+          const nextPP = filletSinglePath(currentPathPoints, idx);
+          if (nextPP) {
+            currentPathPoints = nextPP;
+            successCount++;
+          }
+        }
+        updatedPaths[pIdx] = currentPathPoints;
+      }
+    });
+
+    if (successCount > 0) {
+      setLayers(prev => prev.map(l => {
+        if (l.id === activeLayerId) {
+          return {
+            ...l,
+            finalPoints: updatedFinalPoints,
+            paths: updatedPaths,
+            isClosed: true
+          };
+        }
+        return l;
+      }));
+      setModifierSelectedCorners([]);
+      logCommandResponse(`Manuel Fillet Tamamlandı: Seçilen ${successCount} köşeye ${r} mm yarıçapında yuvarlatma uygulandı.`);
+      afterOperationCompleted();
+    } else {
+      logCommandResponse(`Seçili köşelere yuvarlatma uygulanamadı (köşe kenarları yarıçaptan küçük olabilir).`);
+    }
   };
 
   const handleDXFImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -12392,6 +12595,101 @@ export default function App() {
                           Auto-Fillet All
                         </button>
                       </div>
+
+                      {/* Manual Sharp Corners Selector Selection */}
+                      {(() => {
+                        const sharpCorners = getActiveSharpCorners();
+                        if (sharpCorners.length === 0) return null;
+                        return (
+                          <div className="bg-slate-50/80 p-2 rounded-lg border border-slate-205/60 mt-2 space-y-2 text-left">
+                            <div className="flex items-center justify-between text-[9px] font-mono font-bold text-cyan-700 uppercase">
+                              <span>🔍 MANUEL KÖŞE SEÇİMLERİ ({modifierSelectedCorners.length}/{sharpCorners.length})</span>
+                            </div>
+                            <p className="text-[8.5px] text-slate-500 font-sans leading-normal">
+                              Aşağıdaki listeden veya çizim ekranından istediğiniz köşeleri seçerek sadece onlara özel fillet uygulayabilirsiniz.
+                            </p>
+                            <div className="flex gap-1 justify-end">
+                              <button
+                                onClick={() => {
+                                  setModifierSelectedCorners(sharpCorners.map(c => ({ pathIdx: c.pathIdx, vertexIdx: c.vertexIdx })));
+                                  logCommandResponse("Tüm tasarım köşeleri seçildi.");
+                                }}
+                                className="px-2 py-0.5 bg-white hover:bg-slate-100 text-[8.5px] font-bold border border-slate-300 rounded text-slate-650 transition cursor-pointer"
+                              >
+                                Tümünü Seç
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setModifierSelectedCorners([]);
+                                  logCommandResponse("Köşe seçimleri temizlendi.");
+                                }}
+                                className="px-2 py-0.5 bg-white hover:bg-slate-100 text-[8.5px] font-bold border border-slate-300 rounded text-slate-650 transition cursor-pointer"
+                              >
+                                Temizle
+                              </button>
+                            </div>
+                            <div className="max-h-24 overflow-y-auto border border-slate-200 rounded divide-y divide-slate-100 bg-white">
+                              {sharpCorners.map((corner) => {
+                                const isChecked = modifierSelectedCorners.some(
+                                  c => c.pathIdx === corner.pathIdx && c.vertexIdx === corner.vertexIdx
+                                );
+                                const isHighlighted = selectedVertexIdx === corner.vertexIdx && selectedPathIdx === corner.pathIdx;
+                                return (
+                                  <div
+                                    key={`${corner.pathIdx}-${corner.vertexIdx}`}
+                                    className={`flex items-center justify-between p-1.5 text-[9px] font-mono cursor-pointer transition ${
+                                      isHighlighted ? 'bg-orange-50 font-bold' : isChecked ? 'bg-cyan-50/40' : 'hover:bg-slate-50'
+                                    }`}
+                                    onClick={() => {
+                                      setSelectedVertexIdx(corner.vertexIdx);
+                                      setSelectedPathIdx(corner.pathIdx);
+                                      
+                                      // Toggle inside modifierSelectedCorners
+                                      if (isChecked) {
+                                        setModifierSelectedCorners(prev => prev.filter(
+                                          c => !(c.pathIdx === corner.pathIdx && c.vertexIdx === corner.vertexIdx)
+                                        ));
+                                      } else {
+                                        setModifierSelectedCorners(prev => [...prev, { pathIdx: corner.pathIdx, vertexIdx: corner.vertexIdx }]);
+                                      }
+                                    }}
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        readOnly
+                                        className="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer h-3 w-3"
+                                      />
+                                      <span className={isHighlighted ? 'text-orange-600' : 'text-slate-600'}>
+                                        Köşe #{corner.vertexIdx + 1} ({corner.pathIdx === -1 ? 'Sınır' : `Yol #${corner.pathIdx + 1}`})
+                                      </span>
+                                    </div>
+                                    <span className="text-slate-400 text-[8px]">
+                                      [{corner.x.toFixed(1)}, {corner.y.toFixed(1)}]
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <div className="pt-1 flex gap-1.5">
+                              <button
+                                disabled={modifierSelectedCorners.length === 0}
+                                onClick={() => applyFilletToMultipleCorners(modifierSelectedCorners, autoFilletRadius)}
+                                className={`w-full py-1.5 rounded text-[10px] font-bold transition text-center border cursor-pointer ${
+                                  modifierSelectedCorners.length > 0
+                                    ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 border-cyan-500 text-white shadow-xs'
+                                    : 'bg-slate-50 border-slate-200 text-slate-350 cursor-not-allowed'
+                                }`}
+                                title="Seçilen belirli köşelere fillet yarıçapını uygular"
+                              >
+                                Seçili Köşelere Yuvarlatma Uygula ({autoFilletRadius} mm)
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
