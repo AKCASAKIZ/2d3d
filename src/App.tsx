@@ -612,6 +612,10 @@ export default function App() {
   const [selectedVertexIdx, setSelectedVertexIdx] = useState<number | null>(null);
   const [selectedPathIdx, setSelectedPathIdx] = useState<number>(-1); // -1 is finalPoints, otherwise path Index
   
+  // Edge Selection hooks for Fillet/Chamfer
+  const [selectedSegments, setSelectedSegments] = useState<Array<{ pathIdx: number; segmentIdx: number }>>([]);
+  const [isEdgeSelectionMode, setIsEdgeSelectionMode] = useState<boolean>(false);
+  
   // Ghost preview states for real-time 3D boolean preview adjustments
   const [ghostDepth, setGhostDepth] = useState<number | null>(null);
   const [ghostBooleanType, setGhostBooleanType] = useState<'union' | 'cut' | null>(null);
@@ -3174,6 +3178,240 @@ export default function App() {
   };
 
   // Geometric modifiers
+  const getSharedVertexFromSelectedSegments = (): { pathIdx: number; vertexIdx: number } | null => {
+    if (selectedSegments.length !== 2) {
+      logCommandResponse('Kenar seçimiyle işlem yapmak için önce 2 adet komşu (adjacent) kenar seçmelisiniz.');
+      return null;
+    }
+
+    const s1 = selectedSegments[0];
+    const s2 = selectedSegments[1];
+
+    if (s1.pathIdx !== s2.pathIdx) {
+      logCommandResponse('Hata: Seçilen iki kenar aynı çizime ait olmalıdır!');
+      return null;
+    }
+
+    const pathIdx = s1.pathIdx;
+    let pts: Point[] = [];
+    if (pathIdx === -1) {
+      pts = finalPoints;
+    } else if (activeLayer.paths && activeLayer.paths[pathIdx]) {
+      pts = activeLayer.paths[pathIdx];
+    }
+
+    if (pts.length < 4) return null;
+
+    const N = pts.length - 1; // Number of unique segments in closed shape
+    const i = s1.segmentIdx;
+    const j = s2.segmentIdx;
+
+    // Check adjacent loops
+    let sharedVertexIdx: number | null = null;
+    if ((i + 1) % N === j) {
+      sharedVertexIdx = j;
+    } else if ((j + 1) % N === i) {
+      sharedVertexIdx = i;
+    }
+
+    if (sharedVertexIdx !== null) {
+      return { pathIdx, vertexIdx: sharedVertexIdx };
+    }
+
+    logCommandResponse('Hata: Seçilen kenarlar ardışık (birbiriyle komşu/kesişen) olmalıdır!');
+    return null;
+  };
+
+  const applyFilletGeneralized = (r: number, pathIdx: number, vertexIdx: number) => {
+    if (activeLayer.locked) {
+      logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Fillet.`);
+      return;
+    }
+    
+    let pts: Point[] = [];
+    if (pathIdx === -1) {
+      pts = [...finalPoints];
+    } else if (activeLayer.paths && activeLayer.paths[pathIdx]) {
+      pts = [...activeLayer.paths[pathIdx]];
+    }
+
+    if (pts.length < 4) {
+      logCommandResponse('Need at least 3 segments to apply Fillet.');
+      return;
+    }
+
+    if (vertexIdx < 0 || vertexIdx >= pts.length) {
+      logCommandResponse('Invalid selected corner index.');
+      return;
+    }
+
+    saveState();
+    let idx = vertexIdx;
+    if (idx === pts.length - 1) {
+      idx = 0;
+    }
+
+    const roundedPts: Point[] = [];
+    for (let jIter = 0; jIter < pts.length - 1; jIter++) {
+      const p1 = pts[jIter];
+      if (jIter === idx) {
+        const p0 = pts[jIter === 0 ? pts.length - 2 : jIter - 1];
+        const p2 = pts[jIter + 1];
+
+        const dx1 = p0.x - p1.x;
+        const dy1 = p0.y - p1.y;
+        const len1 = Math.hypot(dx1, dy1);
+
+        const dx2 = p2.x - p1.x;
+        const dy2 = p2.y - p1.y;
+        const len2 = Math.hypot(dx2, dy2);
+
+        if (len1 > r && len2 > r) {
+          roundedPts.push({
+            x: p1.x + (dx1 / len1) * r,
+            y: p1.y + (dy1 / len1) * r,
+            isCurvePoint: false,
+          });
+          roundedPts.push({
+            x: p1.x + (dx1 / len1) * r * 0.5 + (dx2 / len2) * r * 0.1,
+            y: p1.y + (dy1 / len1) * r * 0.5 + (dy2 / len2) * r * 0.1,
+            isCurvePoint: true,
+          });
+          roundedPts.push({
+            x: p1.x + (dx1 / len1) * r * 0.1 + (dx2 / len2) * r * 0.5,
+            y: p1.y + (dy1 / len1) * r * 0.1 + (dy2 / len2) * r * 0.5,
+            isCurvePoint: true,
+          });
+          roundedPts.push({
+            x: p1.x + (dx2 / len2) * r,
+            y: p1.y + (dy2 / len2) * r,
+            isCurvePoint: false,
+          });
+        } else {
+          roundedPts.push(p1);
+        }
+      } else {
+        roundedPts.push(p1);
+      }
+    }
+    roundedPts.push({ ...roundedPts[0] });
+
+    if (pathIdx === -1) {
+      setFinalPoints(roundedPts);
+      setIsClosed(true);
+    } else if (activeLayer.paths) {
+      setLayers(prev => prev.map(l => {
+        if (l.id === activeLayerId) {
+          const np = [...(l.paths || [])];
+          np[pathIdx] = roundedPts;
+          return { ...l, paths: np };
+        }
+        return l;
+      }));
+    }
+
+    setSelectedVertexIdx(null);
+    logCommandResponse(`Fillet corners successfully rounded (r: ${r} mm) on the selected corner.`);
+    afterOperationCompleted();
+  };
+
+  const applyChamferGeneralized = (d: number, pathIdx: number, vertexIdx: number) => {
+    if (activeLayer.locked) {
+      logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Chamfer.`);
+      return;
+    }
+
+    let pts: Point[] = [];
+    if (pathIdx === -1) {
+      pts = [...finalPoints];
+    } else if (activeLayer.paths && activeLayer.paths[pathIdx]) {
+      pts = [...activeLayer.paths[pathIdx]];
+    }
+
+    if (pts.length < 4) {
+      logCommandResponse('Need at least 3 segments to apply Chamfer.');
+      return;
+    }
+
+    if (vertexIdx < 0 || vertexIdx >= pts.length) {
+      logCommandResponse('Invalid selected corner index.');
+      return;
+    }
+
+    saveState();
+    let idx = vertexIdx;
+    if (idx === pts.length - 1) {
+      idx = 0;
+    }
+
+    const chamferPts: Point[] = [];
+    for (let jIter = 0; jIter < pts.length - 1; jIter++) {
+      const p1 = pts[jIter];
+      if (jIter === idx) {
+        const p0 = pts[jIter === 0 ? pts.length - 2 : jIter - 1];
+        const p2 = pts[jIter + 1];
+
+        const dx1 = p0.x - p1.x;
+        const dy1 = p0.y - p1.y;
+        const len1 = Math.hypot(dx1, dy1);
+
+        const dx2 = p2.x - p1.x;
+        const dy2 = p2.y - p1.y;
+        const len2 = Math.hypot(dx2, dy2);
+
+        if (len1 > d * 1.5 && len2 > d * 1.5) {
+          chamferPts.push({
+            x: p1.x + (dx1 / len1) * d,
+            y: p1.y + (dy1 / len1) * d,
+          });
+          chamferPts.push({
+            x: p1.x + (dx2 / len2) * d,
+            y: p1.y + (dy2 / len2) * d,
+          });
+        } else {
+          chamferPts.push(p1);
+        }
+      } else {
+        chamferPts.push(p1);
+      }
+    }
+    chamferPts.push({ ...chamferPts[0] });
+
+    if (pathIdx === -1) {
+      setFinalPoints(chamferPts);
+      setIsClosed(true);
+    } else if (activeLayer.paths) {
+      setLayers(prev => prev.map(l => {
+        if (l.id === activeLayerId) {
+          const np = [...(l.paths || [])];
+          np[pathIdx] = chamferPts;
+          return { ...l, paths: np };
+        }
+        return l;
+      }));
+    }
+
+    setSelectedVertexIdx(null);
+    logCommandResponse(`Chamfer corner successfully beveled (d: ${d} mm) on the selected corner.`);
+    afterOperationCompleted();
+  };
+
+  const applyFilletToSelectedEdges = (r: number) => {
+    const res = getSharedVertexFromSelectedSegments();
+    if (res) {
+      applyFilletGeneralized(r, res.pathIdx, res.vertexIdx);
+      setSelectedSegments([]); // Clear selection after successful apply
+    }
+  };
+
+  const applyChamferToSelectedEdges = (d: number) => {
+    const res = getSharedVertexFromSelectedSegments();
+    if (res) {
+      applyChamferGeneralized(d, res.pathIdx, res.vertexIdx);
+      setSelectedSegments([]); // Clear selection after successful apply
+    }
+  };
+
   const applyFillet = (r: number = filletRadius, targetIdx: number | null = selectedVertexIdx) => {
     if (activeLayer.locked) {
       logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Fillet.`);
@@ -6200,6 +6438,56 @@ export default function App() {
       }
     }
 
+    // 9.5 Draw selected segments for Fillet & Chamfer
+    if (selectedSegments && selectedSegments.length > 0) {
+      selectedSegments.forEach((seg, index) => {
+        const { pathIdx, segmentIdx } = seg;
+        const pts = pathIdx === -1 ? finalPoints : (activeLayer.paths ? activeLayer.paths[pathIdx] : []);
+        if (pts && pts.length > 1) {
+          const nextIdx = (segmentIdx + 1) % pts.length;
+          const p1 = pts[segmentIdx];
+          const p2 = pts[nextIdx];
+          if (p1 && p2) {
+            ctx.save();
+            // Glow effect (neon cyan glow for Edge selection)
+            ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
+            ctx.lineWidth = 14 / viewZoom;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+
+            // Clear cyan core line
+            ctx.strokeStyle = '#06b6d4'; // Cyan
+            ctx.lineWidth = 4 / viewZoom;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+
+            // Label "Edge 1" / "Edge 2" at the midpoint
+            const midX = (p1.x + p2.x) / 2;
+            const midY = (p1.y + p2.y) / 2;
+            ctx.fillStyle = '#06b6d4';
+            ctx.beginPath();
+            ctx.arc(midX, midY, 6 / viewZoom, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.2 / viewZoom;
+            ctx.stroke();
+
+            // Text tag
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${Math.max(8, 10 / viewZoom)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText((index + 1).toString(), midX, midY);
+            ctx.restore();
+          }
+        }
+      });
+    }
+
     ctx.restore();
   };
 
@@ -7717,6 +8005,22 @@ export default function App() {
         }
 
         if (isClickOnShape && clickedPathIdx !== null) {
+          if (isEdgeSelectionMode || e.shiftKey) {
+            // Toggle edge selection
+            const exists = selectedSegments.findIndex(s => s.pathIdx === clickedPathIdx && s.segmentIdx === clickedSegmentIdx);
+            if (exists !== -1) {
+              const updated = selectedSegments.filter((_, idx) => idx !== exists);
+              setSelectedSegments(updated);
+              logCommandResponse(`Kenar seçimi iptal edildi. Toplam seçilen kenar: ${updated.length}/2`);
+            } else {
+              const updated = [...selectedSegments, { pathIdx: clickedPathIdx, segmentIdx: clickedSegmentIdx }];
+              const limited = updated.length > 2 ? updated.slice(updated.length - 2) : updated;
+              setSelectedSegments(limited);
+              logCommandResponse(`Kenar seçildi! Toplam seçilen kenar: ${limited.length}/2. ${limited.length === 2 ? "Seçilen iki kenar için sidebar'dan Fillet veya Chamfer uygulayabilirsiniz!" : ""}`);
+            }
+            return;
+          }
+
           // Cancelled: Do not trigger edit dimension popup on line segment touch/cllick
           // setEditingPathIdx(clickedPathIdx);
           // setEditingSegmentIdx(clickedSegmentIdx);
@@ -11653,64 +11957,169 @@ export default function App() {
                     </div>
                   )}
 
-                  <p className="text-[8.5px] text-slate-400 font-mono italic leading-normal">
+                  <p className="text-[8.5px] text-slate-400 font-mono italic leading-normal text-left">
                     * Sürgüyü kaydırarak 3D ekranında gerçek-zamanlı "ghost" kesim/ekleme sonucunu izleyebilir, ardından "Commit" butonuna basarak kaydedebilirsiniz.
                   </p>
                 </div>
 
                 {/* Fillet & Chamfer Controls */}
                 <div className="mt-3 bg-white p-2.5 rounded-lg border border-slate-200 space-y-2.5 shadow-xs">
-                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono block">Geometry Modifiers</span>
+                  <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase font-mono block text-left font-sans">Geometry Modifiers</span>
                   
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-                      <span>Fillet Radius (r):</span>
-                      <span className="text-orange-600 font-bold">{filletRadius} mm</span>
+                  {/* Select 2 Edges Workflow */}
+                  <div className="bg-slate-50 p-2 rounded-lg border border-slate-150 space-y-2">
+                    <div className="flex items-center justify-between text-[9px] font-mono text-cyan-700 font-bold uppercase">
+                      <span>⚡ 2-KENAR FİLLET / CHAMFER</span>
+                      {isEdgeSelectionMode && <span className="animate-pulse text-rose-500">● SEÇİM AKTİF</span>}
                     </div>
-                    <div className="flex gap-1.5">
-                      <input
-                        type="number"
-                        value={filletRadius}
-                        onChange={(e) => setFilletRadius(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
-                        min="1"
-                        max="500"
-                      />
+
+                    <p className="text-[8.5px] text-slate-500 font-sans leading-normal text-left">
+                      Ekranda ardışık 2 kenar seçerek kesişim noktasına yuvarlatma (Fillet) veya pah kırma (Chamfer) uygulayın.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-1.5">
                       <button
-                        onClick={() => applyFillet(filletRadius)}
-                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
-                        title="Apply rounding radius to all corners"
+                        onClick={() => {
+                          setIsEdgeSelectionMode(!isEdgeSelectionMode);
+                          if (!isEdgeSelectionMode) {
+                            setSelectedSegments([]);
+                            logCommandResponse("Kenar Seçim Modu ETKİN: 2 adet komşu kenara sırayla tıklayın (veya Shift basılı tutarak tıklayın).");
+                          } else {
+                            logCommandResponse("Kenar Seçim Modu deaktif edildi.");
+                          }
+                        }}
+                        className={`py-1.5 rounded text-[10px] font-bold font-mono transition text-center border cursor-pointer ${
+                          isEdgeSelectionMode
+                            ? 'bg-cyan-500 text-white border-cyan-600 shadow-sm animate-pulse'
+                            : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                        }`}
                       >
-                        Fillet
+                        {isEdgeSelectionMode ? "🔑 Seçimi Durdur" : "🖱️ Kenar Seçimi Başlat"}
+                      </button>
+
+                      <button
+                        disabled={selectedSegments.length === 0}
+                        onClick={() => {
+                          setSelectedSegments([]);
+                          logCommandResponse("Seçilen kenarlar temizlendi.");
+                        }}
+                        className={`py-1.5 rounded text-[10px] font-mono transition text-center border cursor-pointer ${
+                          selectedSegments.length > 0
+                            ? 'bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-600'
+                            : 'bg-slate-50 border-slate-200 text-slate-300 cursor-not-allowed'
+                        }`}
+                      >
+                        Temizle ({selectedSegments.length}/2)
+                      </button>
+                    </div>
+
+                    {/* Status of Selected Edges */}
+                    <div className="bg-white p-1.5 rounded border border-slate-200 space-y-1 font-mono text-[9px] text-left">
+                      <div className="flex justify-between items-center text-slate-605">
+                        <span>Kenar 1 (Yüzey 1):</span>
+                        {selectedSegments[0] ? (
+                          <span className="text-cyan-600 font-bold bg-cyan-50 px-1 py-0.2 rounded">
+                            Şekil {selectedSegments[0].pathIdx === -1 ? 'Ana' : `#${selectedSegments[0].pathIdx + 1}`}, Seg #{selectedSegments[0].segmentIdx}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Seçilmedi</span>
+                        )}
+                      </div>
+                      <div className="flex justify-between items-center text-slate-605">
+                        <span>Kenar 2 (Yüzey 2):</span>
+                        {selectedSegments[1] ? (
+                          <span className="text-cyan-600 font-bold bg-cyan-50 px-1 py-0.2 rounded">
+                            Şekil {selectedSegments[1].pathIdx === -1 ? 'Ana' : `#${selectedSegments[1].pathIdx + 1}`}, Seg #{selectedSegments[1].segmentIdx}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Seçilmedi</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Actions on selections */}
+                    <div className="grid grid-cols-2 gap-1.5 pt-1">
+                      <button
+                        disabled={selectedSegments.length !== 2}
+                        onClick={() => applyFilletToSelectedEdges(filletRadius)}
+                        className={`py-1.5 rounded text-[10px] font-bold transition text-center border cursor-pointer ${
+                          selectedSegments.length === 2
+                            ? 'bg-cyan-600 border-cyan-500 hover:bg-cyan-700 text-white shadow-xs'
+                            : 'bg-slate-50 border-slate-200 text-slate-305 cursor-not-allowed'
+                        }`}
+                        title="Seçili iki kenarın birleştiği köşeyi yuvarlaklaştırır"
+                      >
+                        Fillet Uygula ({filletRadius} r)
+                      </button>
+
+                      <button
+                        disabled={selectedSegments.length !== 2}
+                        onClick={() => applyChamferToSelectedEdges(chamferDistance)}
+                        className={`py-1.5 rounded text-[10px] font-bold transition text-center border cursor-pointer ${
+                          selectedSegments.length === 2
+                            ? 'bg-cyan-600 border-cyan-500 hover:bg-cyan-700 text-white shadow-xs'
+                            : 'bg-slate-50 border-slate-200 text-slate-305 cursor-not-allowed'
+                        }`}
+                        title="Seçili iki kenarın birleştiği köşeye düz bir pah kırar"
+                      >
+                        Chamfer Uygula ({chamferDistance} d)
                       </button>
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
-                      <span>Chamfer Distance (d):</span>
-                      <span className="text-orange-600 font-bold">{chamferDistance} mm</span>
+                  <div className="border-t border-slate-100 pt-1.5 space-y-2.5">
+                    <span className="text-[9px] font-bold tracking-wider text-slate-400 uppercase font-mono block text-left">Genel Değiştiriciler (Tüm Köşeler)</span>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                        <span>Fillet Radius (r):</span>
+                        <span className="text-orange-600 font-bold">{filletRadius} mm</span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="number"
+                          value={filletRadius}
+                          onChange={(e) => setFilletRadius(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
+                          min="1"
+                          max="500"
+                        />
+                        <button
+                          onClick={() => applyFillet(filletRadius)}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
+                          title="Apply rounding radius to all corners of active contour"
+                        >
+                          Tümüne Uygula
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-1.5">
-                      <input
-                        type="number"
-                        value={chamferDistance}
-                        onChange={(e) => setChamferDistance(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
-                        min="1"
-                        max="500"
-                      />
-                      <button
-                        onClick={() => applyChamfer(chamferDistance)}
-                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
-                        title="Apply corner chamfer to all corners"
-                      >
-                        Chamfer
-                      </button>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                        <span>Chamfer Distance (d):</span>
+                        <span className="text-orange-600 font-bold">{chamferDistance} mm</span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <input
+                          type="number"
+                          value={chamferDistance}
+                          onChange={(e) => setChamferDistance(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-800 outline-none focus:border-orange-500 font-mono"
+                          min="1"
+                          max="500"
+                        />
+                        <button
+                          onClick={() => applyChamfer(chamferDistance)}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-250 hover:border-slate-350 rounded text-xs transition cursor-pointer text-slate-700 font-bold font-mono"
+                          title="Apply corner chamfer to all corners of active contour"
+                        >
+                          Tümüne Uygula
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-1 border-t border-slate-100 pt-1.5">
                     <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
                       <span>Offset Distance (d):</span>
                       <span className="text-orange-600 font-bold">{offsetDistance} mm</span>
