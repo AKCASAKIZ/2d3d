@@ -717,6 +717,7 @@ export default function App() {
   const [draftOpType, setDraftOpType] = useState<'union' | 'cut'>('cut');
   const [draftOpDepth, setDraftOpDepth] = useState<number>(30);
   const [filletRadius, setFilletRadius] = useState<number>(24);
+  const [autoFilletRadius, setAutoFilletRadius] = useState<number>(10);
   const [chamferDistance, setChamferDistance] = useState<number>(20);
   const [offsetDistance, setOffsetDistance] = useState<number>(15);
   const [cadRotateAngle, setCadRotateAngle] = useState<string>("45");
@@ -826,6 +827,7 @@ export default function App() {
 
   // Refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const dxfInputRef = useRef<HTMLInputElement | null>(null);
   const dragIndexRef = useRef<number>(-1);
   const dragPathIndexRef = useRef<number>(-1);
   const isDrawingRef = useRef(false);
@@ -3629,6 +3631,253 @@ export default function App() {
     setIsClosed(true);
     logCommandResponse(`Chamfer applied (d: ${d} mm) to all corners.`);
     afterOperationCompleted();
+  };
+
+  const applyAutoFilletAll = (r: number) => {
+    if (activeLayer.locked) {
+      logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Auto-Fillet.`);
+      return;
+    }
+
+    const processPoints = (pts: Point[]): Point[] => {
+      if (pts.length < 4) return pts;
+      const roundedPts: Point[] = [];
+      const N = pts.length - 1;
+      
+      for (let i = 0; i < N; i++) {
+        const p1 = pts[i];
+        if (p1.isCurvePoint) {
+          roundedPts.push(p1);
+          continue;
+        }
+
+        const p0 = pts[i === 0 ? N - 1 : i - 1];
+        const p2 = pts[i === N - 1 ? 0 : i + 1];
+
+        const dx1 = p0.x - p1.x;
+        const dy1 = p0.y - p1.y;
+        const len1 = Math.hypot(dx1, dy1);
+
+        const dx2 = p2.x - p1.x;
+        const dy2 = p2.y - p1.y;
+        const len2 = Math.hypot(dx2, dy2);
+
+        let isSharp = false;
+        if (len1 > 0.1 && len2 > 0.1) {
+          const cosTheta = (dx1 * dx2 + dy1 * dy2) / (len1 * len2);
+          isSharp = cosTheta > -0.999 && cosTheta < 0.999;
+        }
+
+        if (isSharp && len1 > r && len2 > r) {
+          roundedPts.push({
+            x: p1.x + (dx1 / len1) * r,
+            y: p1.y + (dy1 / len1) * r,
+            isCurvePoint: false,
+          });
+          roundedPts.push({
+            x: p1.x + (dx1 / len1) * r * 0.5 + (dx2 / len2) * r * 0.1,
+            y: p1.y + (dy1 / len1) * r * 0.5 + (dy2 / len2) * r * 0.1,
+            isCurvePoint: true,
+          });
+          roundedPts.push({
+            x: p1.x + (dx1 / len1) * r * 0.1 + (dx2 / len2) * r * 0.5,
+            y: p1.y + (dy1 / len1) * r * 0.1 + (dy2 / len2) * r * 0.5,
+            isCurvePoint: true,
+          });
+          roundedPts.push({
+            x: p1.x + (dx2 / len2) * r,
+            y: p1.y + (dy2 / len2) * r,
+            isCurvePoint: false,
+          });
+        } else {
+          roundedPts.push(p1);
+        }
+      }
+      roundedPts.push({ ...roundedPts[0] });
+      return roundedPts;
+    };
+
+    saveState();
+
+    let appliedAny = false;
+
+    if (finalPoints.length >= 4) {
+      const nextFP = processPoints(finalPoints);
+      setFinalPoints(nextFP);
+      setIsClosed(true);
+      appliedAny = true;
+    }
+
+    if (activeLayer.paths && activeLayer.paths.length > 0) {
+      setLayers(prev => prev.map(l => {
+        if (l.id === activeLayerId && l.paths) {
+          const nextPaths = l.paths.map(p => processPoints(p));
+          return { ...l, paths: nextPaths };
+        }
+        return l;
+      }));
+      appliedAny = true;
+    }
+
+    if (!appliedAny) {
+      logCommandResponse('Kenar yuvarlatılacak aktif bir sketç / kontur bulunamadı.');
+      return;
+    }
+
+    logCommandResponse(`Oto-Fillet Tamamlandı: Tüm keskin köşelere ${r} mm yarıçapında uniform yuvarlatma uygulandı.`);
+    afterOperationCompleted();
+  };
+
+  const handleDXFImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (!text) return;
+
+      try {
+        const lines = text.split(/\r?\n/).map(line => line.trim());
+        const entities: Array<{
+          type: 'LINE' | 'CIRCLE' | 'ARC';
+          x1?: number;
+          y1?: number;
+          x2?: number;
+          y2?: number;
+          cx?: number;
+          cy?: number;
+          r?: number;
+          startAngle?: number;
+          endAngle?: number;
+        }> = [];
+
+        let i = 0;
+        while (i < lines.length) {
+          const code = parseInt(lines[i]);
+          const val = lines[i + 1];
+          if (isNaN(code) || val === undefined) {
+            i++;
+            continue;
+          }
+
+          if (code === 0 && (val === 'LINE' || val === 'CIRCLE' || val === 'ARC')) {
+            const entityType = val as 'LINE' | 'CIRCLE' | 'ARC';
+            const entity: any = { type: entityType };
+            i += 2;
+
+            while (i < lines.length) {
+              const eCode = parseInt(lines[i]);
+              const eVal = lines[i + 1];
+              if (isNaN(eCode) || eVal === undefined) {
+                i++;
+                continue;
+              }
+              if (eCode === 0) {
+                break;
+              }
+
+              if (eCode === 10) entity.x = parseFloat(eVal);
+              else if (eCode === 20) entity.y = parseFloat(eVal);
+              else if (eCode === 11) entity.x2 = parseFloat(eVal);
+              else if (eCode === 21) entity.y2 = parseFloat(eVal);
+              else if (eCode === 40) entity.r = parseFloat(eVal);
+              else if (eCode === 50) entity.startAngle = parseFloat(eVal);
+              else if (eCode === 51) entity.endAngle = parseFloat(eVal);
+
+              i += 2;
+            }
+
+            if (entity.type === 'LINE' && !isNaN(entity.x) && !isNaN(entity.y) && !isNaN(entity.x2) && !isNaN(entity.y2)) {
+              entities.push({
+                type: 'LINE',
+                x1: entity.x,
+                y1: -entity.y,
+                x2: entity.x2,
+                y2: -entity.y2,
+              });
+            } else if (entity.type === 'CIRCLE' && !isNaN(entity.x) && !isNaN(entity.y) && !isNaN(entity.r)) {
+              entities.push({
+                type: 'CIRCLE',
+                cx: entity.x,
+                cy: -entity.y,
+                r: entity.r,
+              });
+            } else if (entity.type === 'ARC' && !isNaN(entity.x) && !isNaN(entity.y) && !isNaN(entity.r)) {
+              entities.push({
+                type: 'ARC',
+                cx: entity.x,
+                cy: -entity.y,
+                r: entity.r,
+                startAngle: entity.startAngle || 0,
+                endAngle: entity.endAngle || 360,
+              });
+            }
+          } else {
+            i += 2;
+          }
+        }
+
+        if (entities.length === 0) {
+          logCommandResponse('Hata: DXF dosyasında çizilebilir LINE, CIRCLE veya ARC objesi bulunamadı.');
+          return;
+        }
+
+        saveState();
+
+        const newPaths: Point[][] = [];
+
+        entities.forEach(ent => {
+          if (ent.type === 'LINE') {
+            newPaths.push([
+              { x: ent.x1!, y: ent.y1! },
+              { x: ent.x2!, y: ent.y2! }
+            ]);
+          } else if (ent.type === 'CIRCLE') {
+            const pts: Point[] = [];
+            const steps = 64;
+            for (let s = 0; s <= steps; s++) {
+              const theta = (s * 2 * Math.PI) / steps;
+              pts.push({
+                x: ent.cx! + ent.r! * Math.cos(theta),
+                y: ent.cy! + ent.r! * Math.sin(theta),
+                isCurvePoint: s > 0 && s < steps,
+                circleData: {
+                  center: { x: ent.cx!, y: ent.cy! },
+                  radius: ent.r!
+                }
+              });
+            }
+            newPaths.push(pts);
+          } else if (ent.type === 'ARC') {
+            const pts: Point[] = [];
+            const steps = 32;
+            const startRad = (ent.startAngle! * Math.PI) / 180;
+            let delta = ((ent.endAngle! - ent.startAngle! + 360) % 360);
+            if (delta === 0) delta = 360;
+            const deltaRad = (delta * Math.PI) / 180;
+
+            for (let s = 0; s <= steps; s++) {
+              const theta = startRad + (s * deltaRad) / steps;
+              pts.push({
+                x: ent.cx! + ent.r! * Math.cos(theta),
+                y: ent.cy! + ent.r! * Math.sin(theta),
+                isCurvePoint: true,
+              });
+            }
+            newPaths.push(pts);
+          }
+        });
+
+        setPaths(prev => [...prev, ...newPaths]);
+        logCommandResponse(`DXF başarıyla içe aktarıldı: ${entities.length} adet obje yeni yollar (Paths) olarak eklendi.`);
+        afterOperationCompleted();
+
+      } catch (err: any) {
+        logCommandResponse(`Hata: DXF dosyası ayrıştırılamadı. ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
   };
 
   const applyOffset = (d: number = offsetDistance) => {
@@ -11552,6 +11801,7 @@ export default function App() {
           {/* Elegant Sidebar Tab Bar Toggle */}
           <div className="flex border-b border-slate-200 bg-slate-100/80 p-0.5 shrink-0 gap-0.5">
             <button
+              id="sidebar-tab-sketch"
               onClick={() => setSidebarTab('sketch')}
               className={`flex-1 py-1.5 text-[9px] sm:text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
                 sidebarTab === 'sketch' ? 'bg-white text-orange-650 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
@@ -12114,6 +12364,32 @@ export default function App() {
                           title="Apply corner chamfer to all corners of active contour"
                         >
                           Tümüne Uygula
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                        <span>Auto-Fillet All Radius (r):</span>
+                        <span className="text-cyan-600 font-bold">{autoFilletRadius} mm</span>
+                      </div>
+                      <div className="flex gap-1.5 geometry-modifier-actions">
+                        <input
+                          id="auto-fillet-all-radius"
+                          type="number"
+                          value={autoFilletRadius}
+                          onChange={(e) => setAutoFilletRadius(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="flex-1 min-w-0 bg-white border border-slate-300 text-xs px-2 py-1 rounded text-slate-800 outline-none focus:border-cyan-500 font-mono"
+                          min="1"
+                          max="500"
+                        />
+                        <button
+                          id="auto-fillet-all-btn"
+                          onClick={() => applyAutoFilletAll(autoFilletRadius)}
+                          className="px-2.5 py-1 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 text-white rounded text-[10px] transition cursor-pointer font-bold font-mono shadow-xs"
+                          title="Apply uniform radius auto-fillet to every sharp corner in active sketch"
+                        >
+                          Auto-Fillet All
                         </button>
                       </div>
                     </div>
@@ -14118,6 +14394,23 @@ export default function App() {
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Export 2D DXF</span>
+                </button>
+              </div>
+              <div className="relative">
+                <input
+                  type="file"
+                  accept=".dxf"
+                  ref={dxfInputRef}
+                  onChange={handleDXFImport}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => dxfInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded text-xs font-bold bg-sky-50 hover:bg-sky-100/75 border border-dashed border-sky-305 text-sky-700 hover:text-sky-800 transition cursor-pointer"
+                  title="İçe Aktar: 2D DXF dosyasındaki LINE, CIRCLE, veya ARC çizgilerini sketç yolları olarak ekler"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Import 2D DXF</span>
                 </button>
               </div>
               <button
