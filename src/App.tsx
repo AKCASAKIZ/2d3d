@@ -164,6 +164,80 @@ const getAutoDimensionDetails = (
   return { dimType, value, offset };
 };
 
+const computeFilletPoints = (p0: Point, p1: Point, p2: Point, r: number): Point[] => {
+  const dx1 = p0.x - p1.x;
+  const dy1 = p0.y - p1.y;
+  const len1 = Math.hypot(dx1, dy1);
+
+  const dx2 = p2.x - p1.x;
+  const dy2 = p2.y - p1.y;
+  const len2 = Math.hypot(dx2, dy2);
+
+  if (len1 < 0.1 || len2 < 0.1) {
+    return [p1];
+  }
+
+  const u1 = { x: dx1 / len1, y: dy1 / len1 };
+  const u2 = { x: dx2 / len2, y: dy2 / len2 };
+
+  const cosTheta = u1.x * u2.x + u1.y * u2.y;
+  if (cosTheta > 0.999 || cosTheta < -0.999) {
+    // Nearly parallel edges, cannot fillet
+    return [p1];
+  }
+
+  const theta = Math.acos(Math.max(-1, Math.min(1, cosTheta)));
+  let T = r / Math.tan(theta / 2);
+
+  // Proportional Auto-Scaling to prevent self-intersection of adjacent edges:
+  const maxT = Math.min(len1, len2) * 0.45;
+  if (T > maxT) {
+    T = maxT;
+  }
+
+  // Turn angle
+  const phi = Math.PI - theta;
+  const k = (4 / 3) * Math.tan(phi / 4);
+
+  const A = { x: p1.x + u1.x * T, y: p1.y + u1.y * T };
+  const B = { x: p1.x + u2.x * T, y: p1.y + u2.y * T };
+
+  return [
+    { x: A.x, y: A.y, isCurvePoint: false },
+    { x: A.x + u2.x * T * k, y: A.y + u2.y * T * k, isCurvePoint: true },
+    { x: B.x + u1.x * T * k, y: B.y + u1.y * T * k, isCurvePoint: true },
+    { x: B.x, y: B.y, isCurvePoint: false }
+  ];
+};
+
+const computeChamferPoints = (p0: Point, p1: Point, p2: Point, d: number): Point[] => {
+  const dx1 = p0.x - p1.x;
+  const dy1 = p0.y - p1.y;
+  const len1 = Math.hypot(dx1, dy1);
+
+  const dx2 = p2.x - p1.x;
+  const dy2 = p2.y - p1.y;
+  const len2 = Math.hypot(dx2, dy2);
+
+  if (len1 < 0.1 || len2 < 0.1) {
+    return [p1];
+  }
+
+  const u1 = { x: dx1 / len1, y: dy1 / len1 };
+  const u2 = { x: dx2 / len2, y: dy2 / len2 };
+
+  let T = d;
+  const maxT = Math.min(len1, len2) * 0.45;
+  if (T > maxT) {
+    T = maxT;
+  }
+
+  return [
+    { x: p1.x + u1.x * T, y: p1.y + u1.y * T },
+    { x: p1.x + u2.x * T, y: p1.y + u2.y * T }
+  ];
+};
+
 interface PointAnchor {
   type: 'finalPoints' | 'path';
   pathIdx?: number;
@@ -3239,12 +3313,12 @@ export default function App() {
     }
 
     if (pts.length < 4) {
-      logCommandResponse('Need at least 3 segments to apply Fillet.');
+      logCommandResponse('Kenar yuvarlatılacak aktif bir sketç / kontur bulunamadı.');
       return;
     }
 
     if (vertexIdx < 0 || vertexIdx >= pts.length) {
-      logCommandResponse('Invalid selected corner index.');
+      logCommandResponse('Hata: Geçersiz köşe indeksi.');
       return;
     }
 
@@ -3261,38 +3335,7 @@ export default function App() {
         const p0 = pts[jIter === 0 ? pts.length - 2 : jIter - 1];
         const p2 = pts[jIter + 1];
 
-        const dx1 = p0.x - p1.x;
-        const dy1 = p0.y - p1.y;
-        const len1 = Math.hypot(dx1, dy1);
-
-        const dx2 = p2.x - p1.x;
-        const dy2 = p2.y - p1.y;
-        const len2 = Math.hypot(dx2, dy2);
-
-        if (len1 > r && len2 > r) {
-          roundedPts.push({
-            x: p1.x + (dx1 / len1) * r,
-            y: p1.y + (dy1 / len1) * r,
-            isCurvePoint: false,
-          });
-          roundedPts.push({
-            x: p1.x + (dx1 / len1) * r * 0.5 + (dx2 / len2) * r * 0.1,
-            y: p1.y + (dy1 / len1) * r * 0.5 + (dy2 / len2) * r * 0.1,
-            isCurvePoint: true,
-          });
-          roundedPts.push({
-            x: p1.x + (dx1 / len1) * r * 0.1 + (dx2 / len2) * r * 0.5,
-            y: p1.y + (dy1 / len1) * r * 0.1 + (dy2 / len2) * r * 0.5,
-            isCurvePoint: true,
-          });
-          roundedPts.push({
-            x: p1.x + (dx2 / len2) * r,
-            y: p1.y + (dy2 / len2) * r,
-            isCurvePoint: false,
-          });
-        } else {
-          roundedPts.push(p1);
-        }
+        roundedPts.push(...computeFilletPoints(p0, p1, p2, r));
       } else {
         roundedPts.push(p1);
       }
@@ -3314,7 +3357,7 @@ export default function App() {
     }
 
     setSelectedVertexIdx(null);
-    logCommandResponse(`Fillet corners successfully rounded (r: ${r} mm) on the selected corner.`);
+    logCommandResponse(`Köşeye başarıyla radius uygulandı (r: ${r} mm).`);
     afterOperationCompleted();
   };
 
@@ -3354,26 +3397,7 @@ export default function App() {
         const p0 = pts[jIter === 0 ? pts.length - 2 : jIter - 1];
         const p2 = pts[jIter + 1];
 
-        const dx1 = p0.x - p1.x;
-        const dy1 = p0.y - p1.y;
-        const len1 = Math.hypot(dx1, dy1);
-
-        const dx2 = p2.x - p1.x;
-        const dy2 = p2.y - p1.y;
-        const len2 = Math.hypot(dx2, dy2);
-
-        if (len1 > d * 1.5 && len2 > d * 1.5) {
-          chamferPts.push({
-            x: p1.x + (dx1 / len1) * d,
-            y: p1.y + (dy1 / len1) * d,
-          });
-          chamferPts.push({
-            x: p1.x + (dx2 / len2) * d,
-            y: p1.y + (dy2 / len2) * d,
-          });
-        } else {
-          chamferPts.push(p1);
-        }
+        chamferPts.push(...computeChamferPoints(p0, p1, p2, d));
       } else {
         chamferPts.push(p1);
       }
@@ -3395,7 +3419,7 @@ export default function App() {
     }
 
     setSelectedVertexIdx(null);
-    logCommandResponse(`Chamfer corner successfully beveled (d: ${d} mm) on the selected corner.`);
+    logCommandResponse(`Köşeye başarıyla pah kırıldı (d: ${d} mm).`);
     afterOperationCompleted();
   };
 
@@ -3415,222 +3439,83 @@ export default function App() {
     }
   };
 
-  const applyFillet = (r: number = filletRadius, targetIdx: number | null = selectedVertexIdx) => {
+  const applyFillet = (r: number = filletRadius, targetIdx: number | null = selectedVertexIdx, targetPathIdx: number = selectedPathIdx) => {
     if (activeLayer.locked) {
       logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Fillet.`);
       return;
     }
-    if (finalPoints.length < 4) {
-      logCommandResponse('Need at least 3 segments to apply Fillet.');
+
+    if (targetIdx !== null) {
+      applyFilletGeneralized(r, targetPathIdx, targetIdx);
       return;
     }
 
-    if (targetIdx !== null) {
-      if (targetIdx < 0 || targetIdx >= finalPoints.length) {
-        logCommandResponse('Invalid selected vertex index.');
-        return;
-      }
-      saveState();
-      const roundedPts: Point[] = [];
-      let idx = targetIdx;
-      if (idx === finalPoints.length - 1) {
-        idx = 0;
-      }
-
-      for (let i = 0; i < finalPoints.length - 1; i++) {
-        const p1 = finalPoints[i];
-        if (i === idx) {
-          const p0 = finalPoints[i === 0 ? finalPoints.length - 2 : i - 1];
-          const p2 = finalPoints[i + 1];
-
-          const dx1 = p0.x - p1.x;
-          const dy1 = p0.y - p1.y;
-          const len1 = Math.hypot(dx1, dy1);
-
-          const dx2 = p2.x - p1.x;
-          const dy2 = p2.y - p1.y;
-          const len2 = Math.hypot(dx2, dy2);
-
-          if (len1 > r && len2 > r) {
-            roundedPts.push({
-              x: p1.x + (dx1 / len1) * r,
-              y: p1.y + (dy1 / len1) * r,
-              isCurvePoint: false,
-            });
-            roundedPts.push({
-              x: p1.x + (dx1 / len1) * r * 0.5 + (dx2 / len2) * r * 0.1,
-              y: p1.y + (dy1 / len1) * r * 0.5 + (dy2 / len2) * r * 0.1,
-              isCurvePoint: true,
-            });
-            roundedPts.push({
-              x: p1.x + (dx1 / len1) * r * 0.1 + (dx2 / len2) * r * 0.5,
-              y: p1.y + (dy1 / len1) * r * 0.1 + (dy2 / len2) * r * 0.5,
-              isCurvePoint: true,
-            });
-            roundedPts.push({
-              x: p1.x + (dx2 / len2) * r,
-              y: p1.y + (dy2 / len2) * r,
-              isCurvePoint: false,
-            });
-          } else {
-            roundedPts.push(p1);
-          }
-        } else {
-          roundedPts.push(p1);
-        }
-      }
-      roundedPts.push({ ...roundedPts[0] });
-      setFinalPoints(roundedPts);
-      setIsClosed(true);
-      setSelectedVertexIdx(null);
-      logCommandResponse(`Fillet applied (r: ${r} mm) to selected corner.`);
-      afterOperationCompleted();
+    if (finalPoints.length < 4) {
+      logCommandResponse('Kenar yuvarlatılacak aktif bir sketç / kontur bulunamadı.');
       return;
     }
 
     saveState();
-    const roundedPts: Point[] = [];
-    for (let i = 0; i < finalPoints.length - 1; i++) {
-      const p1 = finalPoints[i];
-      const p0 = finalPoints[i === 0 ? finalPoints.length - 2 : i - 1];
-      const p2 = finalPoints[i + 1];
-
-      const dx1 = p0.x - p1.x;
-      const dy1 = p0.y - p1.y;
-      const len1 = Math.hypot(dx1, dy1);
-
-      const dx2 = p2.x - p1.x;
-      const dy2 = p2.y - p1.y;
-      const len2 = Math.hypot(dx2, dy2);
-
-      if (len1 > r && len2 > r) {
-        // Compute rounded tangent points
-        roundedPts.push({
-          x: p1.x + (dx1 / len1) * r,
-          y: p1.y + (dy1 / len1) * r,
-          isCurvePoint: false, // keep start/end of fillet rounded arc selected/visible as handles
-        });
-        // Mid arcs
-        roundedPts.push({
-          x: p1.x + (dx1 / len1) * r * 0.5 + (dx2 / len2) * r * 0.1,
-          y: p1.y + (dy1 / len1) * r * 0.5 + (dy2 / len2) * r * 0.1,
-          isCurvePoint: true, // internal curve
-        });
-        roundedPts.push({
-          x: p1.x + (dx1 / len1) * r * 0.1 + (dx2 / len2) * r * 0.5,
-          y: p1.y + (dy1 / len1) * r * 0.1 + (dy2 / len2) * r * 0.5,
-          isCurvePoint: true, // internal curve
-        });
-        roundedPts.push({
-          x: p1.x + (dx2 / len2) * r,
-          y: p1.y + (dy2 / len2) * r,
-          isCurvePoint: false, // keep exit of fillet rounded arc visible
-        });
-      } else {
-        roundedPts.push(p1);
+    let roundedPts = [...finalPoints];
+    const N = roundedPts.length - 1;
+    
+    const rebuilt: Point[] = [];
+    for (let i = 0; i < N; i++) {
+      const p1 = roundedPts[i];
+      if (p1.isCurvePoint) {
+        rebuilt.push(p1);
+        continue;
       }
+      const p0 = roundedPts[i === 0 ? N - 1 : i - 1];
+      const p2 = roundedPts[i === N - 1 ? 0 : i + 1];
+      
+      rebuilt.push(...computeFilletPoints(p0, p1, p2, r));
     }
-    // ensure closed
-    roundedPts.push({ ...roundedPts[0] });
-    setFinalPoints(roundedPts);
+    rebuilt.push({ ...rebuilt[0] });
+    
+    setFinalPoints(rebuilt);
     setIsClosed(true);
-    logCommandResponse(`Fillet applied (r: ${r} mm) to all corners.`);
+    logCommandResponse(`Tüm köşelere fillet uygulandı (r: ${r} mm).`);
     afterOperationCompleted();
   };
 
-  const applyChamfer = (d: number = chamferDistance, targetIdx: number | null = selectedVertexIdx) => {
+  const applyChamfer = (d: number = chamferDistance, targetIdx: number | null = selectedVertexIdx, targetPathIdx: number = selectedPathIdx) => {
     if (activeLayer.locked) {
       logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Chamfer.`);
       return;
     }
-    if (finalPoints.length < 4) {
-      logCommandResponse('Need at least 3 segments to apply Chamfer.');
+
+    if (targetIdx !== null) {
+      applyChamferGeneralized(d, targetPathIdx, targetIdx);
       return;
     }
 
-    if (targetIdx !== null) {
-      if (targetIdx < 0 || targetIdx >= finalPoints.length) {
-        logCommandResponse('Invalid selected vertex index.');
-        return;
-      }
-      saveState();
-      const chamferPts: Point[] = [];
-      let idx = targetIdx;
-      if (idx === finalPoints.length - 1) {
-        idx = 0;
-      }
-
-      for (let i = 0; i < finalPoints.length - 1; i++) {
-        const p1 = finalPoints[i];
-        if (i === idx) {
-          const p0 = finalPoints[i === 0 ? finalPoints.length - 2 : i - 1];
-          const p2 = finalPoints[i + 1];
-
-          const dx1 = p0.x - p1.x;
-          const dy1 = p0.y - p1.y;
-          const len1 = Math.hypot(dx1, dy1);
-
-          const dx2 = p2.x - p1.x;
-          const dy2 = p2.y - p1.y;
-          const len2 = Math.hypot(dx2, dy2);
-
-          if (len1 > d * 1.5 && len2 > d * 1.5) {
-            chamferPts.push({
-              x: p1.x + (dx1 / len1) * d,
-              y: p1.y + (dy1 / len1) * d,
-            });
-            chamferPts.push({
-              x: p1.x + (dx2 / len2) * d,
-              y: p1.y + (dy2 / len2) * d,
-            });
-          } else {
-            chamferPts.push(p1);
-          }
-        } else {
-          chamferPts.push(p1);
-        }
-      }
-      chamferPts.push({ ...chamferPts[0] });
-      setFinalPoints(chamferPts);
-      setIsClosed(true);
-      setSelectedVertexIdx(null);
-      logCommandResponse(`Chamfer applied (d: ${d} mm) to selected corner.`);
-      afterOperationCompleted();
+    if (finalPoints.length < 4) {
+      logCommandResponse('Kenar pahı kırılacak aktif bir sketç / kontur bulunamadı.');
       return;
     }
 
     saveState();
-    const chamferPts: Point[] = [];
-    for (let i = 0; i < finalPoints.length - 1; i++) {
-      const p1 = finalPoints[i];
-      const p0 = finalPoints[i === 0 ? finalPoints.length - 2 : i - 1];
-      const p2 = finalPoints[i + 1];
-
-      const dx1 = p0.x - p1.x;
-      const dy1 = p0.y - p1.y;
-      const len1 = Math.hypot(dx1, dy1);
-
-      const dx2 = p2.x - p1.x;
-      const dy2 = p2.y - p1.y;
-      const len2 = Math.hypot(dx2, dy2);
-
-      if (len1 > d * 1.5 && len2 > d * 1.5) {
-        chamferPts.push({
-          x: p1.x + (dx1 / len1) * d,
-          y: p1.y + (dy1 / len1) * d,
-        });
-        chamferPts.push({
-          x: p1.x + (dx2 / len2) * d,
-          y: p1.y + (dy2 / len2) * d,
-        });
-      } else {
-        chamferPts.push(p1);
+    let chamferPts = [...finalPoints];
+    const N = chamferPts.length - 1;
+    
+    const rebuilt: Point[] = [];
+    for (let i = 0; i < N; i++) {
+      const p1 = chamferPts[i];
+      if (p1.isCurvePoint) {
+        rebuilt.push(p1);
+        continue;
       }
+      const p0 = chamferPts[i === 0 ? N - 1 : i - 1];
+      const p2 = chamferPts[i === N - 1 ? 0 : i + 1];
+      
+      rebuilt.push(...computeChamferPoints(p0, p1, p2, d));
     }
-    chamferPts.push({ ...chamferPts[0] });
-    setFinalPoints(chamferPts);
+    rebuilt.push({ ...rebuilt[0] });
+    
+    setFinalPoints(rebuilt);
     setIsClosed(true);
-    logCommandResponse(`Chamfer applied (d: ${d} mm) to all corners.`);
+    logCommandResponse(`Tüm köşelere pah uygulandı (d: ${d} mm).`);
     afterOperationCompleted();
   };
 
@@ -3655,44 +3540,7 @@ export default function App() {
         const p0 = pts[i === 0 ? N - 1 : i - 1];
         const p2 = pts[i === N - 1 ? 0 : i + 1];
 
-        const dx1 = p0.x - p1.x;
-        const dy1 = p0.y - p1.y;
-        const len1 = Math.hypot(dx1, dy1);
-
-        const dx2 = p2.x - p1.x;
-        const dy2 = p2.y - p1.y;
-        const len2 = Math.hypot(dx2, dy2);
-
-        let isSharp = false;
-        if (len1 > 0.1 && len2 > 0.1) {
-          const cosTheta = (dx1 * dx2 + dy1 * dy2) / (len1 * len2);
-          isSharp = cosTheta > -0.999 && cosTheta < 0.999;
-        }
-
-        if (isSharp && len1 > r && len2 > r) {
-          roundedPts.push({
-            x: p1.x + (dx1 / len1) * r,
-            y: p1.y + (dy1 / len1) * r,
-            isCurvePoint: false,
-          });
-          roundedPts.push({
-            x: p1.x + (dx1 / len1) * r * 0.5 + (dx2 / len2) * r * 0.1,
-            y: p1.y + (dy1 / len1) * r * 0.5 + (dy2 / len2) * r * 0.1,
-            isCurvePoint: true,
-          });
-          roundedPts.push({
-            x: p1.x + (dx1 / len1) * r * 0.1 + (dx2 / len2) * r * 0.5,
-            y: p1.y + (dy1 / len1) * r * 0.1 + (dy2 / len2) * r * 0.5,
-            isCurvePoint: true,
-          });
-          roundedPts.push({
-            x: p1.x + (dx2 / len2) * r,
-            y: p1.y + (dy2 / len2) * r,
-            isCurvePoint: false,
-          });
-        } else {
-          roundedPts.push(p1);
-        }
+        roundedPts.push(...computeFilletPoints(p0, p1, p2, r));
       }
       roundedPts.push({ ...roundedPts[0] });
       return roundedPts;
@@ -3841,38 +3689,7 @@ export default function App() {
           const p0 = pts[jIter === 0 ? pts.length - 2 : jIter - 1];
           const p2 = pts[jIter + 1];
 
-          const dx1 = p0.x - p1.x;
-          const dy1 = p0.y - p1.y;
-          const len1 = Math.hypot(dx1, dy1);
-
-          const dx2 = p2.x - p1.x;
-          const dy2 = p2.y - p1.y;
-          const len2 = Math.hypot(dx2, dy2);
-
-          if (len1 > r && len2 > r) {
-            roundedPts.push({
-              x: p1.x + (dx1 / len1) * r,
-              y: p1.y + (dy1 / len1) * r,
-              isCurvePoint: false,
-            });
-            roundedPts.push({
-              x: p1.x + (dx1 / len1) * r * 0.5 + (dx2 / len2) * r * 0.1,
-              y: p1.y + (dy1 / len1) * r * 0.5 + (dy2 / len2) * r * 0.1,
-              isCurvePoint: true,
-            });
-            roundedPts.push({
-              x: p1.x + (dx1 / len1) * r * 0.1 + (dx2 / len2) * r * 0.5,
-              y: p1.y + (dy1 / len1) * r * 0.1 + (dy2 / len2) * r * 0.5,
-              isCurvePoint: true,
-            });
-            roundedPts.push({
-              x: p1.x + (dx2 / len2) * r,
-              y: p1.y + (dy2 / len2) * r,
-              isCurvePoint: false,
-            });
-          } else {
-            roundedPts.push(p1);
-          }
+          roundedPts.push(...computeFilletPoints(p0, p1, p2, r));
         } else {
           roundedPts.push(p1);
         }
@@ -3927,7 +3744,108 @@ export default function App() {
       logCommandResponse(`Manuel Fillet Tamamlandı: Seçilen ${successCount} köşeye ${r} mm yarıçapında yuvarlatma uygulandı.`);
       afterOperationCompleted();
     } else {
-      logCommandResponse(`Seçili köşelere yuvarlatma uygulanamadı (köşe kenarları yarıçaptan küçük olabilir).`);
+      logCommandResponse(`Seçili köşelere yuvarlatma uygulanamadı.`);
+    }
+  };
+
+  const applyChamferToMultipleCorners = (corners: Array<{ pathIdx: number; vertexIdx: number }>, d: number) => {
+    if (activeLayer.locked) {
+      logCommandResponse(`Layer "${activeLayer.name}" is locked. Unlock it in the Layer Manager to apply Chamfer.`);
+      return;
+    }
+    if (corners.length === 0) {
+      logCommandResponse('Lütfen en az bir köşe seçin.');
+      return;
+    }
+
+    saveState();
+
+    // Group corners by pathIdx
+    const grouped: { [key: number]: number[] } = {};
+    corners.forEach(c => {
+      if (!grouped[c.pathIdx]) {
+        grouped[c.pathIdx] = [];
+      }
+      grouped[c.pathIdx].push(c.vertexIdx);
+    });
+
+    let updatedFinalPoints = [...finalPoints];
+    let updatedPaths = activeLayer.paths ? JSON.parse(JSON.stringify(activeLayer.paths)) as Point[][] : [];
+
+    let successCount = 0;
+
+    // Helper to chamfer a single array of points at vertexIdx
+    const chamferSinglePath = (pts: Point[], idx: number): Point[] | null => {
+      if (pts.length < 4) return null;
+      if (idx < 0 || idx >= pts.length) return null;
+
+      let targetIdx = idx;
+      if (targetIdx === pts.length - 1) {
+        targetIdx = 0;
+      }
+
+      const chamferPts: Point[] = [];
+      for (let jIter = 0; jIter < pts.length - 1; jIter++) {
+        const p1 = pts[jIter];
+        if (jIter === targetIdx) {
+          const p0 = pts[jIter === 0 ? pts.length - 2 : jIter - 1];
+          const p2 = pts[jIter + 1];
+
+          chamferPts.push(...computeChamferPoints(p0, p1, p2, d));
+        } else {
+          chamferPts.push(p1);
+        }
+      }
+      chamferPts.push({ ...chamferPts[0] });
+      return chamferPts;
+    };
+
+    // 1. Process active contour finalPoints (pathIdx === -1)
+    if (grouped[-1]) {
+      const sortedIdx = [...grouped[-1]].sort((a, b) => b - a);
+      for (const idx of sortedIdx) {
+        const nextFP = chamferSinglePath(updatedFinalPoints, idx);
+        if (nextFP) {
+          updatedFinalPoints = nextFP;
+          successCount++;
+        }
+      }
+    }
+
+    // 2. Process other paths
+    Object.keys(grouped).forEach(pathIdxKey => {
+      const pIdx = parseInt(pathIdxKey);
+      if (pIdx !== -1 && updatedPaths[pIdx]) {
+        const sortedIdx = [...grouped[pIdx]].sort((a, b) => b - a);
+        let currentPathPoints = updatedPaths[pIdx];
+        for (const idx of sortedIdx) {
+          const nextPP = chamferSinglePath(currentPathPoints, idx);
+          if (nextPP) {
+            currentPathPoints = nextPP;
+            successCount++;
+          }
+        }
+        updatedPaths[pIdx] = currentPathPoints;
+      }
+    });
+
+    if (successCount > 0) {
+      setLayers(prev => prev.map(l => {
+        if (l.id === activeLayerId) {
+          return {
+            ...l,
+            finalPoints: updatedFinalPoints,
+            paths: updatedPaths,
+            isClosed: true
+          };
+        }
+        return l;
+      }));
+      setModifierSelectedCorners([]);
+      logCommandResponse(`Manuel Chamfer Tamamlandı: Seçilen ${successCount} köşeye ${d} mm pah kırma uygulandı.`);
+      afterOperationCompleted();
+    } else {
+      logCommandResponse(`Seçili köşelere pah uygulanamadı.`);
     }
   };
 
@@ -12673,18 +12591,30 @@ export default function App() {
                               })}
                             </div>
 
-                            <div className="pt-1 flex gap-1.5">
+                            <div className="pt-1 grid grid-cols-2 gap-1.5">
                               <button
                                 disabled={modifierSelectedCorners.length === 0}
                                 onClick={() => applyFilletToMultipleCorners(modifierSelectedCorners, autoFilletRadius)}
-                                className={`w-full py-1.5 rounded text-[10px] font-bold transition text-center border cursor-pointer ${
+                                className={`py-1.5 rounded text-[10px] font-bold transition text-center border cursor-pointer ${
                                   modifierSelectedCorners.length > 0
                                     ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 border-cyan-500 text-white shadow-xs'
                                     : 'bg-slate-50 border-slate-200 text-slate-350 cursor-not-allowed'
                                 }`}
                                 title="Seçilen belirli köşelere fillet yarıçapını uygular"
                               >
-                                Seçili Köşelere Yuvarlatma Uygula ({autoFilletRadius} mm)
+                                Yuvarlat ({autoFilletRadius} mm)
+                              </button>
+                              <button
+                                disabled={modifierSelectedCorners.length === 0}
+                                onClick={() => applyChamferToMultipleCorners(modifierSelectedCorners, autoFilletRadius)}
+                                className={`py-1.5 rounded text-[10px] font-bold transition text-center border cursor-pointer ${
+                                  modifierSelectedCorners.length > 0
+                                    ? 'bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 border-orange-400 text-white shadow-xs'
+                                    : 'bg-slate-50 border-slate-200 text-slate-350 cursor-not-allowed'
+                                }`}
+                                title="Seçilen belirli köşelere chamfer mesafesini uygular"
+                              >
+                                Pah Kır ({autoFilletRadius} mm)
                               </button>
                             </div>
                           </div>
