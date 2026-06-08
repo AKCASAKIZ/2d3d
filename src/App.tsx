@@ -3255,14 +3255,14 @@ export default function App() {
   };
 
   // Geometric modifiers
-  const getSharedVertexFromSelectedSegments = (): { pathIdx: number; vertexIdx: number } | null => {
-    if (selectedSegments.length !== 2) {
+  const getSharedVertexFromSelectedSegments = (segments: typeof selectedSegments = selectedSegments): { pathIdx: number; vertexIdx: number } | null => {
+    if (segments.length !== 2) {
       logCommandResponse('Kenar seçimiyle işlem yapmak için önce 2 adet komşu (adjacent) kenar seçmelisiniz.');
       return null;
     }
 
-    const s1 = selectedSegments[0];
-    const s2 = selectedSegments[1];
+    const s1 = segments[0];
+    const s2 = segments[1];
 
     if (s1.pathIdx !== s2.pathIdx) {
       logCommandResponse('Hata: Seçilen iki kenar aynı çizime ait olmalıdır!');
@@ -8302,6 +8302,29 @@ export default function App() {
         }
       }
 
+      if (found) {
+        if (currentCommand === 'fillet') {
+          const targetPathIdx = dragPathIndexRef.current;
+          const targetVertexIdx = dragIndexRef.current;
+          applyFillet(filletRadius, targetVertexIdx, targetPathIdx);
+          dragIndexRef.current = -1;
+          dragPathIndexRef.current = -1;
+          setSelectedVertexIdx(null);
+          setSelectedPathIdx(-1);
+          return;
+        }
+        if (currentCommand === 'chamfer') {
+          const targetPathIdx = dragPathIndexRef.current;
+          const targetVertexIdx = dragIndexRef.current;
+          applyChamfer(chamferDistance, targetVertexIdx, targetPathIdx);
+          dragIndexRef.current = -1;
+          dragPathIndexRef.current = -1;
+          setSelectedVertexIdx(null);
+          setSelectedPathIdx(-1);
+          return;
+        }
+      }
+
       // Drag segment or entire shape (interactive CAD popup prompt for Stretch vs Move)
       if (!found) {
         let clickedPathIdx: number | null = null;
@@ -8375,18 +8398,36 @@ export default function App() {
         }
 
         if (isClickOnShape && clickedPathIdx !== null) {
-          if (isEdgeSelectionMode || e.shiftKey) {
+          if (isEdgeSelectionMode || e.shiftKey || currentCommand === 'fillet' || currentCommand === 'chamfer') {
             // Toggle edge selection
             const exists = selectedSegments.findIndex(s => s.pathIdx === clickedPathIdx && s.segmentIdx === clickedSegmentIdx);
+            let updatedSegments = [...selectedSegments];
             if (exists !== -1) {
-              const updated = selectedSegments.filter((_, idx) => idx !== exists);
-              setSelectedSegments(updated);
-              logCommandResponse(`Kenar seçimi iptal edildi. Toplam seçilen kenar: ${updated.length}/2`);
+              updatedSegments = selectedSegments.filter((_, idx) => idx !== exists);
+              setSelectedSegments(updatedSegments);
+              logCommandResponse(`Kenar seçimi iptal edildi. Toplam seçilen kenar: ${updatedSegments.length}/2`);
             } else {
               const updated = [...selectedSegments, { pathIdx: clickedPathIdx, segmentIdx: clickedSegmentIdx }];
-              const limited = updated.length > 2 ? updated.slice(updated.length - 2) : updated;
-              setSelectedSegments(limited);
-              logCommandResponse(`Kenar seçildi! Toplam seçilen kenar: ${limited.length}/2. ${limited.length === 2 ? "Seçilen iki kenar için sidebar'dan Fillet veya Chamfer uygulayabilirsiniz!" : ""}`);
+              updatedSegments = updated.length > 2 ? updated.slice(updated.length - 2) : updated;
+              setSelectedSegments(updatedSegments);
+              logCommandResponse(`Kenar seçildi! Toplam seçilen kenar: ${updatedSegments.length}/2.`);
+            }
+
+            // Apply fillet/chamfer immediately if 2 edges selected while in command mode
+            if (updatedSegments.length === 2 && (currentCommand === 'fillet' || currentCommand === 'chamfer')) {
+              const res = getSharedVertexFromSelectedSegments(updatedSegments);
+              if (res) {
+                if (currentCommand === 'fillet') {
+                  applyFilletGeneralized(filletRadius, res.pathIdx, res.vertexIdx);
+                  logCommandResponse(`Seçilen komşu kenarların birleşim köşesine Fillet (${filletRadius} r) uygulandı.`);
+                } else {
+                  applyChamferGeneralized(chamferDistance, res.pathIdx, res.vertexIdx);
+                  logCommandResponse(`Seçilen komşu kenarların birleşim köşesine Chamfer (${chamferDistance} d) uygulandı.`);
+                }
+              }
+              setSelectedSegments([]);
+            } else if (updatedSegments.length === 2) {
+              logCommandResponse("2 kenar seçildi! Sidebar'dan veya düzenle menüsünden Fillet veya Chamfer uygulayabilirsiniz.");
             }
             return;
           }
@@ -9885,9 +9926,13 @@ export default function App() {
     } else if (cmd === 'POL') {
       setCommand('polygon');
     } else if (cmd === 'F') {
-      applyFillet();
-    } else if (cmd === 'CH') {
-      applyChamfer();
+      setCurrentCommand('fillet');
+      setDrawMode('drag');
+      logCommandResponse("✏️ FİLLET (Yarıçap Yuvarlatma) Modu Aktif. Köşelere tıklayarak veya komşu 2 kenarı seçerek radius uygulayabilirsiniz.");
+    } else if (cmd === 'CH' || cmd === 'CHAMFER') {
+      setCurrentCommand('chamfer');
+      setDrawMode('drag');
+      logCommandResponse("📐 CHAMFER (Pah Kırma) Modu Aktif. Köşelere tıklayarak veya komşu 2 kenarı seçerek pah uygulayabilirsiniz.");
     } else if (cmd === 'U') {
       handleUndo();
     } else if (cmd === 'CLEAR') {
@@ -11555,19 +11600,41 @@ export default function App() {
           <div className="flex items-center gap-1 bg-slate-50/70 p-0.5 px-1.5 rounded-md border border-slate-200 shrink-0">
             <span className="text-[9px] uppercase font-mono text-slate-400 mr-1.5 font-bold select-none">Düzenle:</span>
             <button
-              onClick={() => applyFillet()}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-slate-900 transition font-mono font-bold"
+              onClick={() => {
+                if (currentCommand === 'fillet') {
+                  clearCommand();
+                } else {
+                  clearCommand();
+                  setCurrentCommand('fillet');
+                  setDrawMode('drag');
+                  logCommandResponse("✏️ FİLLET (Yarıçap Yuvarlatma) Modu Aktif. Köşelere tıklayarak radius uygulayabilir veya ekrandan kenarlar seçebilirsiniz.");
+                }
+              }}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
+                currentCommand === 'fillet' ? 'bg-orange-500 border-orange-600 text-white font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
               title="Apply Fillet Rounding (F)"
             >
-              <RefreshCw className="w-3 h-3 text-orange-500" />
+              <RefreshCw className={`w-3 h-3 ${currentCommand === 'fillet' ? 'text-white shadow-xs' : 'text-orange-500'}`} />
               <span>Fillet</span>
             </button>
             <button
-              onClick={() => applyChamfer()}
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-slate-100 border border-slate-250 hover:bg-slate-200 text-slate-700 hover:text-slate-900 transition font-mono font-bold"
+              onClick={() => {
+                if (currentCommand === 'chamfer') {
+                  clearCommand();
+                } else {
+                  clearCommand();
+                  setCurrentCommand('chamfer');
+                  setDrawMode('drag');
+                  logCommandResponse("📐 CHAMFER (Pah Kırma) Modu Aktif. Köşelere tıklayarak pah uygulayabilir veya ekrandan kenarlar seçebilirsiniz.");
+                }
+              }}
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition border font-mono ${
+                currentCommand === 'chamfer' ? 'bg-orange-500 border-orange-600 text-white font-bold' : 'bg-slate-100 border-slate-250 text-slate-700 hover:bg-slate-200'
+              }`}
               title="Apply Chamfer (CH)"
             >
-              <ListFilter className="w-3 h-3 text-orange-500" />
+              <ListFilter className={`w-3 h-3 ${currentCommand === 'chamfer' ? 'text-white shadow-xs' : 'text-orange-500'}`} />
               <span>Chamfer</span>
             </button>
             <button
