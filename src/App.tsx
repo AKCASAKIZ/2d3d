@@ -8789,10 +8789,18 @@ export default function App() {
     if (activeSegmentStretch) {
       const { pathIdx, segmentIdx, startX, startY, originalPoints } = activeSegmentStretch;
       
+      const isClosedLoop = pathIdx !== -1 || isClosed;
+      const j = isClosedLoop 
+        ? (segmentIdx + 1) % originalPoints.length 
+        : segmentIdx + 1;
+      
+      // Exclude indices being stretched so they don't snap to themselves
+      const stablePoints = originalPoints.filter((_, idx) => idx !== segmentIdx && idx !== j);
+
       const otherPaths = pathIdx === -1 
         ? (activeLayer.paths || []) 
-        : (activeLayer.paths || []).filter((_, idx) => idx !== pathIdx);
-      const snapPointsArray = pathIdx === -1 ? [] : finalPoints;
+        : [...(activeLayer.paths || []).filter((_, idx) => idx !== pathIdx), stablePoints];
+      const snapPointsArray = pathIdx === -1 ? stablePoints : finalPoints;
 
       const snapData = calculateSnaps(
         x,
@@ -8813,15 +8821,12 @@ export default function App() {
       setSnapPoint(snapData.snapPoint);
       setTrackedLines(snapData.trackedLines);
       setHoverCoords({ x: snapX, y: snapY });
+      setTempPoint({ x: snapX, y: snapY });
 
       const dx = snapX - startX;
       const dy = snapY - startY;
 
       const i = segmentIdx;
-      const isClosedLoop = pathIdx !== -1 || isClosed;
-      const j = isClosedLoop 
-        ? (segmentIdx + 1) % originalPoints.length 
-        : segmentIdx + 1;
 
       const nextFinalPoints = [...finalPoints];
       const nextPaths = activeLayer.paths ? activeLayer.paths.map(p => [...p]) : [];
@@ -9007,6 +9012,7 @@ export default function App() {
       setSnapPoint(snapData.snapPoint);
       setTrackedLines(snapData.trackedLines);
       setHoverCoords({ x: snapX, y: snapY });
+      setTempPoint({ x: snapX, y: snapY });
 
       const dx = snapX - startX;
       const dy = snapY - startY;
@@ -9064,6 +9070,7 @@ export default function App() {
       setSnapPoint(snapData.snapPoint);
       setTrackedLines(snapData.trackedLines);
       setHoverCoords({ x: snapX, y: snapY });
+      setTempPoint({ x: snapX, y: snapY });
 
       const dx = snapX - startX;
       const dy = snapY - startY;
@@ -9149,6 +9156,7 @@ export default function App() {
           y = snapData.y;
           setSnapPoint(snapData.snapPoint);
           setTrackedLines(snapData.trackedLines);
+          setTempPoint({ x, y });
 
           const updated = [...finalPoints];
           const draggedPt = updated[dragIndexRef.current];
@@ -9364,6 +9372,7 @@ export default function App() {
           y = snapData.y;
           setSnapPoint(snapData.snapPoint);
           setTrackedLines(snapData.trackedLines);
+          setTempPoint({ x, y });
 
           const updatedPaths = activeLayer.paths ? [...activeLayer.paths] : [];
           const updatedPath = [...targetPath];
