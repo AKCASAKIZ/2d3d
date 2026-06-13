@@ -10816,6 +10816,12 @@ export default function App() {
               <span className="text-[9px] font-mono bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded text-slate-500 font-bold">
                 PRO v15.2
               </span>
+              <span
+                className="text-[9px] font-mono bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded text-emerald-600 font-bold"
+                title={`Build: ${__BUILD_INFO__.commit} • ${__BUILD_INFO__.date}`}
+              >
+                {__BUILD_INFO__.commit}
+              </span>
             </div>
 
             {/* Sidebar Toggler */}
