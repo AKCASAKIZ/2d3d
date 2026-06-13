@@ -23,6 +23,7 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "three": "^0.184.0",
+    "three-bvh-csg": "^0.0.18",
     "vite": "^6.2.3"
   },
   "devDependencies": {

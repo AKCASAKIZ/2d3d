@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "fs";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -10,6 +11,52 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// ---- Visitor counter (file-backed; set STATS_DIR to a persistent disk on Render) ----
+const statsDir = process.env.STATS_DIR || path.join(process.cwd(), "data");
+const statsFile = path.join(statsDir, "stats.json");
+
+interface VisitStats {
+  totalVisits: number;
+  days: Record<string, number>;
+}
+
+function loadStats(): VisitStats {
+  try {
+    return JSON.parse(fs.readFileSync(statsFile, "utf-8"));
+  } catch {
+    return { totalVisits: 0, days: {} };
+  }
+}
+
+function saveStats(stats: VisitStats) {
+  try {
+    fs.mkdirSync(statsDir, { recursive: true });
+    fs.writeFileSync(statsFile, JSON.stringify(stats));
+  } catch (e) {
+    console.error("Failed to persist visit stats:", e);
+  }
+}
+
+let stats = loadStats();
+
+app.post("/api/visit", (_req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  stats.totalVisits += 1;
+  stats.days[today] = (stats.days[today] || 0) + 1;
+  // keep only the last 60 days
+  const cutoff = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+  for (const day of Object.keys(stats.days)) {
+    if (day < cutoff) delete stats.days[day];
+  }
+  saveStats(stats);
+  res.json({ totalVisits: stats.totalVisits, today: stats.days[today] });
+});
+
+app.get("/api/stats", (_req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  res.json({ totalVisits: stats.totalVisits, today: stats.days[today] || 0 });
+});
 
 // Initialize Gemini API client safely
 const apiKey = process.env.GEMINI_API_KEY;

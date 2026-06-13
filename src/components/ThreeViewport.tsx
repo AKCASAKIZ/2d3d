@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { Eye, EyeOff, Sliders, Scissors, RotateCcw, FlipHorizontal, MousePointer2, Sparkles, Compass, HelpCircle } from 'lucide-react';
+import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
 import { Point, CADLayer } from '../types';
 import { calculateAssemblyPhysicalProperties, SolidPhysicsProperties } from '../utils/physics';
 
@@ -620,7 +621,22 @@ export function ThreeViewport({
               shape.lineTo(outer.points[i].x - cx, cy - outer.points[i].y);
             }
 
+            // Through-holes (depth >= body depth) are cheap Shape holes;
+            // shallower cuts become real CSG pockets carved from the top face.
+            const throughHoles: LoopConfig[] = [];
+            const pocketHoles: LoopConfig[] = [];
             holes.forEach((hole) => {
+              const hasExplicitDepth = hole.index === -1
+                ? ly.finalPointsSettings?.depth !== undefined
+                : ly.pathSettings?.[hole.index]?.depth !== undefined;
+              if (hasExplicitDepth && hole.booleanType === 'cut' && hole.depth > 0 && hole.depth < outer.depth) {
+                pocketHoles.push(hole);
+              } else {
+                throughHoles.push(hole);
+              }
+            });
+
+            throughHoles.forEach((hole) => {
               const path = new THREE.Path();
               path.moveTo(hole.points[0].x - cx, cy - hole.points[0].y);
               for (let i = 1; i < hole.points.length; i++) {
@@ -638,6 +654,37 @@ export function ThreeViewport({
               bevelSegments: 3,
             });
             geometry.computeVertexNormals();
+
+            if (pocketHoles.length > 0) {
+              const evaluator = new Evaluator();
+              evaluator.useGroups = false;
+              let baseBrush = new Brush(geometry);
+              baseBrush.updateMatrixWorld();
+
+              pocketHoles.forEach((hole) => {
+                const toolShape = new THREE.Shape();
+                toolShape.moveTo(hole.points[0].x - cx, cy - hole.points[0].y);
+                for (let i = 1; i < hole.points.length; i++) {
+                  toolShape.lineTo(hole.points[i].x - cx, cy - hole.points[i].y);
+                }
+                // Overshoot above the top face so the subtraction never leaves
+                // a coplanar skin (bevel adds ~1.5mm above depth).
+                const overshoot = 3;
+                const toolGeom = new THREE.ExtrudeGeometry(toolShape, {
+                  depth: hole.depth + overshoot,
+                  bevelEnabled: false,
+                });
+                toolGeom.translate(0, 0, outer.depth - hole.depth);
+                const toolBrush = new Brush(toolGeom);
+                toolBrush.updateMatrixWorld();
+                baseBrush = evaluator.evaluate(baseBrush, toolBrush, SUBTRACTION);
+                baseBrush.updateMatrixWorld();
+                toolGeom.dispose();
+              });
+
+              geometry = baseBrush.geometry;
+              geometry.computeVertexNormals();
+            }
           } else {
             // Revolve around custom chosen axis
             let lMinX = Infinity;

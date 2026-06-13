@@ -64,6 +64,21 @@ import {
 
 
 export default function App() {
+  // Live visitor statistics (backed by /api/visit on the server)
+  const [visitorStats, setVisitorStats] = useState<{ totalVisits: number; today: number } | null>(null);
+  useEffect(() => {
+    const alreadyCounted = sessionStorage.getItem('wf3d_visited');
+    fetch(alreadyCounted ? '/api/stats' : '/api/visit', { method: alreadyCounted ? 'GET' : 'POST' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d && typeof d.totalVisits === 'number') {
+          setVisitorStats({ totalVisits: d.totalVisits, today: d.today || 0 });
+          sessionStorage.setItem('wf3d_visited', '1');
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Layer / Sketch state
   const [layers, setLayersRaw] = useState<CADLayer[]>([
     {
@@ -10822,6 +10837,15 @@ export default function App() {
               >
                 {__BUILD_INFO__.commit}
               </span>
+              {visitorStats && (
+                <span
+                  className="text-[9px] font-mono bg-sky-50 border border-sky-200 px-1.5 py-0.2 rounded text-sky-600 font-bold flex items-center gap-1"
+                  title={`Toplam ziyaret: ${visitorStats.totalVisits} • Bugün: ${visitorStats.today}`}
+                >
+                  <Eye className="w-2.5 h-2.5" />
+                  {visitorStats.totalVisits.toLocaleString('tr-TR')}
+                </span>
+              )}
             </div>
 
             {/* Sidebar Toggler */}
@@ -16200,6 +16224,21 @@ export default function App() {
                       className="w-full py-2.5 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-extrabold rounded-lg shadow-md transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer text-xs"
                     >
                       ✏️ BU SKEÇİ AKTİF ET & DÜZENLE
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        selectAndLoadSketch(matchedLayer.id);
+                        setCommand('circle');
+                        setCmdLogs((prev) => [
+                          ...prev,
+                          `[3D CUT] "${matchedLayer.name}" gövdesine delik/cep modu: daireyi çizin, ardından açılan pencerede CUT işlemini ve derinliği seçin. Derinlik gövdeden azsa CEP (pocket), eşit/fazlaysa BOYDAN BOYA DELİK olur.`
+                        ]);
+                        setPendingSketchPlane(null);
+                      }}
+                      className="w-full py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-extrabold rounded-lg shadow-md transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                    >
+                      🕳️ BU GÖVDEYE DELİK / CEP AÇ (CUT)
                     </button>
                     <div className="text-[10px] text-slate-400 text-center font-bold pt-1">
                       — VEYA AŞAĞIDAN YENİ BİR SKEÇ SIZINTISI OLUŞTURUN —
