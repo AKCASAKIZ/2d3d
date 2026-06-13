@@ -358,7 +358,7 @@ export default function App() {
   const [alignmentPt1, setAlignmentPt1] = useState<Point | null>(null);
   const [alignmentPt2, setAlignmentPt2] = useState<Point | null>(null);
   const [alignmentSelectMode, setAlignmentSelectMode] = useState<'p1' | 'p2' | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<'sketch' | 'layers' | 'dimensions' | '3d' | 'bridge'>('sketch');
+  const [sidebarTab, setSidebarTab] = useState<'sketch' | 'model' | 'layers' | 'dimensions' | '3d' | 'bridge'>('sketch');
 
   // WebForge3D & Technical Drawing Layout integration states
   const [workspaceLayout, setWorkspaceLayout] = useState<'split' | '2d-only' | '3d-only' | 'drawing-sheet'>('split');
@@ -11596,6 +11596,15 @@ export default function App() {
               🛠 Tools
             </button>
             <button
+              onClick={() => setSidebarTab('model')}
+              className={`flex-1 py-1.5 text-[9px] sm:text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
+                sidebarTab === 'model' ? 'bg-white text-orange-650 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
+              }`}
+              title="Model Ağacı (Browser)"
+            >
+              🌳 Model
+            </button>
+            <button
               onClick={() => setSidebarTab('layers')}
               className={`flex-1 py-1.5 text-[9px] sm:text-[10px] font-bold uppercase transition rounded text-center cursor-pointer ${
                 sidebarTab === 'layers' ? 'bg-white text-orange-650 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200/50'
@@ -12913,6 +12922,94 @@ export default function App() {
           )}
 
           {/* Section B: Layer Manager */}
+          {/* TAB CONTENT: MODEL TREE (BROWSER) */}
+          {sidebarTab === 'model' && (
+            <div className="flex-1 flex flex-col overflow-y-auto p-3 gap-2">
+              <h2 className="text-xs font-extrabold uppercase tracking-wider text-slate-800 flex items-center gap-1.5 mb-1">
+                <Workflow className="w-4 h-4 text-orange-600" />
+                <span>Model Ağacı ({layers.length} gövde)</span>
+              </h2>
+              {layers.map((ly) => {
+                const isActive = ly.id === activeLayerId;
+                const mainSettings = ly.finalPointsSettings;
+                const hasMain = ly.finalPoints.length >= 3 && ly.isClosed;
+                return (
+                  <div key={ly.id} className={`rounded-lg border ${isActive ? 'border-orange-305 bg-orange-50' : 'border-slate-200 bg-white'}`}>
+                    {/* Body node */}
+                    <div
+                      className="flex items-center gap-2 px-2.5 py-2 cursor-pointer hover:bg-slate-50 rounded-t-lg"
+                      onClick={() => selectAndLoadSketch(ly.id)}
+                      title={isActive ? 'Aktif gövde' : 'Aktif etmek için tıkla'}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-sm shrink-0 border border-slate-300" style={{ backgroundColor: ly.color }} />
+                      <span className={`text-[11px] font-mono font-extrabold truncate flex-1 ${isActive ? 'text-orange-650' : 'text-slate-700'}`}>
+                        {ly.name}
+                      </span>
+                      <span className="text-[8.5px] font-mono text-slate-400 font-bold shrink-0">
+                        z={ly.zOffset || 0}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLayers((prev) => prev.map((l) => (l.id === ly.id ? { ...l, visible: !l.visible } : l)));
+                        }}
+                        className="shrink-0 text-slate-400 hover:text-orange-500 cursor-pointer"
+                        title={ly.visible ? 'Gizle' : 'Göster'}
+                      >
+                        {ly.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                    {/* Feature children */}
+                    <div className="pb-1.5">
+                      {hasMain && (
+                        <div
+                          className={`flex items-center gap-1.5 mx-2 pl-3 pr-2 py-1 border-l-2 cursor-pointer rounded-r text-[10px] font-mono ${
+                            isActive && selectedPathIdx === -1 ? 'border-orange-500 bg-orange-50 text-orange-650 font-bold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                          onClick={() => { selectAndLoadSketch(ly.id); setSelectedPathIdx(-1); }}
+                        >
+                          <span className="flex-1 truncate">Ana Profil ({ly.finalPoints.length} nokta)</span>
+                          <span className="text-[8px] font-extrabold px-1 rounded bg-slate-100 text-slate-500 border border-slate-200 uppercase shrink-0">
+                            {(mainSettings?.opType || ly.opType) === 'revolve' ? 'REVOLVE' : `EXT ${mainSettings?.depth ?? ly.depth ?? 30}mm`}
+                          </span>
+                        </div>
+                      )}
+                      {(ly.paths || []).map((p, idx) => {
+                        if (p.length < 3) return null;
+                        const ps = ly.pathSettings?.[idx];
+                        const isCut = ps?.booleanType === 'cut';
+                        const isSel = isActive && selectedPathIdx === idx;
+                        return (
+                          <div
+                            key={idx}
+                            className={`flex items-center gap-1.5 mx-2 pl-3 pr-2 py-1 border-l-2 cursor-pointer rounded-r text-[10px] font-mono ${
+                              isSel ? 'border-orange-500 bg-orange-50 text-orange-650 font-bold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                            onClick={() => { selectAndLoadSketch(ly.id); setSelectedPathIdx(idx); }}
+                          >
+                            <span className="flex-1 truncate">
+                              {p.some((pt) => pt.circleData) ? 'Daire' : 'Şekil'} #{idx + 1}
+                            </span>
+                            <span
+                              className={`text-[8px] font-extrabold px-1 rounded border uppercase shrink-0 ${
+                                isCut ? 'bg-red-50 text-red-650 border-red-200' : 'bg-emerald-50 text-emerald-850 border-emerald-200'
+                              }`}
+                            >
+                              {isCut ? `CUT ${ps?.depth ?? ''}mm` : 'UNION'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {!hasMain && (ly.paths || []).filter((p) => p.length >= 3).length === 0 && (
+                        <div className="mx-2 pl-3 py-1 text-[9.5px] font-mono text-slate-400 italic">Boş sketç — çizime başlayın</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {sidebarTab === 'layers' && (
             <div className="p-4 border-b border-slate-200 flex flex-col shrink-0">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-850 flex items-center justify-between mb-3">
