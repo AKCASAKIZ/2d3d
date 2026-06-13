@@ -58,6 +58,19 @@ app.get("/api/stats", (_req, res) => {
   res.json({ totalVisits: stats.totalVisits, today: stats.days[today] || 0 });
 });
 
+// ---- Pro license verification ----
+// PRO_KEYS: comma-separated license keys (e.g. issued via Gumroad/Lemon
+// Squeezy webhooks or generated manually and sent to paying customers).
+app.post("/api/license/verify", (req, res) => {
+  const key = String(req.body?.key || "").trim();
+  if (!key) return res.json({ valid: false });
+  const keys = (process.env.PRO_KEYS || "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+  res.json({ valid: keys.includes(key) });
+});
+
 // Initialize Gemini API client safely
 const apiKey = process.env.GEMINI_API_KEY;
 let ai: GoogleGenAI | null = null;

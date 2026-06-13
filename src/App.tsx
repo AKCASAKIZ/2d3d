@@ -72,6 +72,57 @@ export default function App() {
     localStorage.setItem('wf3d_theme', darkUI ? 'dark' : 'light');
   }, [darkUI]);
 
+  // ---- Pro (freemium) licensing ----
+  const [isPro, setIsPro] = useState(false);
+  const [showProModal, setShowProModal] = useState(false);
+  const [proKeyInput, setProKeyInput] = useState('');
+  const [proKeyStatus, setProKeyStatus] = useState<'idle' | 'checking' | 'invalid'>('idle');
+  useEffect(() => {
+    const saved = localStorage.getItem('wf3d_pro_key');
+    if (!saved) return;
+    fetch('/api/license/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: saved }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.valid) setIsPro(true);
+        else localStorage.removeItem('wf3d_pro_key');
+      })
+      .catch(() => {});
+  }, []);
+
+  const activateProKey = () => {
+    const key = proKeyInput.trim();
+    if (!key) return;
+    setProKeyStatus('checking');
+    fetch('/api/license/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.valid) {
+          localStorage.setItem('wf3d_pro_key', key);
+          setIsPro(true);
+          setShowProModal(false);
+          setProKeyStatus('idle');
+        } else {
+          setProKeyStatus('invalid');
+        }
+      })
+      .catch(() => setProKeyStatus('invalid'));
+  };
+
+  // Returns true when the user may use a Pro feature; otherwise opens the upgrade modal.
+  const requirePro = (): boolean => {
+    if (isPro) return true;
+    setShowProModal(true);
+    return false;
+  };
+
   // Live visitor statistics (backed by /api/visit on the server)
   const [visitorStats, setVisitorStats] = useState<{ totalVisits: number; today: number } | null>(null);
   useEffect(() => {
@@ -9503,6 +9554,7 @@ export default function App() {
 
   // STL triggers
   const executeStlExport = () => {
+    if (!requirePro()) return;
     if (triggerStlExportRef.current) {
       triggerStlExportRef.current();
     } else {
@@ -9512,6 +9564,7 @@ export default function App() {
 
   // DXF export generator
   const exportToDXF = () => {
+    if (!requirePro()) return;
     // Collect all paths to export:
     const allPaths: Point[][] = [];
     if (finalPoints.length > 0) {
@@ -9566,6 +9619,7 @@ export default function App() {
 
   // TECHNICAL BLUEPRINT EXPORT IN PDF FORMAT USING VECTOR RENDERING
   const exportToPDF = () => {
+    if (!requirePro()) return;
     try {
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const visibleLayers = layers.filter(l => l.visible);
@@ -10023,6 +10077,7 @@ export default function App() {
 
   // FULLY INTEGRATED PRODUCTION-GRADE MECHANICAL BLUEPRINT SHEET EXPORT SYSTEM
   const exportDrawingSheetToPDF = () => {
+    if (!requirePro()) return;
     try {
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const visibleLayers = layers.filter(l => l.visible);
@@ -10861,6 +10916,19 @@ export default function App() {
               >
                 {darkUI ? '☀' : '🌙'}
               </button>
+              {isPro ? (
+                <span className="text-[9px] font-mono bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded text-amber-600 font-extrabold" title="Pro lisans aktif">
+                  ★ PRO
+                </span>
+              ) : (
+                <button
+                  onClick={() => setShowProModal(true)}
+                  className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-extrabold cursor-pointer transition shadow-sm"
+                  title="Pro'ya yükselt: STL/DXF/PDF export ve daha fazlası"
+                >
+                  ★ PRO'YA GEÇ
+                </button>
+              )}
             </div>
 
             {/* Sidebar Toggler */}
@@ -16297,6 +16365,76 @@ export default function App() {
                 Onayla (Confirm)
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRO UPGRADE / LICENSE ACTIVATION MODAL */}
+      {showProModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs select-none animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden p-6 flex flex-col gap-4">
+            <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
+              <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-2 rounded-xl shadow-md">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide leading-none">WebForge3D Pro</h3>
+                <span className="text-[10px] text-slate-400 font-semibold font-mono block mt-1">PROFESYONEL ÇIKTI ÖZELLİKLERİ</span>
+              </div>
+            </div>
+
+            <ul className="text-xs text-slate-600 space-y-1.5 font-sans">
+              <li className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> STL export — 3D baskıya hazır model çıktısı</li>
+              <li className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> DXF export — AutoCAD uyumlu 2D çizim</li>
+              <li className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> PDF teknik resim & antetli sheet çıktısı</li>
+              <li className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> Gelecek tüm Pro özelliklere erişim</li>
+            </ul>
+
+            {import.meta.env.VITE_PAYMENT_URL ? (
+              <a
+                href={import.meta.env.VITE_PAYMENT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-extrabold rounded-lg shadow-md transition text-center text-xs cursor-pointer"
+              >
+                ★ LİSANS SATIN AL
+              </a>
+            ) : (
+              <div className="text-[10px] text-slate-400 font-mono bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-center">
+                Satın alma bağlantısı yakında aktif olacak.
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-slate-500 font-bold uppercase tracking-wider text-[10px] font-mono">Lisans anahtarın var mı?</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={proKeyInput}
+                  onChange={(e) => { setProKeyInput(e.target.value); setProKeyStatus('idle'); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') activateProKey(); }}
+                  placeholder="WF3D-XXXX-XXXX"
+                  className="flex-1 bg-slate-50 border border-slate-200 focus:border-orange-500 rounded px-3 py-2 text-slate-850 font-mono text-xs outline-none font-bold placeholder-slate-400"
+                />
+                <button
+                  onClick={activateProKey}
+                  disabled={proKeyStatus === 'checking'}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs transition cursor-pointer disabled:opacity-50"
+                >
+                  {proKeyStatus === 'checking' ? '...' : 'AKTİF ET'}
+                </button>
+              </div>
+              {proKeyStatus === 'invalid' && (
+                <span className="text-[10px] text-red-650 font-bold font-mono">Geçersiz lisans anahtarı.</span>
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowProModal(false)}
+              className="text-[11px] text-slate-400 hover:text-slate-600 font-bold transition cursor-pointer"
+            >
+              Şimdilik ücretsiz devam et
+            </button>
           </div>
         </div>
       )}
