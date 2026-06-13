@@ -66,6 +66,8 @@ import {
 export default function App() {
   // UI theme: dark CAD chrome by default, light optional
   const [darkUI, setDarkUI] = useState<boolean>(() => localStorage.getItem('wf3d_theme') !== 'light');
+  // Ribbon tab selection (Fusion-style grouped toolbar)
+  const [ribbonTab, setRibbonTab] = useState<'sketch' | 'edit' | 'snap'>('sketch');
   useEffect(() => {
     localStorage.setItem('wf3d_theme', darkUI ? 'dark' : 'light');
   }, [darkUI]);
@@ -10994,9 +10996,29 @@ export default function App() {
           </div>
         </div>
 
-        {/* ROW 2: All CAD Drawing Tool Groups, Modifiers and Snapping Anchors */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 border-t border-slate-100">
-          
+        {/* ROW 2: Ribbon — tab strip + active tab's tool groups */}
+        <div className="flex flex-col gap-1.5 pt-1 border-t border-slate-100">
+          <div className="flex items-center gap-0.5 select-none">
+            {([
+              { id: 'sketch', label: 'SKETCH / ÇİZİM' },
+              { id: 'edit', label: 'DÜZENLE' },
+              { id: 'snap', label: 'YAKALA (O-SNAP)' },
+            ] as const).map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setRibbonTab(t.id)}
+                className={`px-3 py-1 text-[10px] font-mono font-extrabold uppercase tracking-wider rounded-t-md border-b-2 transition cursor-pointer ${
+                  ribbonTab === t.id
+                    ? 'border-orange-500 text-orange-650 bg-slate-50'
+                    : 'border-transparent text-slate-400 hover:text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {ribbonTab === 'sketch' && (<>
           {/* Group 2.1: Draw Tools */}
           <div className="flex items-center gap-1 bg-slate-50/70 p-0.5 px-1.5 rounded-md border border-slate-200 shrink-0">
             <span className="text-[9px] uppercase font-mono text-slate-400 mr-1.5 font-bold select-none">Çizim:</span>
@@ -11164,7 +11186,9 @@ export default function App() {
               <span>👆 Edit Vertex</span>
             </button>
           </div>
+          </>)}
 
+          {ribbonTab === 'edit' && (<>
           {/* Group 2.3: Modifiers */}
           <div className="flex items-center gap-1 bg-slate-50/70 p-0.5 px-1.5 rounded-md border border-slate-200 shrink-0">
             <span className="text-[9px] uppercase font-mono text-slate-400 mr-1.5 font-bold select-none">Düzenle:</span>
@@ -11243,7 +11267,9 @@ export default function App() {
               <span>Undo</span>
             </button>
           </div>
+          </>)}
 
+          {ribbonTab === 'snap' && (<>
           {/* Group 2.4: Snaps Selection Toggle */}
           <div className="flex items-center gap-1 bg-slate-50/70 p-0.5 px-1.5 rounded-md border border-slate-200 shrink-0 select-none">
             <span className="text-[9px] uppercase font-mono text-slate-400 mr-1.5 font-bold select-none">Yakala:</span>
@@ -11320,7 +11346,9 @@ export default function App() {
               Track Align
             </button>
           </div>
+          </>)}
 
+          </div>
         </div>
       </header>
 
