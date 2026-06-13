@@ -64,6 +64,12 @@ import {
 
 
 export default function App() {
+  // UI theme: dark CAD chrome by default, light optional
+  const [darkUI, setDarkUI] = useState<boolean>(() => localStorage.getItem('wf3d_theme') !== 'light');
+  useEffect(() => {
+    localStorage.setItem('wf3d_theme', darkUI ? 'dark' : 'light');
+  }, [darkUI]);
+
   // Live visitor statistics (backed by /api/visit on the server)
   const [visitorStats, setVisitorStats] = useState<{ totalVisits: number; today: number } | null>(null);
   useEffect(() => {
@@ -10815,7 +10821,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 font-sans text-slate-800 select-none">
+    <div className={`flex flex-col h-screen w-screen overflow-hidden bg-slate-100 font-sans text-slate-800 select-none ${darkUI ? 'cad-dark' : ''}`}>
       
        {/* 1. Upper Ribbon Bar (Actions & Quick Toolings with 2 Layers) */}
       <header className="flex flex-col gap-2 p-2.5 bg-white border-b border-slate-200 shrink-0 shadow-sm relative z-40 select-none">
@@ -10846,6 +10852,13 @@ export default function App() {
                   {visitorStats.totalVisits.toLocaleString('tr-TR')}
                 </span>
               )}
+              <button
+                onClick={() => setDarkUI(!darkUI)}
+                title={darkUI ? 'Açık temaya geç' : 'Koyu (CAD) temaya geç'}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-slate-200 bg-slate-100 hover:bg-slate-200 text-slate-500 cursor-pointer transition font-bold"
+              >
+                {darkUI ? '☀' : '🌙'}
+              </button>
             </div>
 
             {/* Sidebar Toggler */}
